@@ -1,0 +1,80 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.12.35521.163
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ShiftYar.Api", "ShiftYar.Api\ShiftYar.Api.csproj", "{6C2D126D-6C50-4016-930E-771213D29382}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ShiftYar.Domain", "ShiftYar.Domain\ShiftYar.Domain.csproj", "{FBC63EC4-6A79-43C4-B10C-0BD250F6F97F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ShiftYar.Application", "ShiftYar.Application\ShiftYar.Application.csproj", "{881E997D-44BE-424D-A444-07AACE9BF717}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ShiftYar.Infrastructure", "ShiftYar.Infrastructure\ShiftYar.Infrastructure.csproj", "{2D929272-E3E3-4F00-B0AC-1516E1232408}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ShiftYar.Shared", "ShiftYar.Shared\ShiftYar.Shared.csproj", "{90611263-0065-484E-9A42-F3BA454FCCCF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ShiftYar.Scheduling", "ShiftYar.Scheduling\ShiftYar.Scheduling.csproj", "{A0ACEC0A-1CAC-4055-84FD-19611D1E6007}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{BD34F47E-3ED1-432B-9B56-65A384759230}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{4E64A829-B2FC-4CD6-9B42-49ACEA62424B}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ShiftYar.UnitTests", "ShiftYar.UnitTests", "{AF18B6BD-9B33-4475-BF8A-E61D64326930}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ShiftYar.IntegrationTests", "ShiftYar.IntegrationTests", "{B0306261-A150-47D1-9E77-8DC6DA55F4E6}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Scripts", "Scripts", "{92174A9D-243B-41F0-94B3-1C1A27D41CF3}"
+	ProjectSection(SolutionItems) = preProject
+		add-migration.ps1 = add-migration.ps1
+		BeforAddMigrationInPowerShellWindow.txt = BeforAddMigrationInPowerShellWindow.txt
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6C2D126D-6C50-4016-930E-771213D29382}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6C2D126D-6C50-4016-930E-771213D29382}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6C2D126D-6C50-4016-930E-771213D29382}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6C2D126D-6C50-4016-930E-771213D29382}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FBC63EC4-6A79-43C4-B10C-0BD250F6F97F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FBC63EC4-6A79-43C4-B10C-0BD250F6F97F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FBC63EC4-6A79-43C4-B10C-0BD250F6F97F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FBC63EC4-6A79-43C4-B10C-0BD250F6F97F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{881E997D-44BE-424D-A444-07AACE9BF717}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{881E997D-44BE-424D-A444-07AACE9BF717}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{881E997D-44BE-424D-A444-07AACE9BF717}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{881E997D-44BE-424D-A444-07AACE9BF717}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2D929272-E3E3-4F00-B0AC-1516E1232408}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2D929272-E3E3-4F00-B0AC-1516E1232408}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2D929272-E3E3-4F00-B0AC-1516E1232408}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2D929272-E3E3-4F00-B0AC-1516E1232408}.Release|Any CPU.Build.0 = Release|Any CPU
+		{90611263-0065-484E-9A42-F3BA454FCCCF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{90611263-0065-484E-9A42-F3BA454FCCCF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{90611263-0065-484E-9A42-F3BA454FCCCF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{90611263-0065-484E-9A42-F3BA454FCCCF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A0ACEC0A-1CAC-4055-84FD-19611D1E6007}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A0ACEC0A-1CAC-4055-84FD-19611D1E6007}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A0ACEC0A-1CAC-4055-84FD-19611D1E6007}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A0ACEC0A-1CAC-4055-84FD-19611D1E6007}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{6C2D126D-6C50-4016-930E-771213D29382} = {BD34F47E-3ED1-432B-9B56-65A384759230}
+		{FBC63EC4-6A79-43C4-B10C-0BD250F6F97F} = {BD34F47E-3ED1-432B-9B56-65A384759230}
+		{881E997D-44BE-424D-A444-07AACE9BF717} = {BD34F47E-3ED1-432B-9B56-65A384759230}
+		{2D929272-E3E3-4F00-B0AC-1516E1232408} = {BD34F47E-3ED1-432B-9B56-65A384759230}
+		{90611263-0065-484E-9A42-F3BA454FCCCF} = {BD34F47E-3ED1-432B-9B56-65A384759230}
+		{A0ACEC0A-1CAC-4055-84FD-19611D1E6007} = {BD34F47E-3ED1-432B-9B56-65A384759230}
+		{AF18B6BD-9B33-4475-BF8A-E61D64326930} = {4E64A829-B2FC-4CD6-9B42-49ACEA62424B}
+		{B0306261-A150-47D1-9E77-8DC6DA55F4E6} = {4E64A829-B2FC-4CD6-9B42-49ACEA62424B}
+		{92174A9D-243B-41F0-94B3-1C1A27D41CF3} = {BD34F47E-3ED1-432B-9B56-65A384759230}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {ECBF1BB4-A4A8-42D3-9196-984AF5D61262}
+	EndGlobalSection
+EndGlobal

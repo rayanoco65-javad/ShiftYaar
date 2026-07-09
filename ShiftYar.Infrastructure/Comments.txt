@@ -1,0 +1,12 @@
+﻿
+/*
+
+✅ MyProject.Infrastructure
+   - پیاده‌سازی وابستگی‌ها (مثل Repositoryها)
+
+   - تنظیم و پیکربندی EF Core (DbContext و Migrations)
+
+
+// پیاده‌سازی دیتابیس، فایل و غیره، API خارجی و
+
+*/

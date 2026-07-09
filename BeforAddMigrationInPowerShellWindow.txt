@@ -1,0 +1,12 @@
+﻿
+/*
+
+
+برای دسترسی دادن فقط به پنجره پاورشل جاری
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
+
+
+برای دسترسی دادن دائم به کاربر جاری در پاورشل
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+*/

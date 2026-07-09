@@ -1,0 +1,12 @@
+﻿
+/*
+
+✅ MyProject.API
+    - فقط لایه Web API (Controllerها)
+
+    - Dependency Injection، Middleware، و Swagger
+
+
+// رابط کاربری RESTful برای موبایل یا وب
+
+*/

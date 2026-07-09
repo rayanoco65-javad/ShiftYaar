@@ -1,0 +1,12 @@
+﻿
+/*
+
+✅ MyProject.Application
+    - شامل Use Case ‌ها (مثلاً CreateUser, GetOrders)
+
+    - دارای واسط‌ها (Interfaces) برای سرویس‌ها، و DTOها 
+
+
+// منطق کسب‌وکار (Use Cases)، واسط‌های سرویس‌ها و ریپازیتوری‌ها
+
+*/
