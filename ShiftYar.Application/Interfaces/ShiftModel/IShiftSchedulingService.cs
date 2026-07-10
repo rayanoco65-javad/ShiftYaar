@@ -23,7 +23,7 @@ namespace ShiftYar.Application.Interfaces.ShiftModel
 
 
         /// اجرای کامل فرآیند بهینه‌سازی و ذخیره (اعتبارسنجی + بهینه‌سازی + ذخیره)
-        Task<ApiResponse<object>> OptimizeAndSaveAsync(ShiftSchedulingRequestDto request);
+        Task<ApiResponse<object>> OptimizeAndSaveAsync(ShiftSchedulingRequestDto request, bool isBackgroundExecution = false);
 
 
         /// دریافت آمارهای الگوریتم

@@ -93,6 +93,38 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
             await repo.SaveAsync();
         }
 
+        public async Task<int> MarkStaleRunningJobsAsFailedAsync(TimeSpan staleThreshold)
+        {
+            var cutoff = DateTime.UtcNow - staleThreshold;
+
+            using var scope = _scopeFactory.CreateScope();
+            var repo = scope.ServiceProvider.GetRequiredService<IEfRepository<SchedulingJobRecord>>();
+
+            var (items, _) = await repo.GetByFilterAsync(
+                new SimpleFilter<SchedulingJobRecord>(r =>
+                    r.Status == (int)SchedulingJobStatus.Running &&
+                    r.StartedAtUtc.HasValue &&
+                    r.StartedAtUtc.Value < cutoff));
+
+            if (items.Count == 0)
+            {
+                return 0;
+            }
+
+            foreach (var record in items)
+            {
+                record.Status = (int)SchedulingJobStatus.Failed;
+                record.IsSuccess = false;
+                record.Message = "Job was interrupted or timed out while running. Please submit a new job.";
+                record.CompletedAtUtc = DateTime.UtcNow;
+                record.UpdateDate = DateTime.UtcNow;
+                repo.Update(record);
+            }
+
+            await repo.SaveAsync();
+            return items.Count;
+        }
+
         private static SchedulingJob ToJob(SchedulingJobRecord record)
         {
             ShiftSchedulingRequestDto request = null;

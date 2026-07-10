@@ -14,6 +14,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
     /// </summary>
     public class SchedulingBackgroundService : BackgroundService
     {
+        private static readonly TimeSpan StaleJobThreshold = TimeSpan.FromMinutes(30);
+        private static readonly TimeSpan JobExecutionTimeout = TimeSpan.FromHours(2);
+
         private readonly ISchedulingJobQueue _queue;
         private readonly ISchedulingJobStore _store;
         private readonly IServiceScopeFactory _scopeFactory;
@@ -34,6 +37,12 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("SchedulingBackgroundService started.");
+
+            var recovered = await _store.MarkStaleRunningJobsAsFailedAsync(StaleJobThreshold);
+            if (recovered > 0)
+            {
+                _logger.LogWarning("Marked {Count} stale scheduling job(s) as Failed on startup.", recovered);
+            }
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -76,7 +85,21 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
                     "Running scheduling job {JobId} for DepartmentId={DepartmentId}, Algorithm={Algorithm}",
                     job.Id, job.Request.DepartmentId, job.Request.Algorithm);
 
-                var result = await schedulingService.OptimizeAndSaveAsync(job.Request);
+                var workTask = schedulingService.OptimizeAndSaveAsync(job.Request, isBackgroundExecution: true);
+                var completedTask = await Task.WhenAny(workTask, Task.Delay(JobExecutionTimeout, stoppingToken));
+
+                if (completedTask != workTask)
+                {
+                    job.IsSuccess = false;
+                    job.Message = $"Scheduling job timed out after {JobExecutionTimeout.TotalMinutes:0} minutes.";
+                    job.Status = SchedulingJobStatus.Failed;
+                    _logger.LogError(
+                        "Scheduling job {JobId} timed out after {TimeoutMinutes} minutes.",
+                        job.Id, JobExecutionTimeout.TotalMinutes);
+                    return;
+                }
+
+                var result = await workTask;
 
                 job.IsSuccess = result.IsSuccess;
                 job.Message = result.Message;

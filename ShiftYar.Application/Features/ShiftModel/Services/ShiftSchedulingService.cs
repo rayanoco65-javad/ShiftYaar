@@ -186,7 +186,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
         /// اجرای کامل فرآیند بهینه‌سازی و ذخیره (اعتبارسنجی + بهینه‌سازی + ذخیره)
         /// این متد هم توسط اکشن همزمان و هم توسط اجرای پس‌زمینه استفاده می‌شود تا منطق تکرار نشود.
-        public async Task<ApiResponse<object>> OptimizeAndSaveAsync(ShiftSchedulingRequestDto request)
+        public async Task<ApiResponse<object>> OptimizeAndSaveAsync(ShiftSchedulingRequestDto request, bool isBackgroundExecution = false)
         {
             try
             {
@@ -196,7 +196,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     DepartmentId = request.DepartmentId,
                     StartDate = DateConverter.ConvertToGregorianDate(request.StartDate),
                     EndDate = DateConverter.ConvertToGregorianDate(request.EndDate),
-                    Algorithm = request.Algorithm
+                    Algorithm = request.Algorithm,
+                    AllowExtendedSolverTime = isBackgroundExecution
                 };
 
                 // اعتبارسنجی اولیه
@@ -806,8 +807,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         // solves the scheduling should be moved to a background job instead of the request path.
         private const int MaxOrToolsSolveSeconds = 25;
         private const int MaxOrToolsSearchWorkers = 2;
+        private const int MaxOrToolsBackgroundSolveSeconds = 600;
 
-        private async Task<(int MaxTimeInSeconds, int NumSearchWorkers, bool LogSearchProgress, int MaxSolutions, double RelativeGapLimit)> GetOrToolsSettingsAsync(int departmentId)
+        private async Task<(int MaxTimeInSeconds, int NumSearchWorkers, bool LogSearchProgress, int MaxSolutions, double RelativeGapLimit)> GetOrToolsSettingsAsync(int departmentId, bool allowExtendedSolverTime = false)
         {
             int maxTimeInSeconds = 20;
             int numSearchWorkers = 1;
@@ -835,13 +837,14 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             }
 
             // Clamp to keep the synchronous solve within the request/proxy budget and container memory.
-            var clampedTime = Math.Clamp(maxTimeInSeconds, 1, MaxOrToolsSolveSeconds);
+            var maxAllowedSeconds = allowExtendedSolverTime ? MaxOrToolsBackgroundSolveSeconds : MaxOrToolsSolveSeconds;
+            var clampedTime = Math.Clamp(maxTimeInSeconds, 1, maxAllowedSeconds);
             var clampedWorkers = Math.Clamp(numSearchWorkers, 1, MaxOrToolsSearchWorkers);
             if (clampedTime != maxTimeInSeconds || clampedWorkers != numSearchWorkers)
             {
                 _logger.LogWarning(
-                    "OR-Tools solver budget clamped for DepartmentId={DepartmentId}: MaxTimeInSeconds {RequestedTime}->{ClampedTime}, NumSearchWorkers {RequestedWorkers}->{ClampedWorkers} to avoid gateway timeout / OOM (502).",
-                    departmentId, maxTimeInSeconds, clampedTime, numSearchWorkers, clampedWorkers);
+                    "OR-Tools solver budget clamped for DepartmentId={DepartmentId}: MaxTimeInSeconds {RequestedTime}->{ClampedTime}, NumSearchWorkers {RequestedWorkers}->{ClampedWorkers} (background={IsBackground}).",
+                    departmentId, maxTimeInSeconds, clampedTime, numSearchWorkers, clampedWorkers, allowExtendedSolverTime);
             }
 
             return (clampedTime, clampedWorkers, logSearchProgress, maxSolutions, relativeGapLimit);
@@ -1010,36 +1013,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         }
                     }
 
-                    // بارگذاری درخواست‌های شیفت کاربر
-                    var userShiftRequests = await _shiftRequestRepository.GetByFilterAsync(
-                        filter: null,
-                        includes: new[] { "User" }
-                    );
-                    
-                    var userRequests = userShiftRequests.Items
-                        .Where(r => r.UserId == user.Id && 
-                                   r.Status == Domain.Enums.ShiftRequestModel.RequestStatus.Approved &&
-                                   r.RequestDate >= constraints.StartDate && 
-                                   r.RequestDate <= constraints.EndDate)
-                        .ToList();
-
-                    foreach (var shiftRequest in userRequests)
-                    {
-                        if (shiftRequest.RequestAction == Domain.Enums.ShiftRequestModel.RequestAction.RequestToBeOffShift)
-                        {
-                            if (shiftRequest.RequestDate.HasValue)
-                            {
-                                userConstraint.UnavailableDates.Add(shiftRequest.RequestDate.Value);
-                            }
-                        }
-                        else if (shiftRequest.RequestAction == Domain.Enums.ShiftRequestModel.RequestAction.RequestToBeOnShift)
-                        {
-                            if (shiftRequest.ShiftLabel.HasValue)
-                            {
-                                userConstraint.PreferredShifts.Add(shiftRequest.ShiftLabel.Value);
-                            }
-                        }
-                    }
+                    // بارگذاری درخواست‌های شیفت کاربر در حلقه حذف شد؛
+                    // همان داده‌ها یک‌بار در انتهای متد (approvedRequests) بارگذاری می‌شود.
 
                     constraints.UserConstraints.Add(userConstraint);
                 }
@@ -1188,9 +1163,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         }
                     );
                     var lookbackDateSet = new HashSet<DateTime>(lookbackDates.Where(d => d.Date.HasValue).Select(d => d.Date.Value.Date));
+                    var departmentUserIds = new HashSet<int>(departmentUsers.Where(u => u.Id.HasValue).Select(u => u.Id!.Value));
 
                     var (prevAssignments, _) = await _shiftAssignmentRepository.GetByFilterAsync(
-                        new Application.Common.Filters.SimpleFilter<ShiftAssignment>(a => a.ShiftDate != null && a.ShiftDate.Date.HasValue),
+                        new Application.Common.Filters.SimpleFilter<ShiftAssignment>(a =>
+                            a.UserId.HasValue &&
+                            departmentUserIds.Contains(a.UserId.Value) &&
+                            a.ShiftDate != null &&
+                            a.ShiftDate.Date.HasValue &&
+                            lookbackDateSet.Contains(a.ShiftDate.Date.Value.Date)),
                         "ShiftDate"
                     );
 
@@ -1596,7 +1577,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             // تبدیل محدودیت‌ها به فرمت OR-Tools
             var ortoolsConstraints = await ConvertToOrToolsConstraintsInternalAsync(constraints, request);
 
-            var ortParamsFromDb = await GetOrToolsSettingsAsync(request.DepartmentId);
+            var ortParamsFromDb = await GetOrToolsSettingsAsync(request.DepartmentId, request.AllowExtendedSolverTime);
             var parameters = new OrToolsParameters
             {
                 MaxTimeInSeconds = ortParamsFromDb.MaxTimeInSeconds,
@@ -1636,7 +1617,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 MaxIterationsWithoutImprovement = saParamsFromDb.MaxIterationsWithoutImprovement
             };
 
-            var ortParamsFromDb = await GetOrToolsSettingsAsync(request.DepartmentId);
+            var ortParamsFromDb = await GetOrToolsSettingsAsync(request.DepartmentId, request.AllowExtendedSolverTime);
             var ortoolsParameters = new OrToolsParameters
             {
                 MaxTimeInSeconds = ortParamsFromDb.MaxTimeInSeconds,

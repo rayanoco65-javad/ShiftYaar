@@ -16,6 +16,11 @@ namespace ShiftYar.Application.DTOs.ShiftModel.ShiftSchedulingModel
         public DateTime StartDate { get; set; } // تاریخ شروع بازه (میلادی)
         public DateTime EndDate { get; set; } // تاریخ پایان بازه (میلادی)
         public SchedulingAlgorithm Algorithm { get; set; } = SchedulingAlgorithm.SimulatedAnnealing; // الگوریتم انتخابی
+
+        /// <summary>
+        /// اجرای پس‌زمینه: محدودیت زمانی کوتاه OR-Tools (برای جلوگیری از 502) اعمال نمی‌شود.
+        /// </summary>
+        public bool AllowExtendedSolverTime { get; set; }
     }
 
     /// <summary>

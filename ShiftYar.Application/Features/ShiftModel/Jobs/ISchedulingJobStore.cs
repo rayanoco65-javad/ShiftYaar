@@ -1,3 +1,4 @@
+using System;
 using System.Threading.Tasks;
 using ShiftYar.Application.DTOs.ShiftModel.ShiftSchedulingModel;
 
@@ -16,5 +17,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
 
         /// به‌روزرسانی وضعیت/نتیجهٔ یک کار
         Task UpdateAsync(SchedulingJob job);
+
+        /// کارهای Running که بیش از آستانه در حال اجرا بوده‌اند را Failed می‌کند (بازیابی پس از کرش/ری‌استارت).
+        Task<int> MarkStaleRunningJobsAsFailedAsync(TimeSpan staleThreshold);
     }
 }
