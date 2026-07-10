@@ -14,8 +14,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
     /// </summary>
     public class SchedulingBackgroundService : BackgroundService
     {
-        private static readonly TimeSpan StaleJobThreshold = TimeSpan.FromMinutes(30);
-        private static readonly TimeSpan JobExecutionTimeout = TimeSpan.FromHours(2);
+        private static readonly TimeSpan StaleJobThreshold = TimeSpan.FromMinutes(12);
+        private static readonly TimeSpan JobExecutionTimeout = TimeSpan.FromMinutes(20);
+        private static readonly TimeSpan StaleCheckInterval = TimeSpan.FromMinutes(2);
 
         private readonly ISchedulingJobQueue _queue;
         private readonly ISchedulingJobStore _store;
@@ -38,12 +39,53 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
         {
             _logger.LogInformation("SchedulingBackgroundService started.");
 
+            await RecoverJobsOnStartupAsync(stoppingToken);
+
+            var staleCheckTask = RunStaleCheckLoopAsync(stoppingToken);
+            var dequeueTask = DequeueLoopAsync(stoppingToken);
+
+            await Task.WhenAll(staleCheckTask, dequeueTask);
+
+            _logger.LogInformation("SchedulingBackgroundService stopping.");
+        }
+
+        private async Task RunStaleCheckLoopAsync(CancellationToken stoppingToken)
+        {
+            using var staleCheckTimer = new PeriodicTimer(StaleCheckInterval);
+            while (await staleCheckTimer.WaitForNextTickAsync(stoppingToken))
+            {
+                await MarkStaleJobsAsync();
+            }
+        }
+
+        private async Task RecoverJobsOnStartupAsync(CancellationToken stoppingToken)
+        {
             var recovered = await _store.MarkStaleRunningJobsAsFailedAsync(StaleJobThreshold);
             if (recovered > 0)
             {
                 _logger.LogWarning("Marked {Count} stale scheduling job(s) as Failed on startup.", recovered);
             }
 
+            var queuedJobIds = await _store.GetQueuedJobIdsAsync();
+            foreach (var jobId in queuedJobIds)
+            {
+                stoppingToken.ThrowIfCancellationRequested();
+                await _queue.EnqueueAsync(jobId, stoppingToken);
+                _logger.LogInformation("Re-queued scheduling job {JobId} from database after startup.", jobId);
+            }
+        }
+
+        private async Task MarkStaleJobsAsync()
+        {
+            var recovered = await _store.MarkStaleRunningJobsAsFailedAsync(StaleJobThreshold);
+            if (recovered > 0)
+            {
+                _logger.LogWarning("Marked {Count} stale scheduling job(s) as Failed during periodic check.", recovered);
+            }
+        }
+
+        private async Task DequeueLoopAsync(CancellationToken stoppingToken)
+        {
             while (!stoppingToken.IsCancellationRequested)
             {
                 string jobId;
@@ -53,13 +95,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
                 }
                 catch (OperationCanceledException)
                 {
-                    break; // در حال خاموش شدن برنامه
+                    break;
                 }
 
                 await ProcessJobAsync(jobId, stoppingToken);
             }
-
-            _logger.LogInformation("SchedulingBackgroundService stopping.");
         }
 
         private async Task ProcessJobAsync(string jobId, CancellationToken stoppingToken)
@@ -71,13 +111,20 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
                 return;
             }
 
+            if (job.Request == null)
+            {
+                job.Status = SchedulingJobStatus.Failed;
+                job.IsSuccess = false;
+                job.Message = "Stored job request is invalid or missing.";
+                job.CompletedAtUtc = DateTime.UtcNow;
+                await _store.UpdateAsync(job);
+                return;
+            }
+
             job.Status = SchedulingJobStatus.Running;
             job.StartedAtUtc = DateTime.UtcNow;
+            job.Message = "Job started.";
             await _store.UpdateAsync(job);
-
-            // هر کار در یک scope مستقل اجرا می‌شود (DbContext و سرویس‌های scoped جداگانه).
-            using var scope = _scopeFactory.CreateScope();
-            var schedulingService = scope.ServiceProvider.GetRequiredService<IShiftSchedulingService>();
 
             try
             {
@@ -85,7 +132,13 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
                     "Running scheduling job {JobId} for DepartmentId={DepartmentId}, Algorithm={Algorithm}",
                     job.Id, job.Request.DepartmentId, job.Request.Algorithm);
 
-                var workTask = schedulingService.OptimizeAndSaveAsync(job.Request, isBackgroundExecution: true);
+                // LongRunning: OR-Tools/Hybrid از thread pool جدا می‌شود تا قفل thread pool (Task.WaitAll) رخ ندهد.
+                var workTask = Task.Factory.StartNew(
+                    () => ExecuteJobInScopeAsync(job.Id, job.Request),
+                    stoppingToken,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default).Unwrap();
+
                 var completedTask = await Task.WhenAny(workTask, Task.Delay(JobExecutionTimeout, stoppingToken));
 
                 if (completedTask != workTask)
@@ -118,6 +171,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
                 job.CompletedAtUtc = DateTime.UtcNow;
                 await _store.UpdateAsync(job);
             }
+        }
+
+        private async Task<Application.Common.Models.ResponseModel.ApiResponse<object>> ExecuteJobInScopeAsync(
+            string jobId,
+            Application.DTOs.ShiftModel.ShiftSchedulingModel.ShiftSchedulingRequestDto request)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var schedulingService = scope.ServiceProvider.GetRequiredService<IShiftSchedulingService>();
+            return await schedulingService.OptimizeAndSaveAsync(request, isBackgroundExecution: true, backgroundJobId: jobId);
         }
     }
 }

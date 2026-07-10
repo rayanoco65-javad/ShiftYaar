@@ -20,6 +20,8 @@ using ShiftYar.Application.Features.ShiftModel.Hybrid;
 using System.Globalization;
 using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.Features.ShiftModel.Filters;
+using ShiftYar.Application.Features.ShiftModel.Jobs;
+using ShiftYar.Application.Features.UserModel.Filters;
 using AutoMapper;
 
 namespace ShiftYar.Application.Features.ShiftModel.Services
@@ -42,6 +44,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         private readonly ILogger<ShiftSchedulingService> _logger;
         private readonly IWorkingHoursCalculator _workingHoursCalculator;
         private readonly IMapper _mapper;
+        private readonly ISchedulingJobStore _schedulingJobStore;
 
         public ShiftSchedulingService(
             IEfRepository<User> userRepository,
@@ -56,6 +59,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             IAlgorithmSettingsService algorithmSettingsService,
             IWorkingHoursCalculator workingHoursCalculator,
             IMapper mapper,
+            ISchedulingJobStore schedulingJobStore,
             ILogger<ShiftSchedulingService> logger)
         {
             _userRepository = userRepository;
@@ -70,6 +74,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             _algorithmSettingsService = algorithmSettingsService;
             _workingHoursCalculator = workingHoursCalculator;
             _mapper = mapper;
+            _schedulingJobStore = schedulingJobStore;
 
             _logger = logger;
         }
@@ -186,10 +191,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
         /// اجرای کامل فرآیند بهینه‌سازی و ذخیره (اعتبارسنجی + بهینه‌سازی + ذخیره)
         /// این متد هم توسط اکشن همزمان و هم توسط اجرای پس‌زمینه استفاده می‌شود تا منطق تکرار نشود.
-        public async Task<ApiResponse<object>> OptimizeAndSaveAsync(ShiftSchedulingRequestDto request, bool isBackgroundExecution = false)
+        public async Task<ApiResponse<object>> OptimizeAndSaveAsync(
+            ShiftSchedulingRequestDto request,
+            bool isBackgroundExecution = false,
+            string backgroundJobId = null)
         {
             try
             {
+                await ReportJobProgressAsync(backgroundJobId, "Validating constraints...");
+
                 // تبدیل تاریخ‌های شمسی به میلادی
                 var internalRequest = new ShiftSchedulingRequestInternalDto
                 {
@@ -207,12 +217,16 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     return ApiResponse<object>.Fail($"Validation failed: {string.Join(", ", validationResult.Data ?? new List<string>())}");
                 }
 
+                await ReportJobProgressAsync(backgroundJobId, "Loading department data and running optimizer...");
+
                 // اجرای بهینه‌سازی
                 var optimizationResult = await OptimizeShiftScheduleInternalAsync(internalRequest);
                 if (!optimizationResult.IsSuccess)
                 {
                     return ApiResponse<object>.Fail(optimizationResult.Message ?? "Optimization failed");
                 }
+
+                await ReportJobProgressAsync(backgroundJobId, "Saving optimized schedule...");
 
                 // ذخیره نتیجه
                 var saveResult = await SaveOptimizedScheduleAsync(optimizationResult.Data);
@@ -311,13 +325,17 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                 // اعتبارسنجی وجود کاربران فعال در دپارتمان
                 var users = await _userRepository.GetByFilterAsync(
-                    filter: null,
+                    new UserFilter
+                    {
+                        DepartmentId = request.DepartmentId,
+                        IsActive = true,
+                        PageNumber = 1,
+                        PageSize = 5000
+                    },
                     includes: new[] { "Department" }
                 );
                 
-                var activeUsers = users.Items
-                    .Where(u => u.DepartmentId == request.DepartmentId && u.IsActive == true)
-                    .ToList();
+                var activeUsers = users.Items.ToList();
                 
                 if (activeUsers.Count == 0)
                 {
@@ -326,13 +344,16 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                 // اعتبارسنجی وجود شیفت‌های تعریف شده
                 var shifts = await _shiftRepository.GetByFilterAsync(
-                    filter: null,
+                    new ShiftFilter
+                    {
+                        DepartmentId = request.DepartmentId,
+                        PageNumber = 1,
+                        PageSize = 500
+                    },
                     includes: new[] { "Department" }
                 );
                 
-                var departmentShifts = shifts.Items
-                    .Where(s => s.DepartmentId == request.DepartmentId)
-                    .ToList();
+                var departmentShifts = shifts.Items.ToList();
                 
                 if (departmentShifts.Count == 0)
                 {
@@ -616,6 +637,42 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         #endregion
 
         #region Private Methods
+
+        private async Task ReportJobProgressAsync(string jobId, string message)
+        {
+            if (string.IsNullOrWhiteSpace(jobId))
+            {
+                return;
+            }
+
+            try
+            {
+                var job = await _schedulingJobStore.GetAsync(jobId);
+                if (job == null || job.Status != SchedulingJobStatus.Running)
+                {
+                    return;
+                }
+
+                job.Message = message;
+                await _schedulingJobStore.UpdateAsync(job);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to update progress for scheduling job {JobId}", jobId);
+            }
+        }
+
+        private static T RunCpuBoundWithTimeout<T>(Func<T> work, TimeSpan timeout)
+        {
+            var task = Task.Run(work);
+            if (!task.Wait(timeout))
+            {
+                throw new TimeoutException($"Optimizer exceeded time limit of {timeout.TotalMinutes:0.#} minutes.");
+            }
+
+            return task.GetAwaiter().GetResult();
+        }
+
         private async Task ApplyAlgorithmSettingsFromDbAsync(ShiftSchedulingRequestDto request)
         {
             try
@@ -956,13 +1013,17 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                 // بارگذاری کاربران دپارتمان
                 var users = await _userRepository.GetByFilterAsync(
-                    filter: null,
+                    new UserFilter
+                    {
+                        DepartmentId = request.DepartmentId,
+                        IsActive = true,
+                        PageNumber = 1,
+                        PageSize = 5000
+                    },
                     includes: new[] { "Department", "Specialty" }
                 );
 
-                var departmentUsers = users.Items
-                    .Where(u => u.DepartmentId == request.DepartmentId && u.IsActive == true)
-                    .ToList();
+                var departmentUsers = users.Items.ToList();
 
                 _logger.LogInformation("LoadConstraints: Loaded {ActiveUserCount} active user(s) for DepartmentId={DepartmentId}", departmentUsers.Count, request.DepartmentId);
                 if (departmentUsers.Count == 0)
@@ -1021,13 +1082,16 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                 // بارگذاری شیفت‌های دپارتمان
                 var shifts = await _shiftRepository.GetByFilterAsync(
-                    filter: null,
+                    new ShiftFilter
+                    {
+                        DepartmentId = request.DepartmentId,
+                        PageNumber = 1,
+                        PageSize = 500
+                    },
                     includes: new[] { "Department", "RequiredSpecialties", "RequiredSpecialties.Specialty" }
                 );
 
-                var departmentShifts = shifts.Items
-                    .Where(s => s.DepartmentId == request.DepartmentId)
-                    .ToList();
+                var departmentShifts = shifts.Items.ToList();
 
                 _logger.LogInformation("LoadConstraints: Loaded {ShiftCount} shift(s) for DepartmentId={DepartmentId}", departmentShifts.Count, request.DepartmentId);
                 if (departmentShifts.Count == 0)
@@ -1588,7 +1652,13 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             };
 
             var scheduler = new OrToolsCPSatScheduler(ortoolsConstraints, parameters);
-            var solution = scheduler.Optimize();
+            var solveTimeout = request.AllowExtendedSolverTime
+                ? TimeSpan.FromMinutes(15)
+                : TimeSpan.FromSeconds(MaxOrToolsSolveSeconds + 30);
+
+            var solution = request.AllowExtendedSolverTime
+                ? RunCpuBoundWithTimeout(() => scheduler.Optimize(), solveTimeout)
+                : scheduler.Optimize();
             var statistics = scheduler.GetStatistics();
 
             var result = await ConvertOrToolsSolutionToResultAsync(solution, ortoolsConstraints);
@@ -1636,7 +1706,13 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             };
 
             var scheduler = new HybridScheduler(constraints, ortoolsConstraints, saParameters, ortoolsParameters, hybridParameters);
-            var solution = scheduler.Optimize();
+            var optimizeTimeout = request.AllowExtendedSolverTime
+                ? TimeSpan.FromMinutes(25)
+                : TimeSpan.FromMinutes(2);
+
+            var solution = request.AllowExtendedSolverTime
+                ? RunCpuBoundWithTimeout(() => scheduler.Optimize(), optimizeTimeout)
+                : scheduler.Optimize();
             var statistics = scheduler.GetStatistics();
 
             var result = await ConvertHybridSolutionToResultAsync(solution, constraints);

@@ -222,19 +222,20 @@ namespace ShiftYar.Application.Features.ShiftModel.Hybrid
                 return ortoolsScheduler.Optimize();
             });
 
-            // انتظار برای تکمیل هر دو
-            Task.WaitAll(saTask, ortoolsTask);
+            // انتظار برای تکمیل هر دو (به‌صورت متوالی تا از قفل thread pool جلوگیری شود)
+            var saSolution = saTask.GetAwaiter().GetResult();
+            var ortoolsSolution = ortoolsTask.GetAwaiter().GetResult();
 
             parallelStopwatch.Stop();
 
-            solution.SimulatedAnnealingSolution = saTask.Result;
-            solution.OrToolsSolution = ortoolsTask.Result;
+            solution.SimulatedAnnealingSolution = saSolution;
+            solution.OrToolsSolution = ortoolsSolution;
             solution.ParallelExecutionTime = parallelStopwatch.Elapsed;
             _statistics.ParallelExecutionTime = parallelStopwatch.Elapsed;
             _statistics.Phase1Status = "Parallel";
 
             // انتخاب بهترین راه‌حل
-            solution.FinalSolution = SelectBestSolution(saTask.Result, ortoolsTask.Result);
+            solution.FinalSolution = SelectBestSolution(saSolution, ortoolsSolution);
 
             return solution;
         }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -123,6 +124,21 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
 
             await repo.SaveAsync();
             return items.Count;
+        }
+
+        public async Task<IReadOnlyList<string>> GetQueuedJobIdsAsync()
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var repo = scope.ServiceProvider.GetRequiredService<IEfRepository<SchedulingJobRecord>>();
+
+            var (items, _) = await repo.GetByFilterAsync(
+                new SimpleFilter<SchedulingJobRecord>(r => r.Status == (int)SchedulingJobStatus.Queued));
+
+            return items
+                .OrderBy(r => r.CreatedAtUtc)
+                .Select(r => r.JobId)
+                .Where(id => !string.IsNullOrEmpty(id))
+                .ToList();
         }
 
         private static SchedulingJob ToJob(SchedulingJobRecord record)

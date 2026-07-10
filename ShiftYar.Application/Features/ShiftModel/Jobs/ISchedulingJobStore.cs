@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using ShiftYar.Application.DTOs.ShiftModel.ShiftSchedulingModel;
 
@@ -20,5 +21,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
 
         /// کارهای Running که بیش از آستانه در حال اجرا بوده‌اند را Failed می‌کند (بازیابی پس از کرش/ری‌استارت).
         Task<int> MarkStaleRunningJobsAsFailedAsync(TimeSpan staleThreshold);
+
+        /// شناسهٔ کارهای Queued ذخیره‌شده در DB (برای بازیابی صف پس از ری‌استارت).
+        Task<IReadOnlyList<string>> GetQueuedJobIdsAsync();
     }
 }
