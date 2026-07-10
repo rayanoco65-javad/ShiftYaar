@@ -41,109 +41,19 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         {
             var stopwatch = Stopwatch.StartNew();
 
-            // ایجاد راه‌حل اولیه
-            var currentSolution = GenerateInitialSolution();
-            // اگر راه‌حل اولیه نامعتبر است، تلاش برای بازتولید
-            if (!IsFeasible(currentSolution))
-            {
-                currentSolution = RepairOrRegenerate(currentSolution) ?? GenerateInitialSolution();
-            }
+            var currentSolution = GenerateFeasibleInitialSolution();
             var bestSolution = currentSolution.Clone();
 
             _statistics.BestScore = currentSolution.Score;
             _statistics.CurrentScore = currentSolution.Score;
 
-            double temperature = _parameters.InitialTemperature;
-            int iterationsWithoutImprovement = 0;
-
-            for (int iteration = 0; iteration < _parameters.MaxIterations; iteration++)
-            {
-                _statistics.TotalIterations = iteration + 1;
-                _statistics.CurrentTemperature = temperature;
-
-                // تولید راه‌حل همسایه
-                var neighborSolution = GenerateNeighbor(currentSolution);
-                if (!IsFeasible(neighborSolution))
-                {
-                    _statistics.RejectedMoves++;
-                    iterationsWithoutImprovement++;
-                    // کاهش دما و ادامه
-                    temperature *= _parameters.CoolingRate;
-                    _statistics.CurrentScore = currentSolution.Score;
-                    _statistics.ScoreHistory.Add(currentSolution.Score);
-                    _statistics.TemperatureHistory.Add(temperature);
-                    if (iterationsWithoutImprovement >= _parameters.MaxIterationsWithoutImprovement || temperature <= _parameters.FinalTemperature)
-                    {
-                        break;
-                    }
-                    continue;
-                }
-
-                // محاسبه تفاوت امتیاز
-                double deltaScore = neighborSolution.Score - currentSolution.Score;
-
-                // تصمیم‌گیری برای پذیرش یا رد راه‌حل جدید
-                bool acceptMove = false;
-
-                if (deltaScore < 0) // راه‌حل بهتر
-                {
-                    acceptMove = true;
-                }
-                else // راه‌حل بدتر - احتمال پذیرش بر اساس دما
-                {
-                    double acceptanceProbability = Math.Exp(-deltaScore / temperature);
-                    acceptMove = _random.NextDouble() < acceptanceProbability;
-                }
-
-                if (acceptMove)
-                {
-                    currentSolution = neighborSolution;
-                    _statistics.AcceptedMoves++;
-
-                    // بررسی بهترین راه‌حل
-                    if (currentSolution.Score < bestSolution.Score)
-                    {
-                        bestSolution = currentSolution.Clone();
-                        _statistics.BestScore = bestSolution.Score;
-                        iterationsWithoutImprovement = 0;
-                    }
-                    else
-                    {
-                        iterationsWithoutImprovement++;
-                    }
-                }
-                else
-                {
-                    _statistics.RejectedMoves++;
-                    iterationsWithoutImprovement++;
-                }
-
-                _statistics.CurrentScore = currentSolution.Score;
-                _statistics.ScoreHistory.Add(currentSolution.Score);
-                _statistics.TemperatureHistory.Add(temperature);
-
-                // کاهش دما
-                temperature *= _parameters.CoolingRate;
-
-                // توقف زودهنگام در صورت عدم بهبود
-                if (iterationsWithoutImprovement >= _parameters.MaxIterationsWithoutImprovement)
-                {
-                    break;
-                }
-
-                // توقف در صورت رسیدن به دمای نهایی
-                if (temperature <= _parameters.FinalTemperature)
-                {
-                    break;
-                }
-            }
+            RunAnnealingLoop(ref currentSolution, ref bestSolution);
 
             stopwatch.Stop();
             _statistics.ExecutionTime = stopwatch.Elapsed;
 
             return bestSolution;
         }
-
 
         /// <summary>
         /// اجرای الگوریتم Simulated Annealing با راه‌حل اولیه مشخص
@@ -153,11 +63,22 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var stopwatch = Stopwatch.StartNew();
 
             var currentSolution = initialSolution.Clone();
+            currentSolution.Score = CalculateSolutionScore(currentSolution);
             var bestSolution = currentSolution.Clone();
 
             _statistics.BestScore = currentSolution.Score;
             _statistics.CurrentScore = currentSolution.Score;
 
+            RunAnnealingLoop(ref currentSolution, ref bestSolution);
+
+            stopwatch.Stop();
+            _statistics.ExecutionTime = stopwatch.Elapsed;
+
+            return bestSolution;
+        }
+
+        private void RunAnnealingLoop(ref ShiftSolution currentSolution, ref ShiftSolution bestSolution)
+        {
             double temperature = _parameters.InitialTemperature;
             int iterationsWithoutImprovement = 0;
 
@@ -166,7 +87,6 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 _statistics.TotalIterations = iteration + 1;
                 _statistics.CurrentTemperature = temperature;
 
-                // تولید راه‌حل همسایه
                 var neighborSolution = GenerateNeighbor(currentSolution);
                 if (!IsFeasible(neighborSolution))
                 {
@@ -176,35 +96,22 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     _statistics.CurrentScore = currentSolution.Score;
                     _statistics.ScoreHistory.Add(currentSolution.Score);
                     _statistics.TemperatureHistory.Add(temperature);
-                    if (iterationsWithoutImprovement >= _parameters.MaxIterationsWithoutImprovement || temperature <= _parameters.FinalTemperature)
+                    if (iterationsWithoutImprovement >= _parameters.MaxIterationsWithoutImprovement ||
+                        temperature <= _parameters.FinalTemperature)
                     {
                         break;
                     }
                     continue;
                 }
 
-                // محاسبه تفاوت امتیاز
                 double deltaScore = neighborSolution.Score - currentSolution.Score;
-
-                // تصمیم‌گیری برای پذیرش یا رد راه‌حل جدید
-                bool acceptMove = false;
-
-                if (deltaScore < 0) // راه‌حل بهتر
-                {
-                    acceptMove = true;
-                }
-                else // راه‌حل بدتر - احتمال پذیرش بر اساس دما
-                {
-                    double acceptanceProbability = Math.Exp(-deltaScore / temperature);
-                    acceptMove = _random.NextDouble() < acceptanceProbability;
-                }
+                bool acceptMove = deltaScore < 0 || _random.NextDouble() < Math.Exp(-deltaScore / temperature);
 
                 if (acceptMove)
                 {
                     currentSolution = neighborSolution;
                     _statistics.AcceptedMoves++;
 
-                    // بررسی بهترین راه‌حل
                     if (currentSolution.Score < bestSolution.Score)
                     {
                         bestSolution = currentSolution.Clone();
@@ -226,26 +133,36 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 _statistics.ScoreHistory.Add(currentSolution.Score);
                 _statistics.TemperatureHistory.Add(temperature);
 
-                // کاهش دما
                 temperature *= _parameters.CoolingRate;
 
-                // توقف زودهنگام در صورت عدم بهبود
-                if (iterationsWithoutImprovement >= _parameters.MaxIterationsWithoutImprovement)
-                {
-                    break;
-                }
-
-                // توقف در صورت رسیدن به دمای نهایی
-                if (temperature <= _parameters.FinalTemperature)
+                if (iterationsWithoutImprovement >= _parameters.MaxIterationsWithoutImprovement ||
+                    temperature <= _parameters.FinalTemperature)
                 {
                     break;
                 }
             }
+        }
 
-            stopwatch.Stop();
-            _statistics.ExecutionTime = stopwatch.Elapsed;
+        private ShiftSolution GenerateFeasibleInitialSolution()
+        {
+            const int maxAttempts = 8;
+            ShiftSolution best = null;
 
-            return bestSolution;
+            for (int attempt = 0; attempt < maxAttempts; attempt++)
+            {
+                var candidate = GenerateInitialSolution();
+                if (IsFeasible(candidate))
+                {
+                    return candidate;
+                }
+
+                if (best == null || candidate.Score < best.Score)
+                {
+                    best = candidate;
+                }
+            }
+
+            return best ?? GenerateInitialSolution();
         }
 
 
@@ -291,28 +208,26 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         {
             var neighbor = currentSolution.Clone();
 
-            // انتخاب تصادفی نوع تغییر
-            var moveType = (MoveType)_random.Next(Enum.GetValues(typeof(MoveType)).Length);
-
-            switch (moveType)
+            // حرکت‌های هدفمند بیمارستانی: جابجایی و انتساب مجدد پرتکرارتر از افزودن/حذف تصادفی
+            var roll = _random.NextDouble();
+            if (roll < 0.35)
             {
-                case MoveType.Swap:
-                    PerformSwapMove(neighbor);
-                    break;
-                case MoveType.Reassign:
-                    PerformReassignMove(neighbor);
-                    break;
-                case MoveType.Add:
-                    PerformAddMove(neighbor);
-                    break;
-                case MoveType.Remove:
-                    PerformRemoveMove(neighbor);
-                    break;
+                PerformReassignMove(neighbor);
+            }
+            else if (roll < 0.65)
+            {
+                PerformSwapMove(neighbor);
+            }
+            else if (roll < 0.85)
+            {
+                PerformAddMove(neighbor);
+            }
+            else
+            {
+                PerformRemoveMove(neighbor);
             }
 
-            // محاسبه امتیاز جدید
             neighbor.Score = CalculateSolutionScore(neighbor);
-
             return neighbor;
         }
 
@@ -350,12 +265,36 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         }
 
         /// <summary>
-        /// محاسبه امتیاز پایه
+        /// جریمهٔ جای خالی بودن شیفت (کم‌کاری از امتیاز بدتر است)
         /// </summary>
         private double CalculateBaseScore(ShiftSolution solution)
         {
-            // امتیاز منفی برای هر انتساب (هر چه کمتر، بهتر)
-            return -solution.Assignments.Count * 10;
+            double penalty = 0;
+            foreach (var date in GetDateRange())
+            {
+                foreach (var shiftReq in _constraints.ShiftRequirements)
+                {
+                    foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
+                    {
+                        var regularCount = CountSpecialtyAssignments(
+                            solution, shiftReq.ShiftId, date, specialtyReq.SpecialtyId, isOnCall: false);
+                        var onCallCount = CountSpecialtyAssignments(
+                            solution, shiftReq.ShiftId, date, specialtyReq.SpecialtyId, isOnCall: true);
+
+                        if (specialtyReq.RequiredTotalCount > 0 && regularCount < specialtyReq.RequiredTotalCount)
+                        {
+                            penalty += (specialtyReq.RequiredTotalCount - regularCount) * 120;
+                        }
+
+                        if (specialtyReq.OnCallTotalCount > 0 && onCallCount < specialtyReq.OnCallTotalCount)
+                        {
+                            penalty += (specialtyReq.OnCallTotalCount - onCallCount) * 100;
+                        }
+                    }
+                }
+            }
+
+            return penalty;
         }
 
         private double CalculateFairShiftCountBalancePenalty(ShiftSolution solution)
@@ -414,38 +353,37 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         {
             double penalty = 0;
 
-            // بررسی محدودیت‌های هر کاربر
             foreach (var userConstraint in _constraints.UserConstraints)
             {
                 var userAssignments = solution.GetUserAllAssignments(userConstraint.UserId);
 
-                // بررسی حداکثر شیفت‌های متوالی
+                // قوانین سخت در IsFeasible بررسی می‌شوند؛ اینجا فقط جریمهٔ نرم برای قوانین غیرفعال‌شده
                 if (!_constraints.HardRules.EnforceMaxConsecutiveShifts)
                 {
                     penalty += CheckConsecutiveShifts(userAssignments, userConstraint.MaxConsecutiveShifts, violations);
                 }
 
-                // بررسی حداقل روزهای استراحت
                 if (!_constraints.HardRules.EnforceMinRestDays)
                 {
                     penalty += CheckRestDays(userAssignments, userConstraint.MinRestDaysBetweenShifts, violations);
                 }
 
-                // بررسی حداکثر شیفت‌های هفتگی
                 if (!_constraints.HardRules.EnforceWeeklyMaxShifts)
                 {
-                    penalty += CheckWeeklyShifts(userAssignments, userConstraint.MaxShiftsPerWeek, violations) * _constraints.SoftWeights.WeeklyMaxWeight;
+                    penalty += CheckWeeklyShifts(userAssignments, userConstraint.MaxShiftsPerWeek, violations) *
+                              _constraints.SoftWeights.WeeklyMaxWeight;
                 }
 
-                // بررسی حداکثر شیفت‌های شبانه ماهانه
                 if (!_constraints.HardRules.EnforceNightShiftMonthlyCap)
                 {
-                    penalty += CheckMonthlyNightShifts(userAssignments, userConstraint.MaxNightShiftsPerMonth, violations) * _constraints.SoftWeights.MonthlyNightCapWeight;
+                    penalty += CheckMonthlyNightShifts(userAssignments, userConstraint.MaxNightShiftsPerMonth, violations) *
+                              _constraints.SoftWeights.MonthlyNightCapWeight;
                 }
 
                 if (!_constraints.HardRules.EnforceProductivityHours && userConstraint.ProductivityRequiredHours.HasValue)
                 {
-                    penalty += CheckMonthlyWorkingHours(userConstraint, userAssignments, violations) * _constraints.SoftWeights.ProductivityOvertimeWeight;
+                    penalty += CheckMonthlyWorkingHours(userConstraint, userAssignments, violations) *
+                              _constraints.SoftWeights.ProductivityOvertimeWeight;
                 }
             }
 
@@ -455,38 +393,17 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// <summary>
         /// محاسبه جریمه عدم تعادل جنسیتی
         /// </summary>
-		private double CalculateGenderBalancePenalty(ShiftSolution solution)
+        private double CalculateGenderBalancePenalty(ShiftSolution solution)
         {
             if (!_constraints.GlobalConstraints.RequireGenderBalance)
-                return 0;
-
-            double penalty = 0;
-            var dateRange = GetDateRange();
-
-            foreach (var date in dateRange)
             {
-                foreach (var shiftReq in _constraints.ShiftRequirements)
-                {
-                    var assignments = solution.GetShiftAssignments(shiftReq.ShiftId, date);
-                    var maleCount = assignments.Count(a => GetUserGender(a.UserId) == UserGender.Male);
-                    var femaleCount = assignments.Count(a => GetUserGender(a.UserId) == UserGender.Female);
-                    var totalCount = assignments.Count;
-
-                    if (totalCount > 0)
-                    {
-                        double maleRatio = (double)maleCount / totalCount;
-                        double femaleRatio = (double)femaleCount / totalCount;
-
-                        if (maleRatio < _constraints.GlobalConstraints.MinGenderBalanceRatio ||
-                            femaleRatio < _constraints.GlobalConstraints.MinGenderBalanceRatio)
-                        {
-                            penalty += 100;
-                        }
-                    }
-                }
+                return 0;
             }
 
-            return penalty * _constraints.SoftWeights.GenderBalanceWeight;
+            // تعادل جنسیتی فقط وقتی برای شیفت تعداد مرد/زن به‌صورت صریح تعیین شده باشد
+            // در سطح تخصص اعمال می‌شود (CalculateSpecialtyMismatchPenalty / IsFeasible).
+            // اگر فقط مجموع نفرات تعیین شده باشد، هر ترکیبی مجاز است و جریمه سراسری اعمال نمی‌شود.
+            return 0;
         }
 
 
@@ -509,12 +426,50 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                     foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
                     {
-                        var assignedCount = assignments.Count(a => GetUserSpecialty(a.UserId) == specialtyReq.SpecialtyId);
-                        var requiredCount = specialtyReq.RequiredTotalCount;
+                        var regularForSpec = assignments
+                            .Where(a => GetUserSpecialty(a.UserId) == specialtyReq.SpecialtyId && !a.IsOnCall)
+                            .ToList();
+                        var onCallForSpec = assignments
+                            .Where(a => GetUserSpecialty(a.UserId) == specialtyReq.SpecialtyId && a.IsOnCall)
+                            .ToList();
 
-                        if (assignedCount < requiredCount)
+                        var hasExplicitRegularGender =
+                            specialtyReq.RequiredMaleCount > 0 || specialtyReq.RequiredFemaleCount > 0;
+                        var hasExplicitOnCallGender =
+                            specialtyReq.OnCallMaleCount > 0 || specialtyReq.OnCallFemaleCount > 0;
+
+                        if (hasExplicitRegularGender)
                         {
-                            penalty += (requiredCount - assignedCount) * 50;
+                            if (specialtyReq.RequiredMaleCount > 0)
+                            {
+                                penalty += Math.Abs(CountGenderAssignments(regularForSpec, UserGender.Male) - specialtyReq.RequiredMaleCount) * 80;
+                            }
+
+                            if (specialtyReq.RequiredFemaleCount > 0)
+                            {
+                                penalty += Math.Abs(CountGenderAssignments(regularForSpec, UserGender.Female) - specialtyReq.RequiredFemaleCount) * 80;
+                            }
+                        }
+                        else if (specialtyReq.RequiredTotalCount > 0 && regularForSpec.Count < specialtyReq.RequiredTotalCount)
+                        {
+                            penalty += (specialtyReq.RequiredTotalCount - regularForSpec.Count) * 50;
+                        }
+
+                        if (hasExplicitOnCallGender)
+                        {
+                            if (specialtyReq.OnCallMaleCount > 0)
+                            {
+                                penalty += Math.Abs(CountGenderAssignments(onCallForSpec, UserGender.Male) - specialtyReq.OnCallMaleCount) * 80;
+                            }
+
+                            if (specialtyReq.OnCallFemaleCount > 0)
+                            {
+                                penalty += Math.Abs(CountGenderAssignments(onCallForSpec, UserGender.Female) - specialtyReq.OnCallFemaleCount) * 80;
+                            }
+                        }
+                        else if (specialtyReq.OnCallTotalCount > 0 && onCallForSpec.Count < specialtyReq.OnCallTotalCount)
+                        {
+                            penalty += (specialtyReq.OnCallTotalCount - onCallForSpec.Count) * 60;
                         }
                     }
                 }
@@ -621,6 +576,30 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         return false;
                     }
                 }
+
+                if (_constraints.HardRules.EnforceWeeklyMaxShifts)
+                {
+                    foreach (var week in userAssignments.GroupBy(a => GetWeekNumber(a.Date)))
+                    {
+                        if (week.Count() > userConstraint.MaxShiftsPerWeek)
+                        {
+                            return false;
+                        }
+                    }
+                }
+
+                if (_constraints.HardRules.EnforceNightShiftMonthlyCap)
+                {
+                    foreach (var month in userAssignments
+                                 .Where(a => a.ShiftLabel == ShiftLabel.Night)
+                                 .GroupBy(a => new { a.Date.Year, a.Date.Month }))
+                    {
+                        if (month.Count() > userConstraint.MaxNightShiftsPerMonth)
+                        {
+                            return false;
+                        }
+                    }
+                }
             }
 
             // ظرفیت تخصص/شیفت/روز نباید بیش از نیاز باشد
@@ -632,15 +611,68 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     foreach (var shiftReq in _constraints.ShiftRequirements)
                     {
                         var assignments = solution.GetShiftAssignments(shiftReq.ShiftId, date);
-                        // کل ظرفیت مجموع تخصص‌ها
-                        int totalRequired = shiftReq.SpecialtyRequirements.Sum(r => r.RequiredTotalCount);
+                        int totalRequired = shiftReq.SpecialtyRequirements.Sum(r => r.RequiredTotalCount + r.OnCallTotalCount);
                         if (assignments.Count > totalRequired)
+                        {
                             return false;
+                        }
                         foreach (var specReq in shiftReq.SpecialtyRequirements)
                         {
-                            int assignedSpec = assignments.Count(a => GetUserSpecialty(a.UserId) == specReq.SpecialtyId);
-                            if (assignedSpec > specReq.RequiredTotalCount)
+                            var specAssignments = assignments
+                                .Where(a => GetUserSpecialty(a.UserId) == specReq.SpecialtyId)
+                                .ToList();
+                            var regular = specAssignments.Where(a => !a.IsOnCall).ToList();
+                            var onCall = specAssignments.Where(a => a.IsOnCall).ToList();
+
+                            if (specAssignments.Count > specReq.RequiredTotalCount + specReq.OnCallTotalCount)
+                            {
                                 return false;
+                            }
+
+                            if (regular.Count > specReq.RequiredTotalCount)
+                            {
+                                return false;
+                            }
+
+                            if (onCall.Count > specReq.OnCallTotalCount)
+                            {
+                                return false;
+                            }
+
+                            var hasExplicitRegularGender =
+                                specReq.RequiredMaleCount > 0 || specReq.RequiredFemaleCount > 0;
+                            var hasExplicitOnCallGender =
+                                specReq.OnCallMaleCount > 0 || specReq.OnCallFemaleCount > 0;
+
+                            if (hasExplicitRegularGender)
+                            {
+                                if (specReq.RequiredMaleCount > 0 &&
+                                    CountGenderAssignments(regular, UserGender.Male) != specReq.RequiredMaleCount)
+                                {
+                                    return false;
+                                }
+
+                                if (specReq.RequiredFemaleCount > 0 &&
+                                    CountGenderAssignments(regular, UserGender.Female) != specReq.RequiredFemaleCount)
+                                {
+                                    return false;
+                                }
+                            }
+
+                            if (hasExplicitOnCallGender)
+                            {
+                                if (specReq.OnCallMaleCount > 0 &&
+                                    CountGenderAssignments(onCall, UserGender.Male) != specReq.OnCallMaleCount)
+                                {
+                                    return false;
+                                }
+
+                                if (specReq.OnCallFemaleCount > 0 &&
+                                    CountGenderAssignments(onCall, UserGender.Female) != specReq.OnCallFemaleCount)
+                                {
+                                    return false;
+                                }
+                            }
                         }
                     }
                 }
@@ -672,20 +704,114 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         private void AssignRequiredPersonnel(ShiftSolution solution, List<UserConstraint> eligibleUsers,
             ShiftRequirement shiftReq, DateTime date, SpecialtyRequirement specialtyReq)
         {
-            var shuffledUsers = eligibleUsers.OrderBy(x => _random.Next()).ToList();
-            int assignedCount = 0;
+            var hasExplicitOnCallGender =
+                specialtyReq.OnCallMaleCount > 0 || specialtyReq.OnCallFemaleCount > 0;
+            var hasExplicitRegularGender =
+                specialtyReq.RequiredMaleCount > 0 || specialtyReq.RequiredFemaleCount > 0;
 
-            foreach (var user in shuffledUsers)
+            // آنکال
+            if (hasExplicitOnCallGender)
             {
-                if (assignedCount >= specialtyReq.RequiredTotalCount)
+                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.OnCallMaleCount, UserGender.Male, isOnCall: true);
+                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.OnCallFemaleCount, UserGender.Female, isOnCall: true);
+                if (specialtyReq.OnCallTotalCount > specialtyReq.OnCallMaleCount + specialtyReq.OnCallFemaleCount)
+                {
+                    AssignRemainingBySpecialty(
+                        solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId,
+                        specialtyReq.OnCallTotalCount, isOnCall: true);
+                }
+            }
+            else if (specialtyReq.OnCallTotalCount > 0)
+            {
+                AssignRemainingBySpecialty(
+                    solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId,
+                    specialtyReq.OnCallTotalCount, isOnCall: true);
+            }
+
+            // نیروی حاضر در محل
+            if (hasExplicitRegularGender)
+            {
+                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.RequiredMaleCount, UserGender.Male, isOnCall: false);
+                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.RequiredFemaleCount, UserGender.Female, isOnCall: false);
+                if (specialtyReq.RequiredTotalCount > specialtyReq.RequiredMaleCount + specialtyReq.RequiredFemaleCount)
+                {
+                    AssignRemainingBySpecialty(
+                        solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId,
+                        specialtyReq.RequiredTotalCount, isOnCall: false);
+                }
+            }
+            else if (specialtyReq.RequiredTotalCount > 0)
+            {
+                AssignRemainingBySpecialty(
+                    solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId,
+                    specialtyReq.RequiredTotalCount, isOnCall: false);
+            }
+        }
+
+        private void AssignByGenderCount(
+            ShiftSolution solution,
+            List<UserConstraint> eligibleUsers,
+            ShiftRequirement shiftReq,
+            DateTime date,
+            int requiredCount,
+            UserGender gender,
+            bool isOnCall)
+        {
+            if (requiredCount <= 0)
+            {
+                return;
+            }
+
+            var assigned = 0;
+            foreach (var user in eligibleUsers.Where(u => u.Gender == gender).OrderBy(_ => _random.Next()))
+            {
+                if (assigned >= requiredCount)
+                {
                     break;
+                }
 
                 if (!solution.HasAssignment(user.UserId, shiftReq.ShiftId, date))
                 {
-                    solution.AddAssignment(user.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel);
-                    assignedCount++;
+                    solution.AddAssignment(user.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall);
+                    assigned++;
                 }
             }
+        }
+
+        private void AssignRemainingBySpecialty(
+            ShiftSolution solution,
+            List<UserConstraint> eligibleUsers,
+            ShiftRequirement shiftReq,
+            DateTime date,
+            int specialtyId,
+            int targetCount,
+            bool isOnCall)
+        {
+            var current = CountSpecialtyAssignments(solution, shiftReq.ShiftId, date, specialtyId, isOnCall);
+            foreach (var user in eligibleUsers.OrderBy(_ => _random.Next()))
+            {
+                if (current >= targetCount)
+                {
+                    break;
+                }
+
+                if (!solution.HasAssignment(user.UserId, shiftReq.ShiftId, date))
+                {
+                    solution.AddAssignment(user.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall);
+                    current++;
+                }
+            }
+        }
+
+        private int CountSpecialtyAssignments(ShiftSolution solution, int shiftId, DateTime date, int specialtyId, bool isOnCall)
+        {
+            return solution.GetShiftAssignments(shiftId, date)
+                .Count(a => a.IsOnCall == isOnCall && GetUserSpecialty(a.UserId) == specialtyId);
+        }
+
+        private int CountGenderAssignments(IEnumerable<SaShiftAssignment> assignments, UserGender gender)
+        {
+            return assignments.Count(a => GetUserGender(a.UserId) == gender);
         }
 
         private double CheckMonthlyWorkingHours(UserConstraint userConstraint, List<SaShiftAssignment> assignments, List<string> violations)
@@ -728,20 +854,30 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private void PerformSwapMove(ShiftSolution solution)
         {
-            var assignments = solution.Assignments.Values.ToList();
-            if (assignments.Count < 2) return;
+            var slotGroups = solution.Assignments.Values
+                .GroupBy(a => (a.ShiftId, a.Date.Date, a.IsOnCall, SpecialtyId: GetUserSpecialty(a.UserId)))
+                .Where(g => g.Count() >= 2)
+                .ToList();
 
-            var assignment1 = assignments[_random.Next(assignments.Count)];
-            var assignment2 = assignments[_random.Next(assignments.Count)];
-
-            if (assignment1.UserId != assignment2.UserId)
+            if (slotGroups.Count == 0)
             {
-                solution.RemoveAssignment(assignment1.UserId, assignment1.ShiftId, assignment1.Date);
-                solution.RemoveAssignment(assignment2.UserId, assignment2.ShiftId, assignment2.Date);
-
-                solution.AddAssignment(assignment2.UserId, assignment1.ShiftId, assignment1.Date, assignment1.ShiftLabel);
-                solution.AddAssignment(assignment1.UserId, assignment2.ShiftId, assignment2.Date, assignment2.ShiftLabel);
+                return;
             }
+
+            var group = slotGroups[_random.Next(slotGroups.Count)].ToList();
+            var assignment1 = group[_random.Next(group.Count)];
+            var assignment2 = group[_random.Next(group.Count)];
+
+            if (assignment1.UserId == assignment2.UserId)
+            {
+                return;
+            }
+
+            solution.RemoveAssignment(assignment1.UserId, assignment1.ShiftId, assignment1.Date);
+            solution.RemoveAssignment(assignment2.UserId, assignment2.ShiftId, assignment2.Date);
+
+            solution.AddAssignment(assignment2.UserId, assignment1.ShiftId, assignment1.Date, assignment1.ShiftLabel, assignment1.IsOnCall);
+            solution.AddAssignment(assignment1.UserId, assignment2.ShiftId, assignment2.Date, assignment2.ShiftLabel, assignment2.IsOnCall);
         }
 
         private void PerformReassignMove(ShiftSolution solution)
@@ -750,46 +886,185 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             if (assignments.Count == 0) return;
 
             var assignment = assignments[_random.Next(assignments.Count)];
+            var assignmentGender = GetUserGender(assignment.UserId);
+            var specialtyId = GetUserSpecialty(assignment.UserId);
+            var shiftReq = _constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftId == assignment.ShiftId);
+            var specialtyReq = shiftReq?.SpecialtyRequirements.FirstOrDefault(s => s.SpecialtyId == specialtyId);
+            var lockGender = specialtyReq != null && (
+                (assignment.IsOnCall && (specialtyReq.OnCallMaleCount > 0 || specialtyReq.OnCallFemaleCount > 0)) ||
+                (!assignment.IsOnCall && (specialtyReq.RequiredMaleCount > 0 || specialtyReq.RequiredFemaleCount > 0)));
+
             var eligibleUsers = _constraints.UserConstraints
-                .Where(u => u.SpecialtyId == GetUserSpecialty(assignment.UserId))
+                .Where(u => u.SpecialtyId == specialtyId)
+                .Where(u => u.IsActive)
+                .Where(u => !lockGender || u.Gender == assignmentGender)
                 .Where(u => !u.UnavailableDates.Contains(assignment.Date.Date))
+                .Where(u => !solution.HasAssignment(u.UserId, assignment.ShiftId, assignment.Date))
+                .OrderBy(u => solution.GetUserAllAssignments(u.UserId).Count)
+                .ThenBy(_ => _random.Next())
                 .ToList();
 
-            if (eligibleUsers.Count > 1)
+            if (eligibleUsers.Count > 0)
             {
-                var newUser = eligibleUsers[_random.Next(eligibleUsers.Count)];
+                var newUser = eligibleUsers[0];
                 solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
-                solution.AddAssignment(newUser.UserId, assignment.ShiftId, assignment.Date, assignment.ShiftLabel);
+                solution.AddAssignment(newUser.UserId, assignment.ShiftId, assignment.Date, assignment.ShiftLabel, assignment.IsOnCall);
             }
         }
 
         private void PerformAddMove(ShiftSolution solution)
         {
-            var dateRange = GetDateRange();
-            var randomDate = dateRange[_random.Next(dateRange.Count)];
-            var randomShift = _constraints.ShiftRequirements[_random.Next(_constraints.ShiftRequirements.Count)];
-            var randomSpecialty = randomShift.SpecialtyRequirements[_random.Next(randomShift.SpecialtyRequirements.Count)];
+            var understaffedSlots = FindUnderstaffedSlots(solution);
+            if (understaffedSlots.Count == 0)
+            {
+                return;
+            }
+
+            var slot = understaffedSlots[_random.Next(understaffedSlots.Count)];
+            var shiftReq = _constraints.ShiftRequirements.First(s => s.ShiftId == slot.ShiftId);
 
             var eligibleUsers = _constraints.UserConstraints
-                .Where(u => u.SpecialtyId == randomSpecialty.SpecialtyId)
-                .Where(u => !u.UnavailableDates.Contains(randomDate.Date))
-                .Where(u => !solution.HasAssignment(u.UserId, randomShift.ShiftId, randomDate))
+                .Where(u => u.SpecialtyId == slot.SpecialtyId)
+                .Where(u => u.IsActive)
+                .Where(u => !u.UnavailableDates.Contains(slot.Date.Date))
+                .Where(u => !solution.HasAssignment(u.UserId, slot.ShiftId, slot.Date))
+                .Where(u => !slot.RequireMale || u.Gender == UserGender.Male)
+                .Where(u => !slot.RequireFemale || u.Gender == UserGender.Female)
+                .OrderBy(u => solution.GetUserAllAssignments(u.UserId).Count)
+                .ThenBy(_ => _random.Next())
                 .ToList();
 
             if (eligibleUsers.Count > 0)
             {
-                var user = eligibleUsers[_random.Next(eligibleUsers.Count)];
-                solution.AddAssignment(user.UserId, randomShift.ShiftId, randomDate, randomShift.ShiftLabel);
+                var user = eligibleUsers[0];
+                solution.AddAssignment(user.UserId, slot.ShiftId, slot.Date, shiftReq.ShiftLabel, slot.IsOnCall);
             }
         }
 
         private void PerformRemoveMove(ShiftSolution solution)
         {
-            var assignments = solution.Assignments.Values.ToList();
-            if (assignments.Count == 0) return;
+            var overstaffed = FindOverstaffedAssignments(solution);
+            if (overstaffed.Count == 0)
+            {
+                return;
+            }
 
-            var assignment = assignments[_random.Next(assignments.Count)];
+            var assignment = overstaffed[_random.Next(overstaffed.Count)];
             solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+        }
+
+        private List<StaffingSlotGap> FindUnderstaffedSlots(ShiftSolution solution)
+        {
+            var gaps = new List<StaffingSlotGap>();
+            foreach (var date in GetDateRange())
+            {
+                foreach (var shiftReq in _constraints.ShiftRequirements)
+                {
+                    foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
+                    {
+                        AddGenderGaps(gaps, solution, shiftReq, date, specialtyReq, isOnCall: true);
+                        AddGenderGaps(gaps, solution, shiftReq, date, specialtyReq, isOnCall: false);
+                    }
+                }
+            }
+
+            return gaps;
+        }
+
+        private void AddGenderGaps(
+            List<StaffingSlotGap> gaps,
+            ShiftSolution solution,
+            ShiftRequirement shiftReq,
+            DateTime date,
+            SpecialtyRequirement specialtyReq,
+            bool isOnCall)
+        {
+            var current = CountSpecialtyAssignments(solution, shiftReq.ShiftId, date, specialtyReq.SpecialtyId, isOnCall);
+            var hasExplicitGender = isOnCall
+                ? specialtyReq.OnCallMaleCount > 0 || specialtyReq.OnCallFemaleCount > 0
+                : specialtyReq.RequiredMaleCount > 0 || specialtyReq.RequiredFemaleCount > 0;
+
+            if (hasExplicitGender)
+            {
+                int maleTarget = isOnCall ? specialtyReq.OnCallMaleCount : specialtyReq.RequiredMaleCount;
+                int femaleTarget = isOnCall ? specialtyReq.OnCallFemaleCount : specialtyReq.RequiredFemaleCount;
+                var assignments = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                    .Where(a => a.IsOnCall == isOnCall && GetUserSpecialty(a.UserId) == specialtyReq.SpecialtyId);
+
+                int maleShort = maleTarget - CountGenderAssignments(assignments, UserGender.Male);
+                int femaleShort = femaleTarget - CountGenderAssignments(assignments, UserGender.Female);
+
+                for (int i = 0; i < maleShort; i++)
+                {
+                    gaps.Add(new StaffingSlotGap(shiftReq.ShiftId, date, specialtyReq.SpecialtyId, isOnCall, requireMale: true));
+                }
+
+                for (int i = 0; i < femaleShort; i++)
+                {
+                    gaps.Add(new StaffingSlotGap(shiftReq.ShiftId, date, specialtyReq.SpecialtyId, isOnCall, requireFemale: true));
+                }
+            }
+            else
+            {
+                int target = isOnCall ? specialtyReq.OnCallTotalCount : specialtyReq.RequiredTotalCount;
+                int shortfall = target - current;
+                for (int i = 0; i < shortfall; i++)
+                {
+                    gaps.Add(new StaffingSlotGap(shiftReq.ShiftId, date, specialtyReq.SpecialtyId, isOnCall));
+                }
+            }
+        }
+
+        private List<SaShiftAssignment> FindOverstaffedAssignments(ShiftSolution solution)
+        {
+            var removable = new List<SaShiftAssignment>();
+            foreach (var date in GetDateRange())
+            {
+                foreach (var shiftReq in _constraints.ShiftRequirements)
+                {
+                    foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
+                    {
+                        var regular = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                            .Where(a => !a.IsOnCall && GetUserSpecialty(a.UserId) == specialtyReq.SpecialtyId)
+                            .ToList();
+                        var onCall = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                            .Where(a => a.IsOnCall && GetUserSpecialty(a.UserId) == specialtyReq.SpecialtyId)
+                            .ToList();
+
+                        if (regular.Count > specialtyReq.RequiredTotalCount)
+                        {
+                            removable.AddRange(regular.OrderByDescending(_ => _random.Next()).Take(regular.Count - specialtyReq.RequiredTotalCount));
+                        }
+
+                        if (onCall.Count > specialtyReq.OnCallTotalCount)
+                        {
+                            removable.AddRange(onCall.OrderByDescending(_ => _random.Next()).Take(onCall.Count - specialtyReq.OnCallTotalCount));
+                        }
+                    }
+                }
+            }
+
+            return removable;
+        }
+
+        private readonly struct StaffingSlotGap
+        {
+            public StaffingSlotGap(int shiftId, DateTime date, int specialtyId, bool isOnCall, bool requireMale = false, bool requireFemale = false)
+            {
+                ShiftId = shiftId;
+                Date = date;
+                SpecialtyId = specialtyId;
+                IsOnCall = isOnCall;
+                RequireMale = requireMale;
+                RequireFemale = requireFemale;
+            }
+
+            public int ShiftId { get; }
+            public DateTime Date { get; }
+            public int SpecialtyId { get; }
+            public bool IsOnCall { get; }
+            public bool RequireMale { get; }
+            public bool RequireFemale { get; }
         }
 
         private UserGender GetUserGender(int userId)
