@@ -14,9 +14,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
     /// </summary>
     public class SchedulingBackgroundService : BackgroundService
     {
-        private static readonly TimeSpan StaleJobThreshold = TimeSpan.FromMinutes(12);
-        private static readonly TimeSpan JobExecutionTimeout = TimeSpan.FromMinutes(20);
+        private static readonly TimeSpan StaleJobThreshold = TimeSpan.FromMinutes(35);
+        private static readonly TimeSpan JobExecutionTimeout = TimeSpan.FromMinutes(30);
         private static readonly TimeSpan StaleCheckInterval = TimeSpan.FromMinutes(2);
+        private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromMinutes(2);
 
         private readonly ISchedulingJobQueue _queue;
         private readonly ISchedulingJobStore _store;
@@ -126,11 +127,17 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
             job.Message = "Job started.";
             await _store.UpdateAsync(job);
 
+            CancellationTokenSource heartbeatCts = null;
+            Task heartbeatTask = Task.CompletedTask;
+
             try
             {
                 _logger.LogInformation(
                     "Running scheduling job {JobId} for DepartmentId={DepartmentId}, Algorithm={Algorithm}",
                     job.Id, job.Request.DepartmentId, job.Request.Algorithm);
+
+                heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                heartbeatTask = RunJobHeartbeatAsync(job.Id, heartbeatCts.Token);
 
                 // LongRunning: OR-Tools/Hybrid از thread pool جدا می‌شود تا قفل thread pool (Task.WaitAll) رخ ندهد.
                 var workTask = Task.Factory.StartNew(
@@ -168,7 +175,41 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
             }
             finally
             {
+                heartbeatCts?.Cancel();
+                try
+                {
+                    await heartbeatTask;
+                }
+                catch (OperationCanceledException)
+                {
+                    // expected when job completes
+                }
+
                 job.CompletedAtUtc = DateTime.UtcNow;
+                await _store.UpdateAsync(job);
+            }
+        }
+
+        private async Task RunJobHeartbeatAsync(string jobId, CancellationToken stoppingToken)
+        {
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(HeartbeatInterval, stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+
+                var job = await _store.GetAsync(jobId);
+                if (job == null || job.Status != SchedulingJobStatus.Running)
+                {
+                    break;
+                }
+
+                job.Message = $"Still optimizing... (last update {DateTime.UtcNow:HH:mm:ss} UTC)";
                 await _store.UpdateAsync(job);
             }
         }

@@ -682,7 +682,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             catch { }
         }
 
-        private async Task<(double InitialTemperature, double FinalTemperature, double CoolingRate, int MaxIterations, int MaxIterationsWithoutImprovement)> GetAlgorithmSettingsAsync(int departmentId, SchedulingAlgorithm algo)
+        private async Task<(double InitialTemperature, double FinalTemperature, double CoolingRate, int MaxIterations, int MaxIterationsWithoutImprovement)> GetAlgorithmSettingsAsync(int departmentId, SchedulingAlgorithm algo, bool forBackground = false)
         {
             try
             {
@@ -691,12 +691,21 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 if (settingsResponse.IsSuccess && settingsResponse.Data != null)
                 {
                     var settings = settingsResponse.Data;
+                    var maxIterations = settings.SA_MaxIterations ?? 10000;
+                    var maxWithoutImprovement = settings.SA_MaxIterationsWithoutImprovement ?? 1000;
+
+                    if (forBackground)
+                    {
+                        maxIterations = Math.Min(maxIterations, MaxBackgroundSaIterations);
+                        maxWithoutImprovement = Math.Min(maxWithoutImprovement, 800);
+                    }
+
                     return (
                         settings.SA_InitialTemperature ?? 1000.0,
                         settings.SA_FinalTemperature ?? 0.1,
                         settings.SA_CoolingRate ?? 0.95,
-                        settings.SA_MaxIterations ?? 10000,
-                        settings.SA_MaxIterationsWithoutImprovement ?? 1000
+                        maxIterations,
+                        maxWithoutImprovement
                     );
                 }
             }
@@ -706,7 +715,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             }
 
             // مقادیر پیش‌فرض
-            return (1000.0, 0.1, 0.95, 10000, 1000);
+            var defaultMaxIterations = forBackground ? MaxBackgroundSaIterations : 10000;
+            var defaultMaxWithoutImprovement = forBackground ? 800 : 1000;
+            return (1000.0, 0.1, 0.95, defaultMaxIterations, defaultMaxWithoutImprovement);
         }
 
         private WorkingHoursCalculationResultDto? CalculateProductivitySnapshot(User user, UserConstraint userConstraint, ShiftConstraints constraints, DepartmentSchedulingSettings? deptSetting, double nightShiftDurationHours)
@@ -864,7 +875,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         // solves the scheduling should be moved to a background job instead of the request path.
         private const int MaxOrToolsSolveSeconds = 25;
         private const int MaxOrToolsSearchWorkers = 2;
-        private const int MaxOrToolsBackgroundSolveSeconds = 600;
+        private const int MaxOrToolsBackgroundSolveSeconds = 180;
+        private const int MaxBackgroundSaIterations = 4000;
+        private const int MaxBackgroundHybridIterations = 2;
 
         private async Task<(int MaxTimeInSeconds, int NumSearchWorkers, bool LogSearchProgress, int MaxSolutions, double RelativeGapLimit)> GetOrToolsSettingsAsync(int departmentId, bool allowExtendedSolverTime = false)
         {
@@ -907,7 +920,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             return (clampedTime, clampedWorkers, logSearchProgress, maxSolutions, relativeGapLimit);
         }
 
-        private async Task<(ShiftYar.Application.Features.ShiftModel.Hybrid.HybridStrategy Strategy, int MaxIterations, double ComplexityThreshold)> GetHybridSettingsAsync(int departmentId)
+        private async Task<(ShiftYar.Application.Features.ShiftModel.Hybrid.HybridStrategy Strategy, int MaxIterations, double ComplexityThreshold)> GetHybridSettingsAsync(int departmentId, bool forBackground = false)
         {
             try
             {
@@ -916,9 +929,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 if (settingsResponse.IsSuccess && settingsResponse.Data != null)
                 {
                     var settings = settingsResponse.Data;
+                    var maxIterations = settings.HYB_MaxIterations ?? 5;
+                    if (forBackground)
+                    {
+                        maxIterations = Math.Min(maxIterations, MaxBackgroundHybridIterations);
+                    }
+
                     return (
                         settings.HYB_Strategy.HasValue ? (ShiftYar.Application.Features.ShiftModel.Hybrid.HybridStrategy)settings.HYB_Strategy.Value : ShiftYar.Application.Features.ShiftModel.Hybrid.HybridStrategy.OrToolsFirst,
-                        settings.HYB_MaxIterations ?? 5,
+                        maxIterations,
                         settings.HYB_ComplexityThreshold ?? 100.0
                     );
                 }
@@ -929,7 +948,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             }
 
             // مقادیر پیش‌فرض
-            return (ShiftYar.Application.Features.ShiftModel.Hybrid.HybridStrategy.OrToolsFirst, 5, 100.0);
+            var defaultIterations = forBackground ? MaxBackgroundHybridIterations : 5;
+            return (ShiftYar.Application.Features.ShiftModel.Hybrid.HybridStrategy.OrToolsFirst, defaultIterations, 100.0);
         }
 
         /// <summary>
@@ -1610,7 +1630,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         /// </summary>
         private async Task<ShiftSchedulingResultDto> OptimizeWithSimulatedAnnealingInternalAsync(ShiftSchedulingRequestInternalDto request, ShiftConstraints constraints)
         {
-            var saParamsFromDb = await GetAlgorithmSettingsAsync(request.DepartmentId, SchedulingAlgorithm.SimulatedAnnealing);
+            var saParamsFromDb = await GetAlgorithmSettingsAsync(request.DepartmentId, SchedulingAlgorithm.SimulatedAnnealing, request.AllowExtendedSolverTime);
             var parameters = new SimulatedAnnealingParameters
             {
                 InitialTemperature = saParamsFromDb.InitialTemperature,
@@ -1653,7 +1673,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
             var scheduler = new OrToolsCPSatScheduler(ortoolsConstraints, parameters);
             var solveTimeout = request.AllowExtendedSolverTime
-                ? TimeSpan.FromMinutes(15)
+                ? TimeSpan.FromMinutes(4)
                 : TimeSpan.FromSeconds(MaxOrToolsSolveSeconds + 30);
 
             var solution = request.AllowExtendedSolverTime
@@ -1677,7 +1697,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             // تبدیل محدودیت‌ها به فرمت OR-Tools
             var ortoolsConstraints = await ConvertToOrToolsConstraintsInternalAsync(constraints, request);
 
-            var saParamsFromDb = await GetAlgorithmSettingsAsync(request.DepartmentId, SchedulingAlgorithm.SimulatedAnnealing);
+            var saParamsFromDb = await GetAlgorithmSettingsAsync(request.DepartmentId, SchedulingAlgorithm.SimulatedAnnealing, request.AllowExtendedSolverTime);
             var saParameters = new SimulatedAnnealingParameters
             {
                 InitialTemperature = saParamsFromDb.InitialTemperature,
@@ -1697,7 +1717,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 RelativeGapLimit = ortParamsFromDb.RelativeGapLimit
             };
 
-            var hyParamsFromDb = await GetHybridSettingsAsync(request.DepartmentId);
+            var hyParamsFromDb = await GetHybridSettingsAsync(request.DepartmentId, request.AllowExtendedSolverTime);
             var hybridParameters = new HybridParameters
             {
                 Strategy = hyParamsFromDb.Strategy,
@@ -1707,7 +1727,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
             var scheduler = new HybridScheduler(constraints, ortoolsConstraints, saParameters, ortoolsParameters, hybridParameters);
             var optimizeTimeout = request.AllowExtendedSolverTime
-                ? TimeSpan.FromMinutes(25)
+                ? TimeSpan.FromMinutes(12)
                 : TimeSpan.FromMinutes(2);
 
             var solution = request.AllowExtendedSolverTime

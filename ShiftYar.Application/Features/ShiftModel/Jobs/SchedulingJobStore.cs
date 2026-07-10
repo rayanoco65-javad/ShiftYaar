@@ -104,8 +104,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
             var (items, _) = await repo.GetByFilterAsync(
                 new SimpleFilter<SchedulingJobRecord>(r =>
                     r.Status == (int)SchedulingJobStatus.Running &&
-                    r.StartedAtUtc.HasValue &&
-                    r.StartedAtUtc.Value < cutoff));
+                    (
+                        (r.UpdateDate ?? r.StartedAtUtc ?? DateTime.MaxValue) < cutoff
+                    )));
 
             if (items.Count == 0)
             {
