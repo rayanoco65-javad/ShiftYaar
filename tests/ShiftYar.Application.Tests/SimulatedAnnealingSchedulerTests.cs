@@ -310,6 +310,62 @@ public class SimulatedAnnealingSchedulerTests
             Assert.False(solution.HasAssignment(1, 1, date));
         }
 
+        [Fact]
+        public void Optimize_EnforcesApprovedRequests_OverLongPeriod_WithTightConstraints()
+        {
+            // شبیه‌سازی شرایط واقعی: بازه یک‌ماهه، قیود سخت فعال، چند درخواست تأییدشده
+            var start = new DateTime(2026, 8, 1);
+            for (int run = 0; run < 5; run++)
+            {
+                var constraints = BuildConstraints(
+                    start: start,
+                    days: 30,
+                    users: Enumerable.Range(1, 8)
+                        .Select(i => User(i, i % 2 == 0 ? UserGender.Female : UserGender.Male, canBeShiftManager: i <= 2))
+                        .ToArray(),
+                    specialty: new SpecialtyRequirement
+                    {
+                        SpecialtyId = 10,
+                        RequiredTotalCount = 2
+                    });
+
+                constraints.HardRules.EnforceMinRestDays = true;
+                foreach (var u in constraints.UserConstraints)
+                {
+                    u.MinRestDaysBetweenShifts = 0;
+                    u.MaxConsecutiveShifts = 4;
+                }
+
+                var requiredDate = start.AddDays(5); // 6th day
+                var offDate = start.AddDays(6);      // 7th day
+
+                constraints.UserConstraints[2].RequiredShiftSlots.Add(new ShiftSlotConstraint
+                {
+                    Date = requiredDate,
+                    ShiftLabel = ShiftLabel.Morning
+                });
+                constraints.UserConstraints[3].UnavailableDates.Add(offDate);
+                constraints.UserConstraints[4].RequiredPresenceDates.Add(requiredDate);
+
+                var solution = new SimulatedAnnealingScheduler(constraints, FastParameters).Optimize();
+
+                // درخواست حضور در شیفت مشخص باید قطعی باشد
+                Assert.True(
+                    solution.GetShiftAssignments(1, requiredDate).Any(a => a.UserId == 3 && !a.IsOnCall),
+                    $"Run {run}: approved on-shift request for user 3 was not honored");
+
+                // درخواست عدم حضور کل روز باید قطعی باشد
+                Assert.False(
+                    solution.GetUserAssignments(4, offDate).Any(),
+                    $"Run {run}: approved off request for user 4 was violated");
+
+                // درخواست حضور کل روز باید قطعی باشد
+                Assert.True(
+                    solution.GetUserAssignments(5, requiredDate).Any(),
+                    $"Run {run}: approved full-day presence request for user 5 was not honored");
+            }
+        }
+
         private static ShiftConstraints BuildConstraints(
         DateTime start,
         int days,

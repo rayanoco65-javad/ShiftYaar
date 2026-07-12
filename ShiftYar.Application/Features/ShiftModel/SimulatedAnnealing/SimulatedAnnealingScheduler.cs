@@ -49,6 +49,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             RunAnnealingLoop(ref currentSolution, ref bestSolution);
 
+            // تضمین نهایی رعایت درخواست‌های تأییدشده و الزام مدیر شیفت
+            // (حتی اگر حلقه SA نتوانسته باشد راه‌حل کاملاً معتبر پیدا کند)
+            EnforceHardRequestConstraints(bestSolution);
+
             stopwatch.Stop();
             _statistics.ExecutionTime = stopwatch.Elapsed;
 
@@ -63,6 +67,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var stopwatch = Stopwatch.StartNew();
 
             var currentSolution = initialSolution.Clone();
+            EnforceHardRequestConstraints(currentSolution);
             currentSolution.Score = CalculateSolutionScore(currentSolution);
             var bestSolution = currentSolution.Clone();
 
@@ -70,6 +75,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             _statistics.CurrentScore = currentSolution.Score;
 
             RunAnnealingLoop(ref currentSolution, ref bestSolution);
+
+            EnforceHardRequestConstraints(bestSolution);
 
             stopwatch.Stop();
             _statistics.ExecutionTime = stopwatch.Elapsed;
@@ -173,6 +180,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         {
             var solution = new ShiftSolution();
 
+            // ابتدا انتساب‌های اجباری (درخواست‌های تأییدشده حضور) اعمال می‌شوند
+            // تا پر کردن ظرفیت باقی‌مانده با آگاهی از آنها انجام شود.
+            ApplyHardRequiredAssignments(solution);
+
             // تولید انتساب‌های تصادفی اولیه
             var availableUsers = _constraints.UserConstraints.ToList();
             var dateRange = GetDateRange();
@@ -194,8 +205,6 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     }
                 }
             }
-
-            ApplyHardRequiredAssignments(solution);
 
             // محاسبه امتیاز راه‌حل
             solution.Score = CalculateSolutionScore(solution);
@@ -830,6 +839,213 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
         }
 
+        /// <summary>
+        /// ترمیم نهایی راه‌حل: تضمین رعایت درخواست‌های تأییدشده (حضور/عدم‌حضور)
+        /// و الزام حضور مدیر شیفت، حتی اگر حلقه SA راه‌حل کاملاً معتبر پیدا نکرده باشد.
+        /// </summary>
+        private void EnforceHardRequestConstraints(ShiftSolution solution)
+        {
+            // 1) حذف انتساب‌های کاربران در تاریخ/شیفت‌های غیرمجاز (درخواست‌های عدم حضور تأییدشده)
+            foreach (var assignment in solution.Assignments.Values.ToList())
+            {
+                var user = _constraints.UserConstraints.FirstOrDefault(u => u.UserId == assignment.UserId);
+                if (user == null)
+                {
+                    continue;
+                }
+
+                if (!IsUserAvailableForShift(user, assignment.Date, assignment.ShiftLabel))
+                {
+                    solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                }
+            }
+
+            // 2) تضمین حضور در شیفت‌های درخواست‌شده (درخواست حضور - شیفت مشخص)
+            foreach (var userConstraint in _constraints.UserConstraints)
+            {
+                foreach (var required in userConstraint.RequiredShiftSlots)
+                {
+                    var shiftReq = GetShiftRequirement(required.ShiftLabel);
+                    if (shiftReq == null ||
+                        required.Date.Date < _constraints.StartDate.Date ||
+                        required.Date.Date > _constraints.EndDate.Date ||
+                        !IsUserAvailableForShift(userConstraint, required.Date, required.ShiftLabel))
+                    {
+                        continue;
+                    }
+
+                    var alreadyAssigned = solution.GetShiftAssignments(shiftReq.ShiftId, required.Date)
+                        .Any(a => a.UserId == userConstraint.UserId && !a.IsOnCall);
+                    if (alreadyAssigned)
+                    {
+                        continue;
+                    }
+
+                    // انتساب‌های دیگر همان روز کاربر حذف می‌شوند تا تداخل روزانه پیش نیاید
+                    RemoveConflictingDailyAssignments(solution, userConstraint.UserId, required.Date, shiftReq.ShiftId);
+
+                    // اگر ظرفیت تخصص کاربر در این شیفت پر است، یک نفر غیرمحافظت‌شده حذف می‌شود
+                    MakeRoomInShift(solution, shiftReq, required.Date, userConstraint);
+
+                    solution.AddAssignment(
+                        userConstraint.UserId,
+                        shiftReq.ShiftId,
+                        required.Date,
+                        required.ShiftLabel,
+                        isOnCall: false);
+                }
+
+                // 3) تضمین حضور در روزهای درخواست‌شده (درخواست حضور - کل روز)
+                foreach (var presenceDate in userConstraint.RequiredPresenceDates)
+                {
+                    if (presenceDate.Date < _constraints.StartDate.Date ||
+                        presenceDate.Date > _constraints.EndDate.Date ||
+                        solution.GetUserAssignments(userConstraint.UserId, presenceDate).Any())
+                    {
+                        continue;
+                    }
+
+                    // اولویت با شیفتی که ظرفیت خالی دارد؛ در غیر این صورت جایگزینی
+                    var candidateShifts = _constraints.ShiftRequirements
+                        .Where(s => IsUserAvailableForShift(userConstraint, presenceDate, s.ShiftLabel))
+                        .Where(s => s.SpecialtyRequirements.Any(r => r.SpecialtyId == userConstraint.SpecialtyId && r.RequiredTotalCount > 0))
+                        .OrderByDescending(s =>
+                        {
+                            var req = s.SpecialtyRequirements.First(r => r.SpecialtyId == userConstraint.SpecialtyId);
+                            var current = CountSpecialtyAssignments(solution, s.ShiftId, presenceDate, userConstraint.SpecialtyId, isOnCall: false);
+                            return req.RequiredTotalCount - current; // بیشترین جای خالی اول
+                        })
+                        .ToList();
+
+                    var targetShift = candidateShifts.FirstOrDefault();
+                    if (targetShift == null)
+                    {
+                        continue;
+                    }
+
+                    MakeRoomInShift(solution, targetShift, presenceDate, userConstraint);
+                    solution.AddAssignment(
+                        userConstraint.UserId,
+                        targetShift.ShiftId,
+                        presenceDate,
+                        targetShift.ShiftLabel,
+                        isOnCall: false);
+                }
+            }
+
+            // 4) تضمین حضور مدیر شیفت در شیفت‌های عصر/شب دارای الزام
+            var managerWarnings = EnsureShiftManagers(solution);
+
+            solution.Score = CalculateSolutionScore(solution);
+            solution.Violations.AddRange(managerWarnings);
+        }
+
+        /// <summary>
+        /// اگر ظرفیت تخصص کاربر در شیفت/روز پر باشد، یک انتساب غیرمحافظت‌شده حذف می‌کند تا جا باز شود.
+        /// </summary>
+        private void MakeRoomInShift(ShiftSolution solution, ShiftRequirement shiftReq, DateTime date, UserConstraint incomingUser)
+        {
+            var specialtyReq = shiftReq.SpecialtyRequirements
+                .FirstOrDefault(r => r.SpecialtyId == incomingUser.SpecialtyId);
+            if (specialtyReq == null || specialtyReq.RequiredTotalCount <= 0)
+            {
+                return;
+            }
+
+            var regulars = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                .Where(a => !a.IsOnCall && GetUserSpecialty(a.UserId) == incomingUser.SpecialtyId)
+                .ToList();
+
+            if (regulars.Count < specialtyReq.RequiredTotalCount)
+            {
+                return; // هنوز جا هست
+            }
+
+            var hasExplicitGender = specialtyReq.RequiredMaleCount > 0 || specialtyReq.RequiredFemaleCount > 0;
+
+            // ترجیحاً کسی حذف شود که هم‌جنسیت کاربر ورودی است (برای حفظ ترکیب جنسیتی)
+            var removable = regulars
+                .Where(a => !IsProtectedAssignment(a))
+                .OrderByDescending(a => !hasExplicitGender || GetUserGender(a.UserId) == incomingUser.Gender)
+                .FirstOrDefault();
+
+            if (removable != null)
+            {
+                solution.RemoveAssignment(removable.UserId, removable.ShiftId, removable.Date);
+            }
+        }
+
+        /// <summary>
+        /// برای هر شیفت عصر/شب دارای الزام مدیر، در صورت نبود مدیر، یک نیروی واجد شرایط جایگزین می‌کند.
+        /// </summary>
+        private List<string> EnsureShiftManagers(ShiftSolution solution)
+        {
+            var warnings = new List<string>();
+            foreach (var date in GetDateRange())
+            {
+                foreach (var shiftReq in _constraints.ShiftRequirements)
+                {
+                    if (!RequiresShiftManager(shiftReq.ShiftLabel))
+                    {
+                        continue;
+                    }
+
+                    var regulars = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                        .Where(a => !a.IsOnCall)
+                        .ToList();
+
+                    if (regulars.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    var hasManager = regulars.Any(a =>
+                        _constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)?.CanBeShiftManager == true);
+                    if (hasManager)
+                    {
+                        continue;
+                    }
+
+                    // جایگزینی یکی از نیروهای غیرمحافظت‌شده با یک کاربر واجد صلاحیت مدیریت
+                    var replaced = false;
+                    foreach (var occupant in regulars.Where(a => !IsProtectedAssignment(a)))
+                    {
+                        var occupantSpecialty = GetUserSpecialty(occupant.UserId);
+                        var occupantGender = GetUserGender(occupant.UserId);
+                        var specialtyReq = shiftReq.SpecialtyRequirements
+                            .FirstOrDefault(r => r.SpecialtyId == occupantSpecialty);
+                        var genderLocked = specialtyReq != null &&
+                            (specialtyReq.RequiredMaleCount > 0 || specialtyReq.RequiredFemaleCount > 0);
+
+                        var candidate = _constraints.UserConstraints
+                            .Where(u => u.CanBeShiftManager && u.IsActive)
+                            .Where(u => u.SpecialtyId == occupantSpecialty)
+                            .Where(u => !genderLocked || u.Gender == occupantGender)
+                            .Where(u => IsUserAvailableForShift(u, date, shiftReq.ShiftLabel))
+                            .Where(u => !solution.GetUserAssignments(u.UserId, date).Any())
+                            .OrderBy(u => solution.GetUserAllAssignments(u.UserId).Count)
+                            .FirstOrDefault();
+
+                        if (candidate != null)
+                        {
+                            solution.RemoveAssignment(occupant.UserId, occupant.ShiftId, occupant.Date);
+                            solution.AddAssignment(candidate.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall: false);
+                            replaced = true;
+                            break;
+                        }
+                    }
+
+                    if (!replaced)
+                    {
+                        warnings.Add(
+                            $"No eligible shift manager available for {shiftReq.ShiftLabel} shift on {date:yyyy-MM-dd}.");
+                    }
+                }
+            }
+
+            return warnings;
+        }
+
         private void RemoveConflictingDailyAssignments(ShiftSolution solution, int userId, DateTime date, int keepShiftId)
         {
             foreach (var assignment in solution.GetUserAssignments(userId, date).ToList())
@@ -929,8 +1145,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             // آنکال
             if (hasExplicitOnCallGender)
             {
-                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.OnCallMaleCount, UserGender.Male, isOnCall: true);
-                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.OnCallFemaleCount, UserGender.Female, isOnCall: true);
+                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId, specialtyReq.OnCallMaleCount, UserGender.Male, isOnCall: true);
+                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId, specialtyReq.OnCallFemaleCount, UserGender.Female, isOnCall: true);
                 if (specialtyReq.OnCallTotalCount > specialtyReq.OnCallMaleCount + specialtyReq.OnCallFemaleCount)
                 {
                     AssignRemainingBySpecialty(
@@ -948,8 +1164,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             // نیروی حاضر در محل
             if (hasExplicitRegularGender)
             {
-                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.RequiredMaleCount, UserGender.Male, isOnCall: false);
-                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.RequiredFemaleCount, UserGender.Female, isOnCall: false);
+                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId, specialtyReq.RequiredMaleCount, UserGender.Male, isOnCall: false);
+                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId, specialtyReq.RequiredFemaleCount, UserGender.Female, isOnCall: false);
                 if (specialtyReq.RequiredTotalCount > specialtyReq.RequiredMaleCount + specialtyReq.RequiredFemaleCount)
                 {
                     AssignRemainingBySpecialty(
@@ -970,6 +1186,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             List<UserConstraint> eligibleUsers,
             ShiftRequirement shiftReq,
             DateTime date,
+            int specialtyId,
             int requiredCount,
             UserGender gender,
             bool isOnCall)
@@ -979,7 +1196,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return;
             }
 
-            var assigned = 0;
+            // انتساب‌های ازپیش‌اعمال‌شده (مثلاً درخواست‌های تأییدشده) شمرده می‌شوند
+            var assigned = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                .Count(a => a.IsOnCall == isOnCall &&
+                            GetUserSpecialty(a.UserId) == specialtyId &&
+                            GetUserGender(a.UserId) == gender);
+
             var orderedUsers = OrderUsersForShiftAssignment(eligibleUsers, shiftReq.ShiftLabel, isOnCall);
             foreach (var user in orderedUsers.Where(u => u.Gender == gender))
             {
@@ -988,7 +1210,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     break;
                 }
 
-                if (!solution.HasAssignment(user.UserId, shiftReq.ShiftId, date))
+                if (!solution.HasAssignment(user.UserId, shiftReq.ShiftId, date) &&
+                    !HasDailyConflict(solution, user.UserId, date))
                 {
                     solution.AddAssignment(user.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall);
                     assigned++;
@@ -1013,12 +1236,33 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     break;
                 }
 
-                if (!solution.HasAssignment(user.UserId, shiftReq.ShiftId, date))
+                if (!solution.HasAssignment(user.UserId, shiftReq.ShiftId, date) &&
+                    !HasDailyConflict(solution, user.UserId, date))
                 {
                     solution.AddAssignment(user.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall);
                     current++;
                 }
             }
+        }
+
+        /// <summary>
+        /// آیا انتساب جدید در این روز باعث نقض قانون «یک شیفت در روز» می‌شود؟
+        /// </summary>
+        private bool HasDailyConflict(ShiftSolution solution, int userId, DateTime date)
+        {
+            var dailyCount = solution.GetUserAssignments(userId, date).Count;
+            if (dailyCount == 0)
+            {
+                return false;
+            }
+
+            if (_constraints.HardRules.ForbidDuplicateDailyAssignments)
+            {
+                return true;
+            }
+
+            return _constraints.HardRules.EnforceMaxShiftsPerDay &&
+                   dailyCount >= _constraints.GlobalConstraints.MaxShiftsPerDay;
         }
 
         private int CountSpecialtyAssignments(ShiftSolution solution, int shiftId, DateTime date, int specialtyId, bool isOnCall)
@@ -1125,7 +1369,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var eligibleUsers = _constraints.UserConstraints
                 .Where(u => u.SpecialtyId == specialtyId)
                 .Where(u => u.IsActive)
-                .Where(u => lockGender || u.Gender == assignmentGender)
+                .Where(u => !lockGender || u.Gender == assignmentGender)
                 .Where(u => IsUserAvailableForShift(u, assignment.Date, assignment.ShiftLabel))
                 .Where(u => !IsRequiredShiftSlotForOtherUser(u.UserId, assignment.Date, assignment.ShiftLabel))
                 .Where(u => !solution.HasAssignment(u.UserId, assignment.ShiftId, assignment.Date))
