@@ -161,7 +161,156 @@ public class SimulatedAnnealingSchedulerTests
         AssertNoDuplicateDailyAssignments(solution);
     }
 
-    private static ShiftConstraints BuildConstraints(
+        [Fact]
+        public void Optimize_RequiresShiftManager_OnEveningShift_WhenConfigured()
+        {
+            var start = new DateTime(2026, 8, 1);
+            var constraints = BuildConstraints(
+                start: start,
+                days: 5,
+                users: new[]
+                {
+                    User(1, UserGender.Male, canBeShiftManager: false),
+                    User(2, UserGender.Male, canBeShiftManager: true),
+                },
+                specialty: new SpecialtyRequirement
+                {
+                    SpecialtyId = 10,
+                    RequiredTotalCount = 1
+                });
+
+            constraints.ShiftRequirements[0].ShiftLabel = ShiftLabel.Evening;
+            constraints.GlobalConstraints.RequireManagerForEveningShift = true;
+
+            var solution = new SimulatedAnnealingScheduler(constraints, FastParameters).Optimize();
+
+            foreach (var date in DateRange(constraints))
+            {
+                var assignments = solution.GetShiftAssignments(1, date).Where(a => !a.IsOnCall).ToList();
+                if (assignments.Count == 0)
+                {
+                    continue;
+                }
+
+                Assert.Contains(assignments, a => constraints.UserConstraints.First(u => u.UserId == a.UserId).CanBeShiftManager);
+            }
+        }
+
+        [Fact]
+        public void Optimize_EnforcesApprovedOnShiftRequest_AsHardConstraint()
+        {
+            var date = new DateTime(2026, 8, 6);
+            var constraints = BuildConstraints(
+                start: date,
+                days: 1,
+                users: new[]
+                {
+                    User(1, UserGender.Male),
+                    User(2, UserGender.Male),
+                },
+                specialty: new SpecialtyRequirement
+                {
+                    SpecialtyId = 10,
+                    RequiredTotalCount = 1
+                });
+
+            constraints.UserConstraints[0].RequiredShiftSlots.Add(new ShiftSlotConstraint
+            {
+                Date = date,
+                ShiftLabel = ShiftLabel.Morning
+            });
+
+            var solution = new SimulatedAnnealingScheduler(constraints, FastParameters).Optimize();
+
+            Assert.True(solution.HasAssignment(1, 1, date));
+            Assert.Equal(1, solution.GetShiftAssignments(1, date).Single(a => !a.IsOnCall).UserId);
+        }
+
+        [Fact]
+        public void Optimize_BlocksUserOnFullDayOffRequest()
+        {
+            var date = new DateTime(2026, 8, 7);
+            var constraints = BuildConstraints(
+                start: date,
+                days: 1,
+                users: new[]
+                {
+                    User(1, UserGender.Male),
+                    User(2, UserGender.Male),
+                },
+                specialty: new SpecialtyRequirement
+                {
+                    SpecialtyId = 10,
+                    RequiredTotalCount = 1
+                });
+
+            constraints.UserConstraints[0].UnavailableDates.Add(date);
+
+            var solution = new SimulatedAnnealingScheduler(constraints, FastParameters).Optimize();
+
+            Assert.False(solution.GetUserAssignments(1, date).Any());
+        }
+
+        [Fact]
+        public void Optimize_BlocksOnlySpecificShift_OnPartialOffRequest()
+        {
+            var date = new DateTime(2026, 8, 8);
+            var constraints = new ShiftConstraints
+            {
+                DepartmentId = 1,
+                StartDate = date,
+                EndDate = date,
+                UserConstraints = new List<UserConstraint>
+                {
+                    User(1, UserGender.Male),
+                    User(2, UserGender.Male),
+                },
+                ShiftRequirements = new List<ShiftRequirement>
+                {
+                    new()
+                    {
+                        ShiftId = 1,
+                        ShiftLabel = ShiftLabel.Morning,
+                        DepartmentId = 1,
+                        DurationHours = 8,
+                        SpecialtyRequirements = new List<SpecialtyRequirement>
+                        {
+                            new() { SpecialtyId = 10, RequiredTotalCount = 1 }
+                        }
+                    },
+                    new()
+                    {
+                        ShiftId = 2,
+                        ShiftLabel = ShiftLabel.Evening,
+                        DepartmentId = 1,
+                        DurationHours = 8,
+                        SpecialtyRequirements = new List<SpecialtyRequirement>
+                        {
+                            new() { SpecialtyId = 10, RequiredTotalCount = 1 }
+                        }
+                    }
+                },
+                HardRules = new HardRuleSet
+                {
+                    ForbidDuplicateDailyAssignments = true,
+                    EnforceMaxShiftsPerDay = true,
+                    EnforceSpecialtyCapacity = true
+                },
+                GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 }
+            };
+
+            constraints.UserConstraints[0].UnavailableShiftSlots.Add(new ShiftSlotConstraint
+            {
+                Date = date,
+                ShiftLabel = ShiftLabel.Morning
+            });
+
+            var solution = new SimulatedAnnealingScheduler(constraints, FastParameters).Optimize();
+
+            Assert.False(solution.HasAssignment(1, 1, date));
+        }
+
+        private static ShiftConstraints BuildConstraints(
         DateTime start,
         int days,
         UserConstraint[] users,
@@ -201,12 +350,13 @@ public class SimulatedAnnealingSchedulerTests
         };
     }
 
-    private static UserConstraint User(int id, UserGender gender) => new()
+    private static UserConstraint User(int id, UserGender gender, bool canBeShiftManager = false) => new()
     {
         UserId = id,
         Gender = gender,
         SpecialtyId = 10,
         IsActive = true,
+        CanBeShiftManager = canBeShiftManager,
         MaxConsecutiveShifts = 7,
         MinRestDaysBetweenShifts = 0,
         MaxShiftsPerWeek = 7

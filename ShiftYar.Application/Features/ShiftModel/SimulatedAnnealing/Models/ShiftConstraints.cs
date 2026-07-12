@@ -36,7 +36,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public UserGender Gender { get; set; }
         public int SpecialtyId { get; set; }
         public string SpecialtyName { get; set; } = string.Empty;
-        public List<DateTime> UnavailableDates { get; set; } = new List<DateTime>();      //تاریخ‌های غیرقابل دسترس
+        public List<DateTime> UnavailableDates { get; set; } = new List<DateTime>();      //تاریخ‌های غیرقابل دسترس (کل روز)
+        public List<ShiftSlotConstraint> UnavailableShiftSlots { get; set; } = new List<ShiftSlotConstraint>(); // عدم حضور در شیفت مشخص
+        public List<ShiftSlotConstraint> RequiredShiftSlots { get; set; } = new List<ShiftSlotConstraint>(); // حضور قطعی در شیفت مشخص
+        public List<DateTime> RequiredPresenceDates { get; set; } = new List<DateTime>(); // حضور قطعی حداقل در یک شیفت آن روز
         public List<ShiftLabel> PreferredShifts { get; set; } = new List<ShiftLabel>();   //شیفت‌های ترجیحی
         public List<ShiftLabel> UnwantedShifts { get; set; } = new List<ShiftLabel>();    //شیفت‌های ناخواسته
         public int MaxConsecutiveShifts { get; set; } = 3;    //حداکثر شیفت‌های متوالی
@@ -111,7 +114,18 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public bool PreferSpecialtyMatch { get; set; } = true;  //مطابقت با تخصص
         public int MaxShiftsPerDay { get; set; } = 1;   //حداکثر شیفت در روز
         public bool AllowWeekendShifts { get; set; } = true;    //مجاز کردن شیفت‌های آخر هفته
-        public bool RequireShiftManager { get; set; } = true;   //نیاز به مدیر شیفت
+        public bool RequireShiftManager { get; set; } = true;   //نیاز به مدیر شیفت (legacy)
+        public bool RequireManagerForEveningShift { get; set; } // الزام حضور مدیر در شیفت عصر
+        public bool RequireManagerForNightShift { get; set; }   // الزام حضور مدیر در شیفت شب
+    }
+
+    /// <summary>
+    /// قید حضور/عدم‌حضور در یک شیفت مشخص در تاریخ معین
+    /// </summary>
+    public class ShiftSlotConstraint
+    {
+        public DateTime Date { get; set; }
+        public ShiftLabel ShiftLabel { get; set; }
     }
 
 

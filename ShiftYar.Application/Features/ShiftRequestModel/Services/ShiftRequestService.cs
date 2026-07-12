@@ -4,14 +4,17 @@ using ShiftYar.Application.Common.Models.ResponseModel;
 using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.DTOs.ShiftModel;
 using ShiftYar.Application.DTOs.ShiftModel.ShiftRequestModel;
+using ShiftYar.Application.Features.DepartmentModel.Filters;
 using ShiftYar.Application.Features.ShiftModel.Filters;
 using ShiftYar.Application.Features.ShiftRequestModel.Filters;
 using ShiftYar.Application.Interfaces.Persistence;
 using ShiftYar.Application.Interfaces.ShiftRequestModel;
 using ShiftYar.Domain.Entities.DepartmentModel;
+using ShiftYar.Domain.Entities.ShiftModel;
 using ShiftYar.Domain.Entities.ShiftRequestModel;
 using ShiftYar.Domain.Entities.UserModel;
 using ShiftYar.Domain.Enums.ShiftRequestModel;
+using ShiftYar.Domain.Enums.ShiftModel;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -26,14 +29,25 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
         private readonly IEfRepository<ShiftRequest> _repository;
         private readonly IEfRepository<User> _repositoryUser;
         private readonly IEfRepository<Department> _repositorDepartment;
+        private readonly IEfRepository<DepartmentSchedulingSettings> _deptSettingsRepository;
+        private readonly IEfRepository<Shift> _shiftRepository;
         private readonly IMapper _mapper;
         private readonly ILogger<ShiftRequestService> _logger;
 
-        public ShiftRequestService(IEfRepository<ShiftRequest> repository, IEfRepository<User> repositoryUser, IEfRepository<Department> repositorDepartment, IMapper mapper, ILogger<ShiftRequestService> logger)
+        public ShiftRequestService(
+            IEfRepository<ShiftRequest> repository,
+            IEfRepository<User> repositoryUser,
+            IEfRepository<Department> repositorDepartment,
+            IEfRepository<DepartmentSchedulingSettings> deptSettingsRepository,
+            IEfRepository<Shift> shiftRepository,
+            IMapper mapper,
+            ILogger<ShiftRequestService> logger)
         {
             _repository = repository;
             _repositoryUser = repositoryUser;
             _repositorDepartment = repositorDepartment;
+            _deptSettingsRepository = deptSettingsRepository;
+            _shiftRepository = shiftRepository;
             _mapper = mapper;
             _logger = logger;
         }
@@ -170,6 +184,15 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 if (entity.Status != RequestStatus.Pending)
                     return ApiResponse<ShiftRequestDtoGet>.Fail("درخواست قبلاً بررسی شده است.");
 
+                if (dto.Status == RequestStatus.Approved)
+                {
+                    var validationError = await ValidateApprovalAsync(entity);
+                    if (validationError != null)
+                    {
+                        return ApiResponse<ShiftRequestDtoGet>.Fail(validationError);
+                    }
+                }
+
                 entity.Status = dto.Status;
                 entity.SupervisorComment = dto.SupervisorComment;
                 entity.ApprovalDate = DateTime.Now;
@@ -276,6 +299,70 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
             {
                 throw new Exception("سرویس دریافت درخواست های شیفت با خطا مواجه شد : " + ex.Message);
             }
+        }
+
+        private async Task<string?> ValidateApprovalAsync(ShiftRequest entity)
+        {
+            if (entity.RequestAction != RequestAction.RequestToBeOnShift ||
+                entity.RequestType != RequestType.SpecificShift ||
+                !entity.ShiftLabel.HasValue ||
+                entity.User == null)
+            {
+                return null;
+            }
+
+            if (entity.User.CanBeShiftManager == true)
+            {
+                return null;
+            }
+
+            if (!entity.User.DepartmentId.HasValue)
+            {
+                return null;
+            }
+
+            var (settings, _) = await _deptSettingsRepository.GetByFilterAsync(
+                new DepartmentSchedulingSettingsFilter
+                {
+                    DepartmentId = entity.User.DepartmentId.Value,
+                    PageNumber = 1,
+                    PageSize = 1
+                });
+
+            var deptSettings = settings.FirstOrDefault();
+            var managerRequired = entity.ShiftLabel.Value switch
+            {
+                ShiftEnums.ShiftLabel.Evening => deptSettings?.RequireManagerForEveningShift == true,
+                ShiftEnums.ShiftLabel.Night => deptSettings?.RequireManagerForNightShift == true,
+                _ => false
+            };
+
+            if (!managerRequired || !entity.User.SpecialtyId.HasValue)
+            {
+                return null;
+            }
+
+            var (shifts, _) = await _shiftRepository.GetByFilterAsync(
+                new ShiftFilter
+                {
+                    DepartmentId = entity.User.DepartmentId.Value,
+                    PageNumber = 1,
+                    PageSize = 100
+                },
+                "RequiredSpecialties");
+
+            foreach (var shift in shifts.Where(s => s.Label == entity.ShiftLabel))
+            {
+                var specialtyRequirement = shift.RequiredSpecialties?
+                    .FirstOrDefault(rs => rs.SpecialtyId == entity.User.SpecialtyId);
+
+                if (specialtyRequirement != null && (specialtyRequirement.RequiredTottalCount ?? 0) == 1)
+                {
+                    return "این شیفت تک‌نفره است و طبق تنظیمات دپارتمان باید توسط فردی با صلاحیت مدیریت شیفت پوشش داده شود. لطفاً درخواست را رد کنید یا ابتدا صلاحیت «مدیر شیفت» را برای این کاربر فعال کنید.";
+                }
+            }
+
+            return null;
         }
 
     }

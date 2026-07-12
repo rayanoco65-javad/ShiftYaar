@@ -1050,6 +1050,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     constraints.SoftWeights.FairShiftCountBalanceWeight = deptSettingEarly.FairShiftCountBalanceWeight ?? 1.0;
                     constraints.SoftWeights.ExtraShiftRotationWeight = deptSettingEarly.ExtraShiftRotationWeight ?? 1.0;
                     constraints.SoftWeights.ShiftLabelBalanceWeight = deptSettingEarly.ShiftLabelBalanceWeight ?? 1.0;
+
+                    constraints.GlobalConstraints.RequireManagerForEveningShift = deptSettingEarly.RequireManagerForEveningShift ?? false;
+                    constraints.GlobalConstraints.RequireManagerForNightShift = deptSettingEarly.RequireManagerForNightShift ?? false;
                 }
 
                 // بارگذاری کاربران دپارتمان
@@ -1231,20 +1234,32 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                     if (req.RequestAction == Domain.Enums.ShiftRequestModel.RequestAction.RequestToBeOffShift)
                     {
-                        // کاربر این تاریخ را نمی‌خواهد سر شیفت باشد
-                        if (!uc.UnavailableDates.Contains(date)) uc.UnavailableDates.Add(date);
-                    }
-                    else if (req.RequestAction == Domain.Enums.ShiftRequestModel.RequestAction.RequestToBeOnShift)
-                    {
-                        // کاربر این شیفت را ترجیح می‌دهد (اگر FullDay است، می‌توانیم هر سه را ترجیح دهیم)
                         if (req.RequestType == Domain.Enums.ShiftRequestModel.RequestType.FullDay)
                         {
-                            foreach (var s in new[] { ShiftLabel.Morning, ShiftLabel.Evening, ShiftLabel.Night })
-                                if (!uc.PreferredShifts.Contains(s)) uc.PreferredShifts.Add(s);
+                            if (!uc.UnavailableDates.Contains(date)) uc.UnavailableDates.Add(date);
                         }
                         else
                         {
-                            if (!uc.PreferredShifts.Contains(label)) uc.PreferredShifts.Add(label);
+                            var slot = new ShiftSlotConstraint { Date = date, ShiftLabel = label };
+                            if (!uc.UnavailableShiftSlots.Any(s => s.Date == slot.Date && s.ShiftLabel == slot.ShiftLabel))
+                            {
+                                uc.UnavailableShiftSlots.Add(slot);
+                            }
+                        }
+                    }
+                    else if (req.RequestAction == Domain.Enums.ShiftRequestModel.RequestAction.RequestToBeOnShift)
+                    {
+                        if (req.RequestType == Domain.Enums.ShiftRequestModel.RequestType.FullDay)
+                        {
+                            if (!uc.RequiredPresenceDates.Contains(date)) uc.RequiredPresenceDates.Add(date);
+                        }
+                        else
+                        {
+                            var slot = new ShiftSlotConstraint { Date = date, ShiftLabel = label };
+                            if (!uc.RequiredShiftSlots.Any(s => s.Date == slot.Date && s.ShiftLabel == slot.ShiftLabel))
+                            {
+                                uc.RequiredShiftSlots.Add(slot);
+                            }
                         }
                     }
                 }
