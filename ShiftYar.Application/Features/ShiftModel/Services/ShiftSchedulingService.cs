@@ -556,6 +556,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             var solution = scheduler.Optimize();
             var statistics = scheduler.GetStatistics();
 
+            scheduler.ApplyMandatoryConstraints(solution);
+
             var result = await ConvertSolutionToResultAsync(solution, constraints);
             result.AlgorithmUsed = SchedulingAlgorithm.SimulatedAnnealing;
             result.AlgorithmStatus = "Completed";
@@ -585,9 +587,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
             var scheduler = new OrToolsCPSatScheduler(ortoolsConstraints, parameters);
             var solution = scheduler.Optimize();
-            var statistics = scheduler.GetStatistics();
 
-            var result = await ConvertOrToolsSolutionToResultAsync(solution, ortoolsConstraints);
+            var saSolution = ConvertOrToolsToShiftSolution(solution);
+            ApplyMandatoryConstraints(saSolution, constraints);
+
+            var result = await ConvertSolutionToResultAsync(saSolution, constraints);
             result.AlgorithmUsed = SchedulingAlgorithm.OrToolsCPSat;
             result.AlgorithmStatus = solution.Status.ToString();
             result.ExecutionTime = solution.SolveTime;
@@ -1212,22 +1216,53 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 }
 
                 // اعمال درخواست‌های شیفت تأییدشده (ShiftRequest) به قیود کاربر
-                var approvedRequests = await _shiftRequestRepository.GetByFilterAsync(
-                    filter: new Features.ShiftRequestModel.Filters.ShiftRequestFilter(x =>
+                var scheduleStartDate = DateConverter.ConvertToGregorianDate(request.StartDate).Date;
+                var scheduleEndDate = DateConverter.ConvertToGregorianDate(request.EndDate).Date;
+                var approvedRequestFilter = new Features.ShiftRequestModel.Filters.ShiftRequestFilter(x =>
                         x.Status == Domain.Enums.ShiftRequestModel.RequestStatus.Approved
                         && x.User != null
                         && x.User.DepartmentId == request.DepartmentId
-                        && x.RequestDate >= DateConverter.ConvertToGregorianDate(request.StartDate)
-                        && x.RequestDate <= DateConverter.ConvertToGregorianDate(request.EndDate)
-                    ),
+                        && x.RequestDate != null
+                        && x.RequestDate.Value.Date >= scheduleStartDate
+                        && x.RequestDate.Value.Date <= scheduleEndDate
+                    )
+                {
+                    PageNumber = 1,
+                    PageSize = 5000 // همه درخواست‌های تأییدشده بازه باید بارگذاری شوند (پیش‌فرض ۱۰ بود)
+                };
+
+                var approvedRequests = await _shiftRequestRepository.GetByFilterAsync(
+                    filter: approvedRequestFilter,
                     includes: new[] { "User" }
                 );
+
+                _logger.LogInformation(
+                    "LoadConstraints: Loaded {LoadedCount}/{TotalCount} approved shift request(s) for DepartmentId={DepartmentId} in range {StartDate}..{EndDate}",
+                    approvedRequests.Items.Count,
+                    approvedRequests.TotalCount,
+                    request.DepartmentId,
+                    scheduleStartDate.ToString("yyyy-MM-dd"),
+                    scheduleEndDate.ToString("yyyy-MM-dd"));
+
+                if (approvedRequests.TotalCount > approvedRequests.Items.Count)
+                {
+                    _logger.LogWarning(
+                        "LoadConstraints: Approved shift requests were truncated by pagination ({Loaded}/{Total}). Increase PageSize.",
+                        approvedRequests.Items.Count,
+                        approvedRequests.TotalCount);
+                }
 
                 foreach (var req in approvedRequests.Items)
                 {
                     if (req.UserId == null || req.RequestDate == null) continue;
                     var uc = constraints.UserConstraints.FirstOrDefault(u => u.UserId == req.UserId);
-                    if (uc == null) continue;
+                    if (uc == null)
+                    {
+                        _logger.LogWarning(
+                            "LoadConstraints: Skipping approved shift request {RequestId} for UserId={UserId} (user not active or not in department)",
+                            req.Id, req.UserId);
+                        continue;
+                    }
 
                     var date = req.RequestDate.Value.Date;
                     var label = req.ShiftLabel ?? ShiftLabel.Morning;
@@ -1236,7 +1271,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     {
                         if (req.RequestType == Domain.Enums.ShiftRequestModel.RequestType.FullDay)
                         {
-                            if (!uc.UnavailableDates.Contains(date)) uc.UnavailableDates.Add(date);
+                            if (!uc.UnavailableDates.Any(d => d.Date == date)) uc.UnavailableDates.Add(date);
                         }
                         else
                         {
@@ -1251,7 +1286,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     {
                         if (req.RequestType == Domain.Enums.ShiftRequestModel.RequestType.FullDay)
                         {
-                            if (!uc.RequiredPresenceDates.Contains(date)) uc.RequiredPresenceDates.Add(date);
+                            if (!uc.RequiredPresenceDates.Any(d => d.Date == date)) uc.RequiredPresenceDates.Add(date);
                         }
                         else
                         {
@@ -1607,21 +1642,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         /// </summary>
         private async Task<ShiftSchedulingResultDto> ConvertHybridSolutionToResultAsync(HybridSolution solution, ShiftConstraints constraints)
         {
-            var result = new ShiftSchedulingResultDto
-            {
-                AlgorithmUsed = SchedulingAlgorithm.Hybrid
-            };
+            var saSolution = ExtractShiftSolution(solution.FinalSolution);
+            ApplyMandatoryConstraints(saSolution, constraints);
 
-            // تبدیل راه‌حل نهایی
-            if (solution.FinalSolution is OrToolsShiftSolution ortoolsSolution)
-            {
-                var ortoolsConstraints = await ConvertToOrToolsConstraintsAsync(constraints, new ShiftSchedulingRequestDto());
-                result = await ConvertOrToolsSolutionToResultAsync(ortoolsSolution, ortoolsConstraints);
-            }
-            else if (solution.FinalSolution is ShiftSolution saSolution)
-            {
-                result = await ConvertSolutionToResultAsync(saSolution, constraints);
-            }
+            var result = await ConvertSolutionToResultAsync(saSolution, constraints);
+            result.AlgorithmUsed = SchedulingAlgorithm.Hybrid;
 
             // اضافه کردن اطلاعات ترکیبی
             result.HybridResult = new HybridResultDto
@@ -1637,6 +1662,38 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             };
 
             return result;
+        }
+
+        private static ShiftSolution ExtractShiftSolution(object? finalSolution)
+        {
+            return finalSolution switch
+            {
+                ShiftSolution sa => sa.Clone(),
+                OrToolsShiftSolution ortools => ConvertOrToolsToShiftSolution(ortools),
+                _ => new ShiftSolution()
+            };
+        }
+
+        private static ShiftSolution ConvertOrToolsToShiftSolution(OrToolsShiftSolution ortoolsSolution)
+        {
+            var saSolution = new ShiftSolution();
+            foreach (var assignment in ortoolsSolution.Assignments.Values)
+            {
+                saSolution.AddAssignment(
+                    assignment.UserId,
+                    assignment.ShiftId,
+                    assignment.Date,
+                    assignment.ShiftLabel,
+                    assignment.IsOnCall);
+            }
+
+            return saSolution;
+        }
+
+        private void ApplyMandatoryConstraints(ShiftSolution solution, ShiftConstraints constraints)
+        {
+            var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters());
+            scheduler.ApplyMandatoryConstraints(solution);
         }
 
 
@@ -1680,6 +1737,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             var solution = scheduler.Optimize();
             var statistics = scheduler.GetStatistics();
 
+            scheduler.ApplyMandatoryConstraints(solution);
+
             var result = await ConvertSolutionToResultAsync(solution, constraints);
             result.AlgorithmUsed = SchedulingAlgorithm.SimulatedAnnealing;
             result.AlgorithmStatus = "Completed";
@@ -1715,9 +1774,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             var solution = request.AllowExtendedSolverTime
                 ? RunCpuBoundWithTimeout(() => scheduler.Optimize(), solveTimeout)
                 : scheduler.Optimize();
-            var statistics = scheduler.GetStatistics();
 
-            var result = await ConvertOrToolsSolutionToResultAsync(solution, ortoolsConstraints);
+            var saSolution = ConvertOrToolsToShiftSolution(solution);
+            ApplyMandatoryConstraints(saSolution, constraints);
+
+            var result = await ConvertSolutionToResultAsync(saSolution, constraints);
             result.AlgorithmUsed = SchedulingAlgorithm.OrToolsCPSat;
             result.AlgorithmStatus = solution.Status.ToString();
             result.ExecutionTime = solution.SolveTime;

@@ -533,7 +533,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     continue;
                 }
 
-                if (userConstraint.UnavailableDates.Contains(assignment.Date.Date))
+                if (userConstraint.UnavailableDates.Any(d => d.Date == assignment.Date.Date))
                 {
                     return false;
                 }
@@ -812,20 +812,15 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
-                    foreach (var shiftReq in _constraints.ShiftRequirements)
+                    foreach (var shiftReq in _constraints.ShiftRequirements
+                                 .Where(s => IsUserAvailableForShift(userConstraint, presenceDate, s.ShiftLabel))
+                                 .OrderByDescending(s =>
+                                 {
+                                     var req = s.SpecialtyRequirements
+                                         .FirstOrDefault(r => r.SpecialtyId == userConstraint.SpecialtyId);
+                                     return req?.RequiredTotalCount ?? 0;
+                                 }))
                     {
-                        if (!IsUserAvailableForShift(userConstraint, presenceDate, shiftReq.ShiftLabel))
-                        {
-                            continue;
-                        }
-
-                        var specialtyReq = shiftReq.SpecialtyRequirements
-                            .FirstOrDefault(s => s.SpecialtyId == userConstraint.SpecialtyId);
-                        if (specialtyReq == null || specialtyReq.RequiredTotalCount <= 0)
-                        {
-                            continue;
-                        }
-
                         RemoveConflictingDailyAssignments(solution, userConstraint.UserId, presenceDate, shiftReq.ShiftId);
                         solution.AddAssignment(
                             userConstraint.UserId,
@@ -840,9 +835,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         }
 
         /// <summary>
-        /// ترمیم نهایی راه‌حل: تضمین رعایت درخواست‌های تأییدشده (حضور/عدم‌حضور)
-        /// و الزام حضور مدیر شیفت، حتی اگر حلقه SA راه‌حل کاملاً معتبر پیدا نکرده باشد.
+        /// اعمال قطعی قیود درخواست‌های تأییدشده و الزام مدیر شیفت روی راه‌حل نهایی.
         /// </summary>
+        public void ApplyMandatoryConstraints(ShiftSolution solution)
+        {
+            EnforceHardRequestConstraints(solution);
+        }
+
         private void EnforceHardRequestConstraints(ShiftSolution solution)
         {
             // 1) حذف انتساب‌های کاربران در تاریخ/شیفت‌های غیرمجاز (درخواست‌های عدم حضور تأییدشده)
@@ -908,12 +907,16 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     // اولویت با شیفتی که ظرفیت خالی دارد؛ در غیر این صورت جایگزینی
                     var candidateShifts = _constraints.ShiftRequirements
                         .Where(s => IsUserAvailableForShift(userConstraint, presenceDate, s.ShiftLabel))
-                        .Where(s => s.SpecialtyRequirements.Any(r => r.SpecialtyId == userConstraint.SpecialtyId && r.RequiredTotalCount > 0))
                         .OrderByDescending(s =>
                         {
-                            var req = s.SpecialtyRequirements.First(r => r.SpecialtyId == userConstraint.SpecialtyId);
+                            var req = s.SpecialtyRequirements.FirstOrDefault(r => r.SpecialtyId == userConstraint.SpecialtyId);
+                            if (req == null || req.RequiredTotalCount <= 0)
+                            {
+                                return 0;
+                            }
+
                             var current = CountSpecialtyAssignments(solution, s.ShiftId, presenceDate, userConstraint.SpecialtyId, isOnCall: false);
-                            return req.RequiredTotalCount - current; // بیشترین جای خالی اول
+                            return req.RequiredTotalCount - current;
                         })
                         .ToList();
 
@@ -1074,7 +1077,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private bool IsUserAvailableForShift(UserConstraint user, DateTime date, ShiftLabel shiftLabel)
         {
-            if (user.UnavailableDates.Contains(date.Date))
+            if (user.UnavailableDates.Any(d => d.Date == date.Date))
             {
                 return false;
             }
@@ -1115,7 +1118,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return true;
             }
 
-            return user.RequiredPresenceDates.Contains(assignment.Date.Date);
+            return user.RequiredPresenceDates.Any(d => d.Date == assignment.Date.Date);
         }
 
         private IEnumerable<UserConstraint> OrderUsersForShiftAssignment(
