@@ -205,12 +205,12 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             {
                 await ReportJobProgressAsync(backgroundJobId, "Validating constraints...");
 
-                // تبدیل تاریخ‌های شمسی به میلادی
+                // تبدیل تاریخ‌های شمسی به میلادی (نرمال‌شده به ابتدای روز، Unspecified)
                 var internalRequest = new ShiftSchedulingRequestInternalDto
                 {
                     DepartmentId = request.DepartmentId,
-                    StartDate = DateConverter.ConvertToGregorianDate(request.StartDate),
-                    EndDate = DateConverter.ConvertToGregorianDate(request.EndDate),
+                    StartDate = DateTime.SpecifyKind(DateConverter.ConvertToGregorianDate(request.StartDate).Date, DateTimeKind.Unspecified),
+                    EndDate = DateTime.SpecifyKind(DateConverter.ConvertToGregorianDate(request.EndDate).Date, DateTimeKind.Unspecified),
                     Algorithm = request.Algorithm,
                     AllowExtendedSolverTime = isBackgroundExecution
                 };
@@ -1246,45 +1246,44 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 }
 
                 // اعمال درخواست‌های شیفت تأییدشده (ShiftRequest) به قیود کاربر
-                var scheduleStartDate = DateConverter.ConvertToGregorianDate(request.StartDate).Date;
-                var scheduleEndDate = DateConverter.ConvertToGregorianDate(request.EndDate).Date;
-                var approvedRequestFilter = new Features.ShiftRequestModel.Filters.ShiftRequestFilter(x =>
-                        x.Status == Domain.Enums.ShiftRequestModel.RequestStatus.Approved
-                        && x.User != null
-                        && x.User.DepartmentId == request.DepartmentId
-                        && x.RequestDate != null
-                        && x.RequestDate.Value.Date >= scheduleStartDate
-                        && x.RequestDate.Value.Date <= scheduleEndDate
-                    )
-                {
-                    PageNumber = 1,
-                    PageSize = 5000 // همه درخواست‌های تأییدشده بازه باید بارگذاری شوند (پیش‌فرض ۱۰ بود)
-                };
+                // فیلتر با UserId های دپارتمان + بازه نیمه‌باز، بدون .Date و بدون اتکا به navigation User
+                // (قبلاً .Date / User.DepartmentId در EF گاهی باعث افتادن درخواست‌ها می‌شد)
+                var scheduleStartDate = constraints.StartDate.Date;
+                var scheduleEndExclusive = constraints.EndDate.Date.AddDays(1);
+                var departmentUserIds = constraints.UserConstraints
+                    .Select(u => u.UserId)
+                    .Where(id => id > 0)
+                    .ToHashSet();
 
-                var approvedRequests = await _shiftRequestRepository.GetByFilterAsync(
-                    filter: approvedRequestFilter,
-                    includes: new[] { "User" }
+                var (approvedRequestItems, approvedRequestTotal) = await _shiftRequestRepository.GetByFilterAsync(
+                    filter: new Application.Common.Filters.SimpleFilter<ShiftYar.Domain.Entities.ShiftRequestModel.ShiftRequest>(x =>
+                        x.Status == Domain.Enums.ShiftRequestModel.RequestStatus.Approved
+                        && x.UserId != null
+                        && departmentUserIds.Contains(x.UserId.Value)
+                        && x.RequestDate != null
+                        && x.RequestDate >= scheduleStartDate
+                        && x.RequestDate < scheduleEndExclusive)
                 );
 
                 _logger.LogInformation(
-                    "LoadConstraints: Loaded {LoadedCount}/{TotalCount} approved shift request(s) for DepartmentId={DepartmentId} in range {StartDate}..{EndDate}",
-                    approvedRequests.Items.Count,
-                    approvedRequests.TotalCount,
+                    "LoadConstraints: Loaded {LoadedCount}/{TotalCount} approved shift request(s) for DepartmentId={DepartmentId} in range {StartDate}..{EndDate} (userIds={UserCount})",
+                    approvedRequestItems.Count,
+                    approvedRequestTotal,
                     request.DepartmentId,
                     scheduleStartDate.ToString("yyyy-MM-dd"),
-                    scheduleEndDate.ToString("yyyy-MM-dd"));
+                    constraints.EndDate.ToString("yyyy-MM-dd"),
+                    departmentUserIds.Count);
 
-                if (approvedRequests.TotalCount > approvedRequests.Items.Count)
-                {
-                    _logger.LogWarning(
-                        "LoadConstraints: Approved shift requests were truncated by pagination ({Loaded}/{Total}). Increase PageSize.",
-                        approvedRequests.Items.Count,
-                        approvedRequests.TotalCount);
-                }
+                int appliedOffFull = 0, appliedOffSlot = 0, appliedOnFull = 0, appliedOnSlot = 0, skippedIncomplete = 0;
 
-                foreach (var req in approvedRequests.Items)
+                foreach (var req in approvedRequestItems)
                 {
-                    if (req.UserId == null || req.RequestDate == null) continue;
+                    if (req.UserId == null || req.RequestDate == null)
+                    {
+                        skippedIncomplete++;
+                        continue;
+                    }
+
                     var uc = constraints.UserConstraints.FirstOrDefault(u => u.UserId == req.UserId);
                     if (uc == null)
                     {
@@ -1294,21 +1293,43 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         continue;
                     }
 
+                    if (!req.RequestAction.HasValue || !req.RequestType.HasValue)
+                    {
+                        skippedIncomplete++;
+                        _logger.LogWarning(
+                            "LoadConstraints: Skipping approved shift request {RequestId} — RequestAction/RequestType is null",
+                            req.Id);
+                        continue;
+                    }
+
                     var date = req.RequestDate.Value.Date;
-                    var label = req.ShiftLabel ?? ShiftLabel.Morning;
 
                     if (req.RequestAction == Domain.Enums.ShiftRequestModel.RequestAction.RequestToBeOffShift)
                     {
                         if (req.RequestType == Domain.Enums.ShiftRequestModel.RequestType.FullDay)
                         {
-                            if (!uc.UnavailableDates.Any(d => d.Date == date)) uc.UnavailableDates.Add(date);
+                            if (!uc.UnavailableDates.Any(d => d.Date == date))
+                            {
+                                uc.UnavailableDates.Add(date);
+                                appliedOffFull++;
+                            }
                         }
                         else
                         {
-                            var slot = new ShiftSlotConstraint { Date = date, ShiftLabel = label };
-                            if (!uc.UnavailableShiftSlots.Any(s => s.Date == slot.Date && s.ShiftLabel == slot.ShiftLabel))
+                            if (!req.ShiftLabel.HasValue)
+                            {
+                                skippedIncomplete++;
+                                _logger.LogWarning(
+                                    "LoadConstraints: Skipping SpecificShift OFF request {RequestId} — ShiftLabel is null",
+                                    req.Id);
+                                continue;
+                            }
+
+                            var slot = new ShiftSlotConstraint { Date = date, ShiftLabel = req.ShiftLabel.Value };
+                            if (!uc.UnavailableShiftSlots.Any(s => s.Date.Date == slot.Date.Date && s.ShiftLabel == slot.ShiftLabel))
                             {
                                 uc.UnavailableShiftSlots.Add(slot);
+                                appliedOffSlot++;
                             }
                         }
                     }
@@ -1316,18 +1337,36 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     {
                         if (req.RequestType == Domain.Enums.ShiftRequestModel.RequestType.FullDay)
                         {
-                            if (!uc.RequiredPresenceDates.Any(d => d.Date == date)) uc.RequiredPresenceDates.Add(date);
+                            if (!uc.RequiredPresenceDates.Any(d => d.Date == date))
+                            {
+                                uc.RequiredPresenceDates.Add(date);
+                                appliedOnFull++;
+                            }
                         }
                         else
                         {
-                            var slot = new ShiftSlotConstraint { Date = date, ShiftLabel = label };
-                            if (!uc.RequiredShiftSlots.Any(s => s.Date == slot.Date && s.ShiftLabel == slot.ShiftLabel))
+                            if (!req.ShiftLabel.HasValue)
+                            {
+                                skippedIncomplete++;
+                                _logger.LogWarning(
+                                    "LoadConstraints: Skipping SpecificShift ON request {RequestId} — ShiftLabel is null",
+                                    req.Id);
+                                continue;
+                            }
+
+                            var slot = new ShiftSlotConstraint { Date = date, ShiftLabel = req.ShiftLabel.Value };
+                            if (!uc.RequiredShiftSlots.Any(s => s.Date.Date == slot.Date.Date && s.ShiftLabel == slot.ShiftLabel))
                             {
                                 uc.RequiredShiftSlots.Add(slot);
+                                appliedOnSlot++;
                             }
                         }
                     }
                 }
+
+                _logger.LogInformation(
+                    "LoadConstraints: Applied approved requests — OffFull={OffFull}, OffSlot={OffSlot}, OnFull={OnFull}, OnSlot={OnSlot}, SkippedIncomplete={Skipped}",
+                    appliedOffFull, appliedOffSlot, appliedOnFull, appliedOnSlot, skippedIncomplete);
 
                 // بارگذاری سابقه اخیر برای عدالت
                 try
@@ -1348,7 +1387,6 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         }
                     );
                     var lookbackDateSet = new HashSet<DateTime>(lookbackDates.Where(d => d.Date.HasValue).Select(d => d.Date.Value.Date));
-                    var departmentUserIds = new HashSet<int>(departmentUsers.Where(u => u.Id.HasValue).Select(u => u.Id!.Value));
 
                     var (prevAssignments, _) = await _shiftAssignmentRepository.GetByFilterAsync(
                         new Application.Common.Filters.SimpleFilter<ShiftAssignment>(a =>
@@ -1737,11 +1775,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         /// </summary>
         private async Task<ShiftConstraints> LoadConstraintsInternalAsync(ShiftSchedulingRequestInternalDto request)
         {
+            // تاریخ‌ها را با .Date نرمال و به‌صورت Unspecified تبدیل می‌کنیم تا round-trip شمسی/میلادی روز را جابه‌جا نکند
+            var start = DateTime.SpecifyKind(request.StartDate.Date, DateTimeKind.Unspecified);
+            var end = DateTime.SpecifyKind(request.EndDate.Date, DateTimeKind.Unspecified);
+
             var dto = new ShiftSchedulingRequestDto
             {
                 DepartmentId = request.DepartmentId,
-                StartDate = ToPersianDateString(request.StartDate),
-                EndDate = ToPersianDateString(request.EndDate),
+                StartDate = ToPersianDateString(start),
+                EndDate = ToPersianDateString(end),
                 Algorithm = request.Algorithm
             };
 
