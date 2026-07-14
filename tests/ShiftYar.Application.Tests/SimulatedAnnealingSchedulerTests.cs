@@ -463,7 +463,64 @@ public class SimulatedAnnealingSchedulerTests
                 Assert.True(
                     solution.GetShiftAssignments(2, eveningRequired).Any(a => a.UserId == 1 && !a.IsOnCall),
                     $"Run {run}: required Evening assignment missing");
+
+                Assert.Empty(ApprovedRequestGuard.GetUnmetViolations(solution, constraints));
             }
+        }
+
+        [Fact]
+        public void ApprovedRequestGuard_ForceApply_AlwaysHonorsRequests_EvenFromEmptySolution()
+        {
+            var day = new DateTime(2026, 8, 25);
+            var constraints = BuildConstraints(
+                start: day,
+                days: 3,
+                users: new[]
+                {
+                    User(1, UserGender.Male),
+                    User(2, UserGender.Male),
+                    User(3, UserGender.Female),
+                    User(4, UserGender.Female),
+                },
+                specialty: new SpecialtyRequirement
+                {
+                    SpecialtyId = 10,
+                    RequiredTotalCount = 2,
+                    OnCallTotalCount = 1
+                });
+
+            // سه شیفت
+            constraints.ShiftRequirements.Add(new ShiftRequirement
+            {
+                ShiftId = 2,
+                ShiftLabel = ShiftLabel.Evening,
+                DepartmentId = 1,
+                DurationHours = 8,
+                SpecialtyRequirements = new List<SpecialtyRequirement>
+                {
+                    new() { SpecialtyId = 10, RequiredTotalCount = 2, OnCallTotalCount = 1 }
+                }
+            });
+
+            var leaveDate = day;
+            var requiredMorning = day.AddDays(1);
+            constraints.UserConstraints[0].UnavailableDates.Add(leaveDate);
+            constraints.UserConstraints[0].RequiredShiftSlots.Add(new ShiftSlotConstraint
+            {
+                Date = requiredMorning,
+                ShiftLabel = ShiftLabel.Morning
+            });
+
+            // راه‌حل خالی + یک انتساب غیرمجاز روی روز مرخصی
+            var solution = new ShiftSolution();
+            solution.AddAssignment(1, 1, leaveDate, ShiftLabel.Morning, isOnCall: true);
+            solution.AddAssignment(2, 1, leaveDate, ShiftLabel.Morning, isOnCall: false);
+
+            ApprovedRequestGuard.ForceApply(solution, constraints);
+
+            Assert.False(solution.GetUserAssignments(1, leaveDate).Any());
+            Assert.True(solution.GetShiftAssignments(1, requiredMorning).Any(a => a.UserId == 1 && !a.IsOnCall));
+            Assert.Empty(ApprovedRequestGuard.GetUnmetViolations(solution, constraints));
         }
 
         private static SpecialtyRequirement CloneSpecialty(SpecialtyRequirement s) => new()

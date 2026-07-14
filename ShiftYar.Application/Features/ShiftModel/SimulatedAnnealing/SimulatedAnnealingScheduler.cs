@@ -49,9 +49,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             RunAnnealingLoop(ref currentSolution, ref bestSolution);
 
-            // تضمین نهایی رعایت درخواست‌های تأییدشده و الزام مدیر شیفت
-            // (حتی اگر حلقه SA نتوانسته باشد راه‌حل کاملاً معتبر پیدا کند)
-            EnforceHardRequestConstraints(bestSolution);
+            // تضمین نهایی: درخواست‌های تأییدشده آخرین حرف را می‌زنند
+            ApplyMandatoryConstraints(bestSolution);
 
             stopwatch.Stop();
             _statistics.ExecutionTime = stopwatch.Elapsed;
@@ -67,8 +66,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var stopwatch = Stopwatch.StartNew();
 
             var currentSolution = initialSolution.Clone();
-            EnforceHardRequestConstraints(currentSolution);
-            currentSolution.Score = CalculateSolutionScore(currentSolution);
+            ApplyMandatoryConstraints(currentSolution);
             var bestSolution = currentSolution.Clone();
 
             _statistics.BestScore = currentSolution.Score;
@@ -76,7 +74,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             RunAnnealingLoop(ref currentSolution, ref bestSolution);
 
-            EnforceHardRequestConstraints(bestSolution);
+            ApplyMandatoryConstraints(bestSolution);
 
             stopwatch.Stop();
             _statistics.ExecutionTime = stopwatch.Elapsed;
@@ -838,188 +836,29 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         /// <summary>
         /// اعمال قطعی قیود درخواست‌های تأییدشده و الزام مدیر شیفت روی راه‌حل نهایی.
+        /// ترتیب: تعمیر مدیر → اجبار درخواست‌ها (آخرین حرف) → گزارش نقض.
         /// </summary>
         public void ApplyMandatoryConstraints(ShiftSolution solution)
         {
-            EnforceHardRequestConstraints(solution);
+            var managerWarnings = EnsureShiftManagers(solution);
+            ApprovedRequestGuard.ForceApply(solution, _constraints);
+            solution.Score = CalculateSolutionScore(solution);
+            solution.Violations.AddRange(managerWarnings);
+            solution.Violations.AddRange(ApprovedRequestGuard.GetUnmetViolations(solution, _constraints));
+        }
+
+        /// <summary>
+        /// آیا همه درخواست‌های تأییدشدهٔ بارگذاری‌شده روی راه‌حل رعایت شده‌اند؟
+        /// </summary>
+        public bool AreApprovedRequestsSatisfied(ShiftSolution solution, out List<string> unmet)
+        {
+            unmet = ApprovedRequestGuard.GetUnmetViolations(solution, _constraints);
+            return unmet.Count == 0;
         }
 
         private void EnforceHardRequestConstraints(ShiftSolution solution)
         {
-            // 1) حذف انتساب‌های کاربران در تاریخ/شیفت‌های غیرمجاز (درخواست‌های عدم حضور تأییدشده)
-            foreach (var assignment in solution.Assignments.Values.ToList())
-            {
-                var user = _constraints.UserConstraints.FirstOrDefault(u => u.UserId == assignment.UserId);
-                if (user == null)
-                {
-                    continue;
-                }
-
-                if (!IsUserAvailableForShift(user, assignment.Date, assignment.ShiftLabel))
-                {
-                    solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
-                }
-            }
-
-            // 2) تضمین حضور در شیفت‌های درخواست‌شده (درخواست حضور - شیفت مشخص)
-            foreach (var userConstraint in _constraints.UserConstraints)
-            {
-                foreach (var required in userConstraint.RequiredShiftSlots)
-                {
-                    var shiftReq = GetShiftRequirement(required.ShiftLabel, userConstraint.SpecialtyId);
-                    if (shiftReq == null)
-                    {
-                        solution.Violations.Add(
-                            $"Approved on-shift request for user {userConstraint.UserId} on {required.Date:yyyy-MM-dd} ({required.ShiftLabel}) could not be applied: no matching department shift.");
-                        continue;
-                    }
-
-                    if (required.Date.Date < _constraints.StartDate.Date ||
-                        required.Date.Date > _constraints.EndDate.Date ||
-                        !IsUserAvailableForShift(userConstraint, required.Date, required.ShiftLabel))
-                    {
-                        continue;
-                    }
-
-                    var existingForUser = solution.GetShiftAssignments(shiftReq.ShiftId, required.Date)
-                        .FirstOrDefault(a => a.UserId == userConstraint.UserId);
-
-                    // نیروی حاضر از قبل کافی است؛ آنکال باید به نیروی حاضر ارتقا یابد
-                    if (existingForUser != null && !existingForUser.IsOnCall)
-                    {
-                        continue;
-                    }
-
-                    // انتساب‌های دیگر همان روز کاربر حذف می‌شوند تا تداخل روزانه پیش نیاید
-                    RemoveConflictingDailyAssignments(solution, userConstraint.UserId, required.Date, shiftReq.ShiftId);
-
-                    // اگر ظرفیت تخصص پر است، جا باز می‌شود (حتی هنگام ارتقای آنکال → حاضر)
-                    MakeRoomInShift(solution, shiftReq, required.Date, userConstraint);
-
-                    solution.AddAssignment(
-                        userConstraint.UserId,
-                        shiftReq.ShiftId,
-                        required.Date,
-                        required.ShiftLabel,
-                        isOnCall: false);
-                }
-
-                // 3) تضمین حضور در روزهای درخواست‌شده (درخواست حضور - کل روز) — فقط نیروی حاضر، نه آنکال
-                foreach (var presenceDate in userConstraint.RequiredPresenceDates)
-                {
-                    if (presenceDate.Date < _constraints.StartDate.Date ||
-                        presenceDate.Date > _constraints.EndDate.Date)
-                    {
-                        continue;
-                    }
-
-                    var dayAssignments = solution.GetUserAssignments(userConstraint.UserId, presenceDate);
-                    var regularPresence = dayAssignments.FirstOrDefault(a => !a.IsOnCall);
-                    if (regularPresence != null)
-                    {
-                        continue;
-                    }
-
-                    // اگر فقط آنکال است، برای ارتقا همان شیفت را نگه می‌داریم
-                    var onCallOnly = dayAssignments.FirstOrDefault(a => a.IsOnCall);
-
-                    var candidateShifts = _constraints.ShiftRequirements
-                        .Where(s => IsUserAvailableForShift(userConstraint, presenceDate, s.ShiftLabel))
-                        .OrderByDescending(s => onCallOnly != null && s.ShiftId == onCallOnly.ShiftId ? 1000 : 0)
-                        .ThenByDescending(s =>
-                        {
-                            var req = s.SpecialtyRequirements.FirstOrDefault(r => r.SpecialtyId == userConstraint.SpecialtyId);
-                            if (req == null || req.RequiredTotalCount <= 0)
-                            {
-                                return 0;
-                            }
-
-                            var current = CountSpecialtyAssignments(solution, s.ShiftId, presenceDate, userConstraint.SpecialtyId, isOnCall: false);
-                            return req.RequiredTotalCount - current;
-                        })
-                        .ToList();
-
-                    var targetShift = candidateShifts.FirstOrDefault();
-                    if (targetShift == null)
-                    {
-                        solution.Violations.Add(
-                            $"Approved full-day presence for user {userConstraint.UserId} on {presenceDate:yyyy-MM-dd} could not be placed.");
-                        continue;
-                    }
-
-                    if (onCallOnly == null || onCallOnly.ShiftId != targetShift.ShiftId)
-                    {
-                        RemoveConflictingDailyAssignments(solution, userConstraint.UserId, presenceDate, targetShift.ShiftId);
-                    }
-
-                    MakeRoomInShift(solution, targetShift, presenceDate, userConstraint);
-                    solution.AddAssignment(
-                        userConstraint.UserId,
-                        targetShift.ShiftId,
-                        presenceDate,
-                        targetShift.ShiftLabel,
-                        isOnCall: false);
-                }
-            }
-
-            // 4) تضمین حضور مدیر شیفت در شیفت‌های عصر/شب دارای الزام
-            var managerWarnings = EnsureShiftManagers(solution);
-
-            solution.Score = CalculateSolutionScore(solution);
-            // CalculateSolutionScore لیست Violations را بازنویسی می‌کند؛ نقض قیود درخواست را دوباره اضافه می‌کنیم
-            solution.Violations.AddRange(CollectUnmetRequestViolations(solution));
-            solution.Violations.AddRange(managerWarnings);
-        }
-
-        private List<string> CollectUnmetRequestViolations(ShiftSolution solution)
-        {
-            var violations = new List<string>();
-
-            foreach (var userConstraint in _constraints.UserConstraints)
-            {
-                foreach (var date in userConstraint.UnavailableDates)
-                {
-                    if (solution.GetUserAssignments(userConstraint.UserId, date).Any())
-                    {
-                        violations.Add(
-                            $"Leave violated: user {userConstraint.UserId} still assigned on {date:yyyy-MM-dd}.");
-                    }
-                }
-
-                foreach (var slot in userConstraint.UnavailableShiftSlots)
-                {
-                    if (solution.GetUserAllAssignments(userConstraint.UserId)
-                        .Any(a => a.Date.Date == slot.Date.Date && a.ShiftLabel == slot.ShiftLabel))
-                    {
-                        violations.Add(
-                            $"Off-slot violated: user {userConstraint.UserId} still on {slot.ShiftLabel} {slot.Date:yyyy-MM-dd}.");
-                    }
-                }
-
-                foreach (var required in userConstraint.RequiredShiftSlots)
-                {
-                    var shiftReq = GetShiftRequirement(required.ShiftLabel, userConstraint.SpecialtyId);
-                    var ok = shiftReq != null &&
-                             solution.GetShiftAssignments(shiftReq.ShiftId, required.Date)
-                                 .Any(a => a.UserId == userConstraint.UserId && !a.IsOnCall);
-                    if (!ok)
-                    {
-                        violations.Add(
-                            $"Required slot missing: user {userConstraint.UserId} {required.ShiftLabel} on {required.Date:yyyy-MM-dd}.");
-                    }
-                }
-
-                foreach (var presenceDate in userConstraint.RequiredPresenceDates)
-                {
-                    if (!solution.GetUserAssignments(userConstraint.UserId, presenceDate).Any(a => !a.IsOnCall))
-                    {
-                        violations.Add(
-                            $"Required presence missing: user {userConstraint.UserId} on {presenceDate:yyyy-MM-dd}.");
-                    }
-                }
-            }
-
-            return violations;
+            ApplyMandatoryConstraints(solution);
         }
 
         /// <summary>
