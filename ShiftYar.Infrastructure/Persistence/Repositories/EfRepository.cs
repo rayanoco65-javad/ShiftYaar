@@ -61,18 +61,19 @@ namespace ShiftYar.Infrastructure.Persistence.Repositories
                 // Get total count before pagination
                 int totalCount = await query.CountAsync();
 
-                // Apply pagination if the filter is a BaseFilter with pagination properties
+                // Apply pagination only when the filter type actually declares PageNumber/PageSize.
+                // SimpleFilter has neither — previously reflection fell back to PageSize=10 and
+                // silently truncated results (e.g. SaveOptimizedSchedule deleted only 10 old rows).
                 if (filter is BaseFilter<T> baseFilter)
                 {
-                    var pageNumber = (int?)baseFilter.GetType().GetProperty("PageNumber")?.GetValue(baseFilter) ?? 1;
-                    var pageSize = (int?)baseFilter.GetType().GetProperty("PageSize")?.GetValue(baseFilter) ?? 10;
-
-                    // Ensure page number is at least 1
-                    pageNumber = Math.Max(1, pageNumber);
-                    // Ensure page size is at least 1
-                    pageSize = Math.Max(1, pageSize);
-
-                    query = query.Skip((pageNumber - 1) * pageSize).Take(pageSize);
+                    var pageNumberProp = baseFilter.GetType().GetProperty("PageNumber");
+                    var pageSizeProp = baseFilter.GetType().GetProperty("PageSize");
+                    if (pageNumberProp != null && pageSizeProp != null)
+                    {
+                        var pageNumber = Math.Max(1, (int)(pageNumberProp.GetValue(baseFilter) ?? 1));
+                        var pageSize = Math.Max(1, (int)(pageSizeProp.GetValue(baseFilter) ?? 10));
+                        query = query.Skip((pageNumber - 1) * pageSize).Take(pageSize);
+                    }
                 }
 
                 var items = await query.ToListAsync();

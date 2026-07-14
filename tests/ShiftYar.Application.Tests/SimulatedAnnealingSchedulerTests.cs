@@ -366,6 +366,118 @@ public class SimulatedAnnealingSchedulerTests
             }
         }
 
+        [Fact]
+        public void Optimize_HonorsLeaveAndRequiredSlots_AcrossMorningEveningNight_WithOnCall()
+        {
+            // سناریوی واقعی شبیه مهدی رضایی: مرخصی کل‌روز + حضور اجباری در صبح/شب/عصر
+            // در حضور ظرفیت آنکال (که قبلاً می‌توانست کاربر مرخص را برای Morning/Evening پر کند)
+            var start = new DateTime(2026, 8, 25); // ~3 شهریور ۱۴۰۵
+            var leaveDate = start;                 // 3 شهریور
+            var morningRequired = start.AddDays(2); // 5 شهریور
+            var nightRequired = start.AddDays(4);   // 7 شهریور
+            var eveningRequired = start.AddDays(28); // 31 شهریور
+
+            var users = Enumerable.Range(1, 10)
+                .Select(i => User(i, i % 2 == 0 ? UserGender.Female : UserGender.Male, canBeShiftManager: i == 1))
+                .ToArray();
+
+            var specialty = new SpecialtyRequirement
+            {
+                SpecialtyId = 10,
+                RequiredMaleCount = 1,
+                RequiredFemaleCount = 1,
+                RequiredTotalCount = 2,
+                OnCallMaleCount = 1,
+                OnCallFemaleCount = 1,
+                OnCallTotalCount = 2
+            };
+
+            var constraints = new ShiftConstraints
+            {
+                DepartmentId = 1,
+                StartDate = start,
+                EndDate = eveningRequired,
+                UserConstraints = users.ToList(),
+                ShiftRequirements = new List<ShiftRequirement>
+                {
+                    new()
+                    {
+                        ShiftId = 1,
+                        ShiftLabel = ShiftLabel.Morning,
+                        DepartmentId = 1,
+                        DurationHours = 8,
+                        SpecialtyRequirements = new List<SpecialtyRequirement> { CloneSpecialty(specialty) }
+                    },
+                    new()
+                    {
+                        ShiftId = 2,
+                        ShiftLabel = ShiftLabel.Evening,
+                        DepartmentId = 1,
+                        DurationHours = 8,
+                        SpecialtyRequirements = new List<SpecialtyRequirement> { CloneSpecialty(specialty) }
+                    },
+                    new()
+                    {
+                        ShiftId = 3,
+                        ShiftLabel = ShiftLabel.Night,
+                        DepartmentId = 1,
+                        DurationHours = 12,
+                        SpecialtyRequirements = new List<SpecialtyRequirement> { CloneSpecialty(specialty) }
+                    }
+                },
+                HardRules = new HardRuleSet
+                {
+                    ForbidDuplicateDailyAssignments = true,
+                    EnforceMaxShiftsPerDay = true,
+                    EnforceSpecialtyCapacity = true
+                },
+                GlobalConstraints = new GlobalConstraints
+                {
+                    MaxShiftsPerDay = 1,
+                    RequireManagerForNightShift = true
+                }
+            };
+
+            var mehdi = constraints.UserConstraints[0]; // user 1, CanBeShiftManager
+            mehdi.UnavailableDates.Add(leaveDate);
+            mehdi.RequiredShiftSlots.Add(new ShiftSlotConstraint { Date = morningRequired, ShiftLabel = ShiftLabel.Morning });
+            mehdi.RequiredShiftSlots.Add(new ShiftSlotConstraint { Date = nightRequired, ShiftLabel = ShiftLabel.Night });
+            mehdi.RequiredShiftSlots.Add(new ShiftSlotConstraint { Date = eveningRequired, ShiftLabel = ShiftLabel.Evening });
+
+            for (int run = 0; run < 5; run++)
+            {
+                var solution = new SimulatedAnnealingScheduler(constraints, FastParameters).Optimize();
+
+                Assert.False(
+                    solution.GetUserAssignments(1, leaveDate).Any(),
+                    $"Run {run}: user on full-day leave still assigned (including OnCall)");
+
+                Assert.True(
+                    solution.GetShiftAssignments(1, morningRequired).Any(a => a.UserId == 1 && !a.IsOnCall),
+                    $"Run {run}: required Morning assignment missing");
+
+                Assert.True(
+                    solution.GetShiftAssignments(3, nightRequired).Any(a => a.UserId == 1 && !a.IsOnCall),
+                    $"Run {run}: required Night assignment missing");
+
+                Assert.True(
+                    solution.GetShiftAssignments(2, eveningRequired).Any(a => a.UserId == 1 && !a.IsOnCall),
+                    $"Run {run}: required Evening assignment missing");
+            }
+        }
+
+        private static SpecialtyRequirement CloneSpecialty(SpecialtyRequirement s) => new()
+        {
+            SpecialtyId = s.SpecialtyId,
+            SpecialtyName = s.SpecialtyName,
+            RequiredMaleCount = s.RequiredMaleCount,
+            RequiredFemaleCount = s.RequiredFemaleCount,
+            RequiredTotalCount = s.RequiredTotalCount,
+            OnCallMaleCount = s.OnCallMaleCount,
+            OnCallFemaleCount = s.OnCallFemaleCount,
+            OnCallTotalCount = s.OnCallTotalCount
+        };
+
         private static ShiftConstraints BuildConstraints(
         DateTime start,
         int days,

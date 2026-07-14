@@ -873,9 +873,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
-                    var alreadyAssigned = solution.GetShiftAssignments(shiftReq.ShiftId, required.Date)
-                        .Any(a => a.UserId == userConstraint.UserId && !a.IsOnCall);
-                    if (alreadyAssigned)
+                    var existingForUser = solution.GetShiftAssignments(shiftReq.ShiftId, required.Date)
+                        .FirstOrDefault(a => a.UserId == userConstraint.UserId);
+
+                    // نیروی حاضر از قبل کافی است؛ آنکال باید به نیروی حاضر ارتقا یابد
+                    if (existingForUser != null && !existingForUser.IsOnCall)
                     {
                         continue;
                     }
@@ -883,7 +885,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     // انتساب‌های دیگر همان روز کاربر حذف می‌شوند تا تداخل روزانه پیش نیاید
                     RemoveConflictingDailyAssignments(solution, userConstraint.UserId, required.Date, shiftReq.ShiftId);
 
-                    // اگر ظرفیت تخصص کاربر در این شیفت پر است، یک نفر غیرمحافظت‌شده حذف می‌شود
+                    // اگر ظرفیت تخصص پر است، جا باز می‌شود (حتی هنگام ارتقای آنکال → حاضر)
                     MakeRoomInShift(solution, shiftReq, required.Date, userConstraint);
 
                     solution.AddAssignment(

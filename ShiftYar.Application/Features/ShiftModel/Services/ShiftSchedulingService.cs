@@ -452,45 +452,62 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         {
             try
             {
+                if (result.Assignments == null || result.Assignments.Count == 0)
+                {
+                    return ApiResponse<string>.Fail("No assignments to save");
+                }
+
                 _logger.LogInformation("Saving optimized schedule with {Count} assignments", result.Assignments.Count);
 
-                // حذف انتساب‌های قبلی برای بازه زمانی مشخص
-                var startDate = result.Assignments.Min(a => a.Date);
-                var endDate = result.Assignments.Max(a => a.Date);
-                var startPersian = DateConverter.ConvertToGregorianDate(
-                    new System.Globalization.PersianCalendar().GetYear(startDate).ToString("0000") + "/" +
-                    new System.Globalization.PersianCalendar().GetMonth(startDate).ToString("00") + "/" +
-                    new System.Globalization.PersianCalendar().GetDayOfMonth(startDate).ToString("00")
-                );
+                var startDate = result.Assignments.Min(a => a.Date).Date;
+                var endDate = result.Assignments.Max(a => a.Date).Date;
+                var scheduleShiftIds = result.Assignments.Select(a => a.ShiftId).Distinct().ToHashSet();
 
-                // واکشی شناسه‌های تاریخ‌های مورد نیاز
-                var (shiftDates, _) = await _shiftDateRepository.GetByFilterAsync(
+                // واکشی شناسه‌های تاریخ‌های مورد نیاز (کل بازه، بدون قطع pagination)
+                var (shiftDates, shiftDatesTotal) = await _shiftDateRepository.GetByFilterAsync(
                     new Features.CalendarSeeder.Filters.ShiftDateFilter
                     {
-                        PersianDateStart = new System.Globalization.PersianCalendar().GetYear(startDate).ToString("0000") + "/" +
-                                          new System.Globalization.PersianCalendar().GetMonth(startDate).ToString("00") + "/" +
-                                          new System.Globalization.PersianCalendar().GetDayOfMonth(startDate).ToString("00"),
-                        PersianDateEnd = new System.Globalization.PersianCalendar().GetYear(endDate).ToString("0000") + "/" +
-                                        new System.Globalization.PersianCalendar().GetMonth(endDate).ToString("00") + "/" +
-                                        new System.Globalization.PersianCalendar().GetDayOfMonth(endDate).ToString("00"),
+                        PersianDateStart = ToPersianDateString(startDate),
+                        PersianDateEnd = ToPersianDateString(endDate),
                         PageNumber = 1,
-                        PageSize = 1000
+                        PageSize = Math.Max(5000, (endDate - startDate).Days + 10)
                     }
                 );
 
-                var shiftDateMap = shiftDates
-                    .Where(d => d.Date.HasValue)
-                    .ToDictionary(d => d.Date.Value.Date, d => d.Id ?? 0);
+                if (shiftDatesTotal > shiftDates.Count)
+                {
+                    _logger.LogWarning(
+                        "SaveOptimizedSchedule: ShiftDate rows truncated ({Loaded}/{Total}) for {Start}..{End}",
+                        shiftDates.Count, shiftDatesTotal, startDate, endDate);
+                }
 
-                // حذف انتساب‌های قبلی مرتبط با این بازه زمانی
-                var (existingAssignments, _) = await _shiftAssignmentRepository.GetByFilterAsync(
+                var shiftDateMap = shiftDates
+                    .Where(d => d.Date.HasValue && d.Id.HasValue)
+                    .GroupBy(d => d.Date!.Value.Date)
+                    .ToDictionary(g => g.Key, g => g.First().Id!.Value);
+
+                // حذف همه انتساب‌های قبلی همین شیفت‌های برنامه در بازه (نه فقط ۱۰ ردیف اول)
+                var (existingAssignments, existingTotal) = await _shiftAssignmentRepository.GetByFilterAsync(
                     filter: new Application.Common.Filters.SimpleFilter<ShiftAssignment>(a =>
                         a.ShiftDateId.HasValue &&
                         a.ShiftDate != null &&
-                        a.ShiftDate.Date >= startDate && a.ShiftDate.Date <= endDate
+                        a.ShiftDate.Date.HasValue &&
+                        a.ShiftDate.Date.Value.Date >= startDate &&
+                        a.ShiftDate.Date.Value.Date <= endDate &&
+                        a.ShiftId.HasValue &&
+                        scheduleShiftIds.Contains(a.ShiftId.Value)
                     ),
                     includes: "ShiftDate"
                 );
+
+                _logger.LogInformation(
+                    "SaveOptimizedSchedule: Deleting {Loaded}/{Total} existing assignment(s) for shifts [{ShiftIds}] in {Start}..{End}",
+                    existingAssignments.Count,
+                    existingTotal,
+                    string.Join(",", scheduleShiftIds),
+                    startDate.ToString("yyyy-MM-dd"),
+                    endDate.ToString("yyyy-MM-dd"));
+
                 foreach (var ea in existingAssignments)
                 {
                     _shiftAssignmentRepository.Delete(ea);
@@ -499,6 +516,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 // ذخیره انتساب‌های جدید
                 var currentUserId = GetCurrentUserId();
                 var now = DateTime.Now;
+                var missingShiftDateCount = 0;
 
                 foreach (var assignment in result.Assignments)
                 {
@@ -512,16 +530,28 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         TheUserId = currentUserId
                     };
 
-                    // اتصال تاریخ شیفت (ShiftDateId)
                     if (shiftDateMap.TryGetValue(assignment.Date.Date, out var sdId))
                     {
                         shiftAssignment.ShiftDateId = sdId;
+                    }
+                    else
+                    {
+                        missingShiftDateCount++;
+                        _logger.LogWarning(
+                            "SaveOptimizedSchedule: No ShiftDate for {Date:yyyy-MM-dd}; assignment UserId={UserId} ShiftId={ShiftId} will not appear in calendar views",
+                            assignment.Date, assignment.UserId, assignment.ShiftId);
                     }
 
                     await _shiftAssignmentRepository.AddAsync(shiftAssignment);
                 }
 
                 await _shiftAssignmentRepository.SaveAsync();
+
+                if (missingShiftDateCount > 0)
+                {
+                    return ApiResponse<string>.Fail(
+                        $"Schedule partially saved: {missingShiftDateCount} assignment(s) had no matching calendar date. Seed the calendar for {ToPersianDateString(startDate)}..{ToPersianDateString(endDate)} and re-run.");
+                }
 
                 _logger.LogInformation("Successfully saved {Count} shift assignments", result.Assignments.Count);
 
