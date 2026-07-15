@@ -81,7 +81,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
-                    var shiftReq = ResolveShift(constraints, required.ShiftLabel, user.SpecialtyId);
+                    var shiftReq = ResolveShift(constraints, required.ShiftLabel, user.SpecialtyId, required.ShiftId);
                     var ok = shiftReq != null &&
                              solution.GetShiftAssignments(shiftReq.ShiftId, required.Date)
                                  .Any(a => a.UserId == user.UserId && !a.IsOnCall);
@@ -152,7 +152,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
-                    var shiftReq = ResolveShift(constraints, required.ShiftLabel, user.SpecialtyId);
+                    var shiftReq = ResolveShift(constraints, required.ShiftLabel, user.SpecialtyId, required.ShiftId);
                     if (shiftReq == null)
                     {
                         continue;
@@ -322,8 +322,17 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 s.Date.Date == date.Date && s.ShiftLabel == shiftLabel);
         }
 
-        private static ShiftRequirement? ResolveShift(ShiftConstraints constraints, ShiftLabel label, int specialtyId)
+        private static ShiftRequirement? ResolveShift(ShiftConstraints constraints, ShiftLabel label, int specialtyId, int? shiftId = null)
         {
+            if (shiftId.HasValue)
+            {
+                var byId = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftId == shiftId.Value);
+                if (byId != null)
+                {
+                    return byId;
+                }
+            }
+
             var matches = constraints.ShiftRequirements.Where(s => s.ShiftLabel == label).ToList();
             if (matches.Count == 0)
             {

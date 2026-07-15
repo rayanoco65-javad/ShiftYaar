@@ -72,6 +72,38 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 entity.RequestDate = DateConverter.ConvertToGregorianDate(dto.RequestPersianDate);
                 entity.SupervisorId = supervisorId;
                 entity.Status = RequestStatus.Pending;
+
+                // اگر فرانت Shift.Id فرستاده به‌جای Label، به Label واقعی تبدیل کن
+                if (entity.ShiftLabel.HasValue && entity.RequestType == RequestType.SpecificShift)
+                {
+                    var (shifts, _) = await _shiftRepository.GetByFilterAsync(
+                        new ShiftFilter
+                        {
+                            DepartmentId = userDepatmentId.Value,
+                            PageNumber = 1,
+                            PageSize = 100
+                        });
+
+                    var raw = (int)entity.ShiftLabel.Value;
+                    var byId = shifts.FirstOrDefault(s => s.Id == raw);
+                    if (byId != null)
+                    {
+                        var realLabel = byId.Label;
+                        if (!realLabel.HasValue || (int)realLabel.Value != raw)
+                        {
+                            _logger.LogWarning(
+                                "CreateShiftRequest: remapping ShiftLabel raw={Raw} → {Label} (interpreted as ShiftId) for UserId={UserId}",
+                                raw, realLabel ?? InferLabel(byId), dto.UserId);
+                            entity.ShiftLabel = realLabel ?? InferLabel(byId);
+                        }
+                    }
+                    else if (!Enum.IsDefined(typeof(ShiftEnums.ShiftLabel), raw))
+                    {
+                        return ApiResponse<ShiftRequestDtoGet>.Fail(
+                            $"مقدار ShiftLabel نامعتبر است ({raw}). باید Morning=0، Evening=1 یا Night=2 باشد.");
+                    }
+                }
+
                 await _repository.AddAsync(entity);
                 await _repository.SaveAsync();
                 var result = _mapper.Map<ShiftRequestDtoGet>(entity);
@@ -81,6 +113,16 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
             {
                 return ApiResponse<ShiftRequestDtoGet>.Fail($"خطا در ثبت درخواست: {ex.Message}");
             }
+        }
+
+        private static ShiftEnums.ShiftLabel InferLabel(Shift shift)
+        {
+            var start = shift.StartTime ?? TimeSpan.Zero;
+            if (start >= TimeSpan.FromHours(5) && start < TimeSpan.FromHours(13))
+                return ShiftEnums.ShiftLabel.Morning;
+            if (start >= TimeSpan.FromHours(13) && start < TimeSpan.FromHours(20))
+                return ShiftEnums.ShiftLabel.Evening;
+            return ShiftEnums.ShiftLabel.Night;
         }
 
         public async Task<ApiResponse<ShiftRequestDtoGet>> CreateShiftRequestForLeaveAsync(ShiftRequestForLeaveDtoAdd dto)

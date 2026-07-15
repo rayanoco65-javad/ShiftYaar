@@ -844,11 +844,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             return Math.Max(1, duration);
         }
 
-        private static string ToPersianDateString(DateTime date)
-        {
-            var calendar = new PersianCalendar();
-            return $"{calendar.GetYear(date):0000}/{calendar.GetMonth(date):00}/{calendar.GetDayOfMonth(date):00}";
-        }
+        private static string ToPersianDateString(DateTime date) => DateConverter.ConvertToPersianDate(date);
 
         /// <summary>
         /// اگر Label شیفت در دیتابیس خالی باشد، از روی ساعت شروع آن را تشخیص می‌دهد
@@ -873,6 +869,49 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             }
 
             return ShiftLabel.Night;
+        }
+
+        /// <summary>
+        /// نرمال‌سازی ShiftLabel درخواست:
+        /// فرانت‌اند گاهی به‌اشتباه مقدار Shift.Id (مثل 1/2/3) را به‌جای Label (0/1/2) می‌فرستد.
+        /// اگر مقدار با Id یک شیفت دپارتمان یکی باشد و با Label واقعی آن شیفت فرق داشته باشد،
+        /// آن را به‌عنوان ShiftId تفسیر می‌کنیم.
+        /// </summary>
+        private static (ShiftLabel Label, int? ShiftId) ResolveRequestShiftMapping(
+            int? rawLabelValue,
+            IReadOnlyList<Shift> departmentShifts)
+        {
+            if (!rawLabelValue.HasValue)
+            {
+                return (ShiftLabel.Morning, null);
+            }
+
+            var raw = rawLabelValue.Value;
+            var shiftById = departmentShifts.FirstOrDefault(s => s.Id == raw);
+            var enumDefined = Enum.IsDefined(typeof(ShiftLabel), raw);
+
+            if (shiftById != null)
+            {
+                var shiftLabel = shiftById.Label ?? ResolveDepartmentShiftLabel(shiftById);
+                // اگر Id با Label هم‌عدد نباشد (مثلاً Id=1 Label=Morning=0)، فرانت ShiftId فرستاده است
+                if (!enumDefined || (int)shiftLabel != raw)
+                {
+                    return (shiftLabel, shiftById.Id);
+                }
+            }
+
+            if (enumDefined)
+            {
+                return ((ShiftLabel)raw, null);
+            }
+
+            // مقدار نامعتبر و بدون ShiftId متناظر
+            return ((ShiftLabel)raw, null);
+        }
+
+        private static bool IsValidShiftLabel(ShiftLabel label)
+        {
+            return Enum.IsDefined(typeof(ShiftLabel), label);
         }
 
         private static List<string> GetApprovedRequestFailures(ShiftSchedulingResultDto result, ShiftConstraints constraints)
@@ -1397,14 +1436,41 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                                 continue;
                             }
 
-                            var slot = new ShiftSlotConstraint { Date = date, ShiftLabel = req.ShiftLabel.Value };
-                            if (!uc.UnavailableShiftSlots.Any(s => s.Date.Date == slot.Date.Date && s.ShiftLabel == slot.ShiftLabel))
+                            var (resolvedLabel, resolvedShiftId) = ResolveRequestShiftMapping(
+                                (int)req.ShiftLabel.Value, departmentShifts);
+
+                            if (!IsValidShiftLabel(resolvedLabel))
+                            {
+                                skippedIncomplete++;
+                                _logger.LogWarning(
+                                    "LoadConstraints: Skipping OFF request {RequestId} — unresolved ShiftLabel raw={Raw}",
+                                    req.Id, (int)req.ShiftLabel.Value);
+                                continue;
+                            }
+
+                            if ((int)req.ShiftLabel.Value != (int)resolvedLabel)
+                            {
+                                _logger.LogWarning(
+                                    "LoadConstraints: OFF request {RequestId} ShiftLabel remapped raw={Raw} → {Label} (ShiftId={ShiftId})",
+                                    req.Id, (int)req.ShiftLabel.Value, resolvedLabel, resolvedShiftId);
+                            }
+
+                            var slot = new ShiftSlotConstraint
+                            {
+                                Date = date,
+                                ShiftLabel = resolvedLabel,
+                                ShiftId = resolvedShiftId
+                            };
+                            if (!uc.UnavailableShiftSlots.Any(s =>
+                                    s.Date.Date == slot.Date.Date &&
+                                    s.ShiftLabel == slot.ShiftLabel &&
+                                    s.ShiftId == slot.ShiftId))
                             {
                                 uc.UnavailableShiftSlots.Add(slot);
                                 appliedOffSlot++;
                                 _logger.LogInformation(
-                                    "LoadConstraints: OFF-Slot UserId={UserId} Date={Date:yyyy-MM-dd} Label={Label} RequestId={RequestId}",
-                                    uc.UserId, date, slot.ShiftLabel, req.Id);
+                                    "LoadConstraints: OFF-Slot UserId={UserId} Date={Date:yyyy-MM-dd} Label={Label} ShiftId={ShiftId} RequestId={RequestId}",
+                                    uc.UserId, date, slot.ShiftLabel, slot.ShiftId, req.Id);
                             }
                         }
                     }
@@ -1432,14 +1498,41 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                                 continue;
                             }
 
-                            var slot = new ShiftSlotConstraint { Date = date, ShiftLabel = req.ShiftLabel.Value };
-                            if (!uc.RequiredShiftSlots.Any(s => s.Date.Date == slot.Date.Date && s.ShiftLabel == slot.ShiftLabel))
+                            var (resolvedLabel, resolvedShiftId) = ResolveRequestShiftMapping(
+                                (int)req.ShiftLabel.Value, departmentShifts);
+
+                            if (!IsValidShiftLabel(resolvedLabel))
+                            {
+                                skippedIncomplete++;
+                                _logger.LogWarning(
+                                    "LoadConstraints: Skipping ON request {RequestId} — unresolved ShiftLabel raw={Raw}",
+                                    req.Id, (int)req.ShiftLabel.Value);
+                                continue;
+                            }
+
+                            if ((int)req.ShiftLabel.Value != (int)resolvedLabel)
+                            {
+                                _logger.LogWarning(
+                                    "LoadConstraints: ON request {RequestId} ShiftLabel remapped raw={Raw} → {Label} (ShiftId={ShiftId})",
+                                    req.Id, (int)req.ShiftLabel.Value, resolvedLabel, resolvedShiftId);
+                            }
+
+                            var slot = new ShiftSlotConstraint
+                            {
+                                Date = date,
+                                ShiftLabel = resolvedLabel,
+                                ShiftId = resolvedShiftId
+                            };
+                            if (!uc.RequiredShiftSlots.Any(s =>
+                                    s.Date.Date == slot.Date.Date &&
+                                    s.ShiftLabel == slot.ShiftLabel &&
+                                    s.ShiftId == slot.ShiftId))
                             {
                                 uc.RequiredShiftSlots.Add(slot);
                                 appliedOnSlot++;
                                 _logger.LogInformation(
-                                    "LoadConstraints: ON-Slot UserId={UserId} Date={Date:yyyy-MM-dd} Label={Label} RequestId={RequestId}",
-                                    uc.UserId, date, slot.ShiftLabel, req.Id);
+                                    "LoadConstraints: ON-Slot UserId={UserId} Date={Date:yyyy-MM-dd} Label={Label} ShiftId={ShiftId} RequestId={RequestId}",
+                                    uc.UserId, date, slot.ShiftLabel, slot.ShiftId, req.Id);
                             }
                         }
                     }
@@ -1448,6 +1541,48 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 _logger.LogInformation(
                     "LoadConstraints: Applied approved requests — OffFull={OffFull}, OffSlot={OffSlot}, OnFull={OnFull}, OnSlot={OnSlot}, SkippedIncomplete={Skipped}",
                     appliedOffFull, appliedOffSlot, appliedOnFull, appliedOnSlot, skippedIncomplete);
+
+                // هشدار mismatch سال شمسی: درخواست‌های تأییدشده در سال دیگر برای همین ماه
+                try
+                {
+                    var pc = new PersianCalendar();
+                    var scheduleMonths = new HashSet<(int Year, int Month)>();
+                    for (var d = scheduleStartDate; d < scheduleEndExclusive; d = d.AddDays(1))
+                    {
+                        scheduleMonths.Add((pc.GetYear(d), pc.GetMonth(d)));
+                    }
+
+                    var (nearbyApproved, _) = await _shiftRequestRepository.GetByFilterAsync(
+                        filter: new Application.Common.Filters.SimpleFilter<ShiftYar.Domain.Entities.ShiftRequestModel.ShiftRequest>(x =>
+                            x.Status == Domain.Enums.ShiftRequestModel.RequestStatus.Approved
+                            && x.UserId != null
+                            && departmentUserIds.Contains(x.UserId.Value)
+                            && x.RequestDate != null
+                            && (x.RequestDate < scheduleStartDate || x.RequestDate >= scheduleEndExclusive))
+                    );
+
+                    var outsideSameMonth = nearbyApproved
+                        .Where(r => r.RequestDate.HasValue &&
+                                    scheduleMonths.Any(m =>
+                                        pc.GetMonth(r.RequestDate.Value) == m.Month &&
+                                        pc.GetYear(r.RequestDate.Value) != m.Year))
+                        .ToList();
+
+                    if (outsideSameMonth.Count > 0)
+                    {
+                        _logger.LogError(
+                            "LoadConstraints: {Count} approved request(s) fall in the SAME Persian month but DIFFERENT year than the schedule range ({Start}..{End}). Example RequestId={ExampleId} Date={ExampleDate:yyyy-MM-dd}. These are ignored. Re-create/approve requests for the scheduled Persian year.",
+                            outsideSameMonth.Count,
+                            scheduleStartDate.ToString("yyyy-MM-dd"),
+                            constraints.EndDate.ToString("yyyy-MM-dd"),
+                            outsideSameMonth[0].Id,
+                            outsideSameMonth[0].RequestDate);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "LoadConstraints: failed while checking adjacent-year approved requests");
+                }
 
                 if (approvedRequestItems.Count > 0 &&
                     appliedOffFull + appliedOffSlot + appliedOnFull + appliedOnSlot == 0 &&

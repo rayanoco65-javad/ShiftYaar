@@ -523,6 +523,80 @@ public class SimulatedAnnealingSchedulerTests
             Assert.Empty(ApprovedRequestGuard.GetUnmetViolations(solution, constraints));
         }
 
+        [Fact]
+        public void ApprovedRequestGuard_ForceApply_UsesShiftId_WhenFrontendSentShiftIdAsLabel()
+        {
+            // شبیه‌سازی باگ واقعی: فرانت Shift.Id=1/2/3 را به‌جای Label=0/1/2 می‌فرستد
+            var day = new DateTime(2026, 8, 27);
+            var constraints = new ShiftConstraints
+            {
+                DepartmentId = 1,
+                StartDate = day,
+                EndDate = day,
+                UserConstraints = new List<UserConstraint>
+                {
+                    User(1, UserGender.Male),
+                    User(2, UserGender.Male),
+                    User(3, UserGender.Female),
+                },
+                ShiftRequirements = new List<ShiftRequirement>
+                {
+                    new()
+                    {
+                        ShiftId = 1,
+                        ShiftLabel = ShiftLabel.Morning,
+                        DepartmentId = 1,
+                        DurationHours = 6,
+                        SpecialtyRequirements = new List<SpecialtyRequirement>
+                        {
+                            new() { SpecialtyId = 10, RequiredTotalCount = 1 }
+                        }
+                    },
+                    new()
+                    {
+                        ShiftId = 2,
+                        ShiftLabel = ShiftLabel.Evening,
+                        DepartmentId = 1,
+                        DurationHours = 6,
+                        SpecialtyRequirements = new List<SpecialtyRequirement>
+                        {
+                            new() { SpecialtyId = 10, RequiredTotalCount = 1 }
+                        }
+                    },
+                    new()
+                    {
+                        ShiftId = 3,
+                        ShiftLabel = ShiftLabel.Night,
+                        DepartmentId = 1,
+                        DurationHours = 12,
+                        SpecialtyRequirements = new List<SpecialtyRequirement>
+                        {
+                            new() { SpecialtyId = 10, RequiredTotalCount = 1 }
+                        }
+                    }
+                },
+                HardRules = new HardRuleSet { ForbidDuplicateDailyAssignments = true, EnforceSpecialtyCapacity = true },
+                GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 }
+            };
+
+            // raw Label=1 meant ShiftId=1 (Morning)، نه Evening
+            constraints.UserConstraints[0].RequiredShiftSlots.Add(new ShiftSlotConstraint
+            {
+                Date = day,
+                ShiftLabel = ShiftLabel.Morning,
+                ShiftId = 1
+            });
+
+            var solution = new ShiftSolution();
+            // پر کردن اشتباه عصر
+            solution.AddAssignment(2, 2, day, ShiftLabel.Evening, isOnCall: false);
+
+            ApprovedRequestGuard.ForceApply(solution, constraints);
+
+            Assert.True(solution.GetShiftAssignments(1, day).Any(a => a.UserId == 1 && !a.IsOnCall));
+            Assert.Empty(ApprovedRequestGuard.GetUnmetViolations(solution, constraints));
+        }
+
         private static SpecialtyRequirement CloneSpecialty(SpecialtyRequirement s) => new()
         {
             SpecialtyId = s.SpecialtyId,

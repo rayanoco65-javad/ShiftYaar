@@ -126,6 +126,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
     {
         public DateTime Date { get; set; }
         public ShiftLabel ShiftLabel { get; set; }
+        /// <summary>
+        /// اگر مشخص باشد، اجبار دقیقاً روی همین ShiftId انجام می‌شود
+        /// (برای وقتی فرانت اشتباهاً Shift.Id را به‌جای ShiftLabel می‌فرستد).
+        /// </summary>
+        public int? ShiftId { get; set; }
     }
 
 
