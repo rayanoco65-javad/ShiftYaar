@@ -872,41 +872,16 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         }
 
         /// <summary>
-        /// نرمال‌سازی ShiftLabel درخواست:
-        /// فرانت‌اند گاهی به‌اشتباه مقدار Shift.Id (مثل 1/2/3) را به‌جای Label (0/1/2) می‌فرستد.
-        /// اگر مقدار با Id یک شیفت دپارتمان یکی باشد و با Label واقعی آن شیفت فرق داشته باشد،
-        /// آن را به‌عنوان ShiftId تفسیر می‌کنیم.
+        /// نرمال‌سازی ShiftLabel درخواست — جزئیات در <see cref="Common.Utilities.ShiftLabelResolver"/>.
         /// </summary>
         private static (ShiftLabel Label, int? ShiftId) ResolveRequestShiftMapping(
             int? rawLabelValue,
             IReadOnlyList<Shift> departmentShifts)
         {
-            if (!rawLabelValue.HasValue)
-            {
-                return (ShiftLabel.Morning, null);
-            }
-
-            var raw = rawLabelValue.Value;
-            var shiftById = departmentShifts.FirstOrDefault(s => s.Id == raw);
-            var enumDefined = Enum.IsDefined(typeof(ShiftLabel), raw);
-
-            if (shiftById != null)
-            {
-                var shiftLabel = shiftById.Label ?? ResolveDepartmentShiftLabel(shiftById);
-                // اگر Id با Label هم‌عدد نباشد (مثلاً Id=1 Label=Morning=0)، فرانت ShiftId فرستاده است
-                if (!enumDefined || (int)shiftLabel != raw)
-                {
-                    return (shiftLabel, shiftById.Id);
-                }
-            }
-
-            if (enumDefined)
-            {
-                return ((ShiftLabel)raw, null);
-            }
-
-            // مقدار نامعتبر و بدون ShiftId متناظر
-            return ((ShiftLabel)raw, null);
+            return Common.Utilities.ShiftLabelResolver.Resolve(
+                rawLabelValue,
+                departmentShifts,
+                ResolveDepartmentShiftLabel);
         }
 
         private static bool IsValidShiftLabel(ShiftLabel label)

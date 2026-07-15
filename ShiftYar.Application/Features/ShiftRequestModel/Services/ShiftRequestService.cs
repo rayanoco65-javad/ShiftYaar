@@ -73,34 +73,32 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 entity.SupervisorId = supervisorId;
                 entity.Status = RequestStatus.Pending;
 
-                // اگر فرانت Shift.Id فرستاده به‌جای Label، به Label واقعی تبدیل کن
+                // فقط مقادیر خارج از enum (مثل Shift.Id=3) را به‌عنوان ShiftId remap کن.
+                // Id=1/2 با Evening/Night هم‌عددند؛ تفسیر آن‌ها به‌عنوان Id درخواست صحیح را خراب می‌کند.
                 if (entity.ShiftLabel.HasValue && entity.RequestType == RequestType.SpecificShift)
                 {
-                    var (shifts, _) = await _shiftRepository.GetByFilterAsync(
-                        new ShiftFilter
-                        {
-                            DepartmentId = userDepatmentId.Value,
-                            PageNumber = 1,
-                            PageSize = 100
-                        });
-
                     var raw = (int)entity.ShiftLabel.Value;
-                    var byId = shifts.FirstOrDefault(s => s.Id == raw);
-                    if (byId != null)
+                    if (!Enum.IsDefined(typeof(ShiftEnums.ShiftLabel), raw))
                     {
-                        var realLabel = byId.Label;
-                        if (!realLabel.HasValue || (int)realLabel.Value != raw)
+                        var (shifts, _) = await _shiftRepository.GetByFilterAsync(
+                            new ShiftFilter
+                            {
+                                DepartmentId = userDepatmentId.Value,
+                                PageNumber = 1,
+                                PageSize = 100
+                            });
+
+                        var (resolved, _) = ShiftLabelResolver.Resolve(raw, shifts.ToList());
+                        if (!Enum.IsDefined(typeof(ShiftEnums.ShiftLabel), (int)resolved))
                         {
-                            _logger.LogWarning(
-                                "CreateShiftRequest: remapping ShiftLabel raw={Raw} → {Label} (interpreted as ShiftId) for UserId={UserId}",
-                                raw, realLabel ?? InferLabel(byId), dto.UserId);
-                            entity.ShiftLabel = realLabel ?? InferLabel(byId);
+                            return ApiResponse<ShiftRequestDtoGet>.Fail(
+                                $"مقدار ShiftLabel نامعتبر است ({raw}). باید Morning=0، Evening=1 یا Night=2 باشد.");
                         }
-                    }
-                    else if (!Enum.IsDefined(typeof(ShiftEnums.ShiftLabel), raw))
-                    {
-                        return ApiResponse<ShiftRequestDtoGet>.Fail(
-                            $"مقدار ShiftLabel نامعتبر است ({raw}). باید Morning=0، Evening=1 یا Night=2 باشد.");
+
+                        _logger.LogWarning(
+                            "CreateShiftRequest: remapping ShiftLabel raw={Raw} → {Label} (interpreted as ShiftId) for UserId={UserId}",
+                            raw, resolved, dto.UserId);
+                        entity.ShiftLabel = resolved;
                     }
                 }
 
@@ -113,16 +111,6 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
             {
                 return ApiResponse<ShiftRequestDtoGet>.Fail($"خطا در ثبت درخواست: {ex.Message}");
             }
-        }
-
-        private static ShiftEnums.ShiftLabel InferLabel(Shift shift)
-        {
-            var start = shift.StartTime ?? TimeSpan.Zero;
-            if (start >= TimeSpan.FromHours(5) && start < TimeSpan.FromHours(13))
-                return ShiftEnums.ShiftLabel.Morning;
-            if (start >= TimeSpan.FromHours(13) && start < TimeSpan.FromHours(20))
-                return ShiftEnums.ShiftLabel.Evening;
-            return ShiftEnums.ShiftLabel.Night;
         }
 
         public async Task<ApiResponse<ShiftRequestDtoGet>> CreateShiftRequestForLeaveAsync(ShiftRequestForLeaveDtoAdd dto)
