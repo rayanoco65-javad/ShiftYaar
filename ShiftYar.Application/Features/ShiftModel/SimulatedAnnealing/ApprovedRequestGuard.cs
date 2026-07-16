@@ -74,7 +74,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
-                    if (!IsUserAvailable(user, required.Date, required.ShiftLabel))
+                    if (!IsOffConflictFree(user, required.Date, required.ShiftLabel))
                     {
                         violations.Add(
                             $"تداخل درخواست: کاربر {user.UserId} هم حضور در {required.ShiftLabel} و هم عدم‌حضور برای {required.Date:yyyy-MM-dd} دارد.");
@@ -147,7 +147,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
-                    if (!IsUserAvailable(user, required.Date, required.ShiftLabel))
+                    if (!IsUserAvailable(user, required.Date, required.ShiftLabel, solution))
                     {
                         continue;
                     }
@@ -205,7 +205,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         .FirstOrDefault(a => a.IsOnCall);
 
                     var candidates = constraints.ShiftRequirements
-                        .Where(s => IsUserAvailable(user, presenceDate, s.ShiftLabel))
+                        .Where(s => IsUserAvailable(user, presenceDate, s.ShiftLabel, solution))
                         .OrderByDescending(s => onCallOnly != null && s.ShiftId == onCallOnly.ShiftId ? 1_000_000 : 0)
                         .ThenByDescending(s =>
                         {
@@ -311,7 +311,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
         }
 
-        private static bool IsUserAvailable(UserConstraint user, DateTime date, ShiftLabel shiftLabel)
+        private static bool IsOffConflictFree(UserConstraint user, DateTime date, ShiftLabel shiftLabel)
         {
             if (user.UnavailableDates.Any(d => d.Date == date.Date))
             {
@@ -320,6 +320,28 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             return !user.UnavailableShiftSlots.Any(s =>
                 s.Date.Date == date.Date && s.ShiftLabel == shiftLabel);
+        }
+
+        private static bool IsUserAvailable(UserConstraint user, DateTime date, ShiftLabel shiftLabel, ShiftSolution? solution = null)
+        {
+            if (!IsOffConflictFree(user, date, shiftLabel))
+            {
+                return false;
+            }
+
+            if (!Common.Utilities.ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, shiftLabel))
+            {
+                return false;
+            }
+
+            if (solution != null &&
+                Common.Utilities.AdjacentShiftRestRules.WouldConflict(
+                    solution.GetUserAllAssignments(user.UserId), date, shiftLabel))
+            {
+                return false;
+            }
+
+            return true;
         }
 
         private static ShiftRequirement? ResolveShift(ShiftConstraints constraints, ShiftLabel label, int specialtyId, int? shiftId = null)

@@ -252,6 +252,99 @@ public class SimulatedAnnealingSchedulerTests
         }
 
         [Fact]
+        public void Optimize_FixedMorningUser_NeverGetsEveningOrNight()
+        {
+            var start = new DateTime(2026, 8, 23);
+            var fixedMorning = User(10, UserGender.Female);
+            fixedMorning.ShiftType = ShiftTypes.FixedShift;
+            fixedMorning.ShiftSubType = ShiftSubTypes.FixedMorning;
+            fixedMorning.AllowedShiftLabels = new List<ShiftLabel> { ShiftLabel.Morning };
+
+            var rotating = User(11, UserGender.Male);
+            rotating.ShiftType = ShiftTypes.RotatingShift;
+            rotating.ShiftSubType = ShiftSubTypes.ThreeShifts;
+            rotating.AllowedShiftLabels = new List<ShiftLabel>
+            {
+                ShiftLabel.Morning, ShiftLabel.Evening, ShiftLabel.Night
+            };
+
+            var rotating2 = User(12, UserGender.Female);
+            rotating2.ShiftType = ShiftTypes.RotatingShift;
+            rotating2.ShiftSubType = ShiftSubTypes.ThreeShifts;
+            rotating2.AllowedShiftLabels = new List<ShiftLabel>
+            {
+                ShiftLabel.Morning, ShiftLabel.Evening, ShiftLabel.Night
+            };
+
+            var rotating3 = User(13, UserGender.Male);
+            rotating3.ShiftType = ShiftTypes.RotatingShift;
+            rotating3.ShiftSubType = ShiftSubTypes.ThreeShifts;
+            rotating3.AllowedShiftLabels = new List<ShiftLabel>
+            {
+                ShiftLabel.Morning, ShiftLabel.Evening, ShiftLabel.Night
+            };
+
+            var specialty = new SpecialtyRequirement
+            {
+                SpecialtyId = 10,
+                RequiredTotalCount = 1,
+                RequiredMaleCount = 0,
+                RequiredFemaleCount = 0
+            };
+
+            var constraints = new ShiftConstraints
+            {
+                DepartmentId = 1,
+                StartDate = start,
+                EndDate = start.AddDays(6),
+                UserConstraints = new List<UserConstraint> { fixedMorning, rotating, rotating2, rotating3 },
+                ShiftRequirements = new List<ShiftRequirement>
+                {
+                    new()
+                    {
+                        ShiftId = 1,
+                        ShiftLabel = ShiftLabel.Morning,
+                        DepartmentId = 1,
+                        DurationHours = 8,
+                        SpecialtyRequirements = new List<SpecialtyRequirement> { CloneSpecialty(specialty) }
+                    },
+                    new()
+                    {
+                        ShiftId = 2,
+                        ShiftLabel = ShiftLabel.Evening,
+                        DepartmentId = 1,
+                        DurationHours = 8,
+                        SpecialtyRequirements = new List<SpecialtyRequirement> { CloneSpecialty(specialty) }
+                    },
+                    new()
+                    {
+                        ShiftId = 3,
+                        ShiftLabel = ShiftLabel.Night,
+                        DepartmentId = 1,
+                        DurationHours = 8,
+                        SpecialtyRequirements = new List<SpecialtyRequirement> { CloneSpecialty(specialty) }
+                    }
+                },
+                HardRules = new HardRuleSet
+                {
+                    ForbidDuplicateDailyAssignments = true,
+                    EnforceMaxShiftsPerDay = true,
+                    EnforceSpecialtyCapacity = true
+                },
+                GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 }
+            };
+
+            for (int run = 0; run < 5; run++)
+            {
+                var solution = new SimulatedAnnealingScheduler(constraints, FastParameters).Optimize();
+
+                var minaAssignments = solution.GetUserAllAssignments(10);
+                Assert.All(minaAssignments, a => Assert.Equal(ShiftLabel.Morning, a.ShiftLabel));
+                Assert.Empty(ShiftEligibilityGuard.GetViolations(solution, constraints));
+            }
+        }
+
+        [Fact]
         public void Optimize_BlocksOnlySpecificShift_OnPartialOffRequest()
         {
             var date = new DateTime(2026, 8, 8);

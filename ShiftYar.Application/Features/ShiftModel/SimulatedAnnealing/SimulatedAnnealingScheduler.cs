@@ -1,4 +1,5 @@
-﻿using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
+﻿using ShiftYar.Application.Common.Utilities;
+using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -194,7 +195,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     {
                         var eligibleUsers = availableUsers
                             .Where(u => u.SpecialtyId == specialtyReq.SpecialtyId)
-                            .Where(u => IsUserAvailableForShift(u, date, shiftReq.ShiftLabel))
+                            .Where(u => IsUserAvailableForShift(u, date, shiftReq.ShiftLabel, solution))
                             .Where(u => u.IsActive) // فقط کاربران فعال
                             .ToList();
 
@@ -339,18 +340,26 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private double CalculateShiftLabelBalancePenalty(ShiftSolution solution)
         {
-            // برای کاربران گردشی، اختلاف توزیع Morning/Evening/Night از توزیع عادلانه جریمه شود
+            // برای کاربران گردشی، اختلاف توزیع برچسب‌های مجاز از توزیع عادلانه جریمه شود
             double penalty = 0;
             foreach (var u in _constraints.UserConstraints)
             {
                 if (u.ShiftType != ShiftTypes.RotatingShift) continue;
                 var ua = solution.GetUserAllAssignments(u.UserId);
                 if (ua.Count == 0) continue;
-                double fair = ua.Count / 3.0;
-                int m = ua.Count(x => x.ShiftLabel == ShiftLabel.Morning);
-                int e = ua.Count(x => x.ShiftLabel == ShiftLabel.Evening);
-                int n = ua.Count(x => x.ShiftLabel == ShiftLabel.Night);
-                penalty += Math.Abs(m - fair) + Math.Abs(e - fair) + Math.Abs(n - fair);
+
+                var allowed = u.AllowedShiftLabels != null && u.AllowedShiftLabels.Count > 0
+                    ? u.AllowedShiftLabels
+                    : new List<ShiftLabel> { ShiftLabel.Morning, ShiftLabel.Evening, ShiftLabel.Night };
+
+                if (allowed.Count == 0) continue;
+
+                double fair = ua.Count / (double)allowed.Count;
+                foreach (var label in allowed)
+                {
+                    int count = ua.Count(x => x.ShiftLabel == label);
+                    penalty += Math.Abs(count - fair);
+                }
             }
             return penalty;
         }
@@ -538,6 +547,21 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                 if (userConstraint.UnavailableShiftSlots.Any(s =>
                         s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel))
+                {
+                    return false;
+                }
+
+                if (!ShiftEligibilityResolver.IsLabelAllowed(userConstraint.AllowedShiftLabels, assignment.ShiftLabel))
+                {
+                    return false;
+                }
+            }
+
+            // ممنوعیت توالی عصر→شب و شب→صبح بدون فاصله
+            foreach (var userConstraint in _constraints.UserConstraints)
+            {
+                if (AdjacentShiftRestRules.HasForbiddenAdjacentPair(
+                        solution.GetUserAllAssignments(userConstraint.UserId)))
                 {
                     return false;
                 }
@@ -785,7 +809,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 foreach (var required in userConstraint.RequiredShiftSlots)
                 {
                     var shiftReq = GetShiftRequirement(required.ShiftLabel, userConstraint.SpecialtyId);
-                    if (shiftReq == null || !IsUserAvailableForShift(userConstraint, required.Date, required.ShiftLabel))
+                    if (shiftReq == null || !IsUserAvailableForShift(userConstraint, required.Date, required.ShiftLabel, solution))
                     {
                         continue;
                     }
@@ -813,7 +837,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     }
 
                     foreach (var shiftReq in _constraints.ShiftRequirements
-                                 .Where(s => IsUserAvailableForShift(userConstraint, presenceDate, s.ShiftLabel))
+                                 .Where(s => IsUserAvailableForShift(userConstraint, presenceDate, s.ShiftLabel, solution))
                                  .OrderByDescending(s =>
                                  {
                                      var req = s.SpecialtyRequirements
@@ -842,9 +866,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         {
             var managerWarnings = EnsureShiftManagers(solution);
             ApprovedRequestGuard.ForceApply(solution, _constraints);
+            ShiftEligibilityGuard.StripIneligibleAssignments(solution, _constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(managerWarnings);
             solution.Violations.AddRange(ApprovedRequestGuard.GetUnmetViolations(solution, _constraints));
+            solution.Violations.AddRange(ShiftEligibilityGuard.GetViolations(solution, _constraints));
+            solution.Violations.AddRange(AdjacentShiftRestGuard.GetViolations(solution, _constraints));
         }
 
         /// <summary>
@@ -963,7 +991,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                             .Where(u => u.CanBeShiftManager && u.IsActive)
                             .Where(u => u.SpecialtyId == occupantSpecialty)
                             .Where(u => !genderLocked || u.Gender == occupantGender)
-                            .Where(u => IsUserAvailableForShift(u, date, shiftReq.ShiftLabel))
+                            .Where(u => IsUserAvailableForShift(u, date, shiftReq.ShiftLabel, solution))
                             .Where(u => !solution.GetUserAssignments(u.UserId, date).Any())
                             .OrderBy(u => solution.GetUserAllAssignments(u.UserId).Count)
                             .FirstOrDefault();
@@ -1033,18 +1061,39 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .First();
         }
 
-        private bool IsUserAvailableForShift(UserConstraint user, DateTime date, ShiftLabel shiftLabel)
+        private bool IsUserAvailableForShift(
+            UserConstraint user,
+            DateTime date,
+            ShiftLabel shiftLabel,
+            ShiftSolution? solution = null)
         {
             if (user.UnavailableDates.Any(d => d.Date == date.Date))
             {
                 return false;
             }
 
-            return !user.UnavailableShiftSlots.Any(s =>
-                s.Date.Date == date.Date && s.ShiftLabel == shiftLabel);
+            if (!ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, shiftLabel))
+            {
+                return false;
+            }
+
+            if (user.UnavailableShiftSlots.Any(s =>
+                    s.Date.Date == date.Date && s.ShiftLabel == shiftLabel))
+            {
+                return false;
+            }
+
+            if (solution != null &&
+                AdjacentShiftRestRules.WouldConflict(
+                    solution.GetUserAllAssignments(user.UserId), date, shiftLabel))
+            {
+                return false;
+            }
+
+            return true;
         }
 
-        private bool IsUserAvailableForShiftOnShiftId(UserConstraint user, DateTime date, int shiftId)
+        private bool IsUserAvailableForShiftOnShiftId(UserConstraint user, DateTime date, int shiftId, ShiftSolution? solution = null)
         {
             var shiftReq = _constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftId == shiftId);
             if (shiftReq == null)
@@ -1052,7 +1101,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return !user.UnavailableDates.Contains(date.Date);
             }
 
-            return IsUserAvailableForShift(user, date, shiftReq.ShiftLabel);
+            return IsUserAvailableForShift(user, date, shiftReq.ShiftLabel, solution);
         }
 
         private bool IsRequiredShiftSlotForOtherUser(int userId, DateTime date, ShiftLabel shiftLabel)
@@ -1193,7 +1242,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
 
                 if (!solution.HasAssignment(user.UserId, shiftReq.ShiftId, date) &&
-                    !HasDailyConflict(solution, user.UserId, date))
+                    !HasDailyConflict(solution, user.UserId, date) &&
+                    !AdjacentShiftRestRules.WouldConflict(
+                        solution.GetUserAllAssignments(user.UserId), date, shiftReq.ShiftLabel))
                 {
                     solution.AddAssignment(user.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall);
                     assigned++;
@@ -1219,7 +1270,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
 
                 if (!solution.HasAssignment(user.UserId, shiftReq.ShiftId, date) &&
-                    !HasDailyConflict(solution, user.UserId, date))
+                    !HasDailyConflict(solution, user.UserId, date) &&
+                    !AdjacentShiftRestRules.WouldConflict(
+                        solution.GetUserAllAssignments(user.UserId), date, shiftReq.ShiftLabel))
                 {
                     solution.AddAssignment(user.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall);
                     current++;
@@ -1325,6 +1378,20 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             solution.RemoveAssignment(assignment1.UserId, assignment1.ShiftId, assignment1.Date);
             solution.RemoveAssignment(assignment2.UserId, assignment2.ShiftId, assignment2.Date);
 
+            // همان شیفت/روز جابه‌جا می‌شود؛ فقط توالی با سایر روزها را چک کن
+            if (AdjacentShiftRestRules.WouldConflict(
+                    solution.GetUserAllAssignments(assignment2.UserId),
+                    assignment1.Date, assignment1.ShiftLabel) ||
+                AdjacentShiftRestRules.WouldConflict(
+                    solution.GetUserAllAssignments(assignment1.UserId),
+                    assignment2.Date, assignment2.ShiftLabel))
+            {
+                // برگرداندن
+                solution.AddAssignment(assignment1.UserId, assignment1.ShiftId, assignment1.Date, assignment1.ShiftLabel, assignment1.IsOnCall);
+                solution.AddAssignment(assignment2.UserId, assignment2.ShiftId, assignment2.Date, assignment2.ShiftLabel, assignment2.IsOnCall);
+                return;
+            }
+
             solution.AddAssignment(assignment2.UserId, assignment1.ShiftId, assignment1.Date, assignment1.ShiftLabel, assignment1.IsOnCall);
             solution.AddAssignment(assignment1.UserId, assignment2.ShiftId, assignment2.Date, assignment2.ShiftLabel, assignment2.IsOnCall);
         }
@@ -1352,7 +1419,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => u.SpecialtyId == specialtyId)
                 .Where(u => u.IsActive)
                 .Where(u => !lockGender || u.Gender == assignmentGender)
-                .Where(u => IsUserAvailableForShift(u, assignment.Date, assignment.ShiftLabel))
+                .Where(u => IsUserAvailableForShift(u, assignment.Date, assignment.ShiftLabel, solution))
                 .Where(u => !IsRequiredShiftSlotForOtherUser(u.UserId, assignment.Date, assignment.ShiftLabel))
                 .Where(u => !solution.HasAssignment(u.UserId, assignment.ShiftId, assignment.Date))
                 .OrderBy(u => solution.GetUserAllAssignments(u.UserId).Count)
@@ -1381,7 +1448,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var eligibleUsers = _constraints.UserConstraints
                 .Where(u => u.SpecialtyId == slot.SpecialtyId)
                 .Where(u => u.IsActive)
-                .Where(u => IsUserAvailableForShiftOnShiftId(u, slot.Date, slot.ShiftId))
+                .Where(u => IsUserAvailableForShiftOnShiftId(u, slot.Date, slot.ShiftId, solution))
                 .Where(u => !IsRequiredShiftSlotForOtherUser(u.UserId, slot.Date, shiftReq.ShiftLabel))
                 .Where(u => !solution.HasAssignment(u.UserId, slot.ShiftId, slot.Date))
                 .Where(u => !slot.RequireMale || u.Gender == UserGender.Male)

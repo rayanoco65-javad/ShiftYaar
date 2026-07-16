@@ -1199,6 +1199,13 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         TwoShiftRotationPattern = user.TwoShiftRotationPattern
                     };
 
+                    userConstraint.AllowedShiftLabels = ShiftEligibilityResolver
+                        .GetAllowedLabels(
+                            userConstraint.ShiftType,
+                            userConstraint.ShiftSubType,
+                            userConstraint.TwoShiftRotationPattern)
+                        .ToList();
+
                     // همه محدودیت‌های عددی از تنظیمات دپارتمان خوانده می‌شوند (مقادیر پیش‌فرض)
                     userConstraint.MaxConsecutiveShifts = 3; // پیش‌فرض
                     userConstraint.MinRestDaysBetweenShifts = 1; // پیش‌فرض

@@ -51,6 +51,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public ShiftTypes ShiftType { get; set; }
         public ShiftSubTypes ShiftSubType { get; set; }
         public TwoShiftRotationPattern? TwoShiftRotationPattern { get; set; }
+        /// <summary>
+        /// شیفت‌های مجاز بر اساس نوع شیفت کاربر. خالی = همه مجاز (سازگاری عقب‌رو).
+        /// </summary>
+        public List<ShiftLabel> AllowedShiftLabels { get; set; } = new List<ShiftLabel>();
         public bool IncludedInProductivityPlan { get; set; }
         public decimal? ProductivityRequiredHours { get; set; }
         public WorkingHoursCalculationResultDto? ProductivitySnapshot { get; set; }
