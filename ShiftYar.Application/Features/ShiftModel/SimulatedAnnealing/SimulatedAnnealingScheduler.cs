@@ -310,7 +310,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         private double CalculateFairShiftCountBalancePenalty(ShiftSolution solution)
         {
             // اختلاف تعداد شیفت‌های این ماه نسبت به میانگین دپارتمان
-            var counts = _constraints.UserConstraints.Select(u => (UserId: u.UserId, Count: solution.GetUserAllAssignments(u.UserId).Count)).ToList();
+            // پرسنل فیکس (حضور روزانهٔ اجباری) از محاسبه حذف می‌شوند تا میانگین گردشی‌ها را منحرف نکنند
+            var counts = _constraints.UserConstraints
+                .Where(u => u.ShiftType != ShiftTypes.FixedShift)
+                .Select(u => (UserId: u.UserId, Count: solution.GetUserAllAssignments(u.UserId).Count))
+                .ToList();
             if (counts.Count == 0) return 0;
             double avg = counts.Average(c => c.Count);
             double sumAbs = counts.Sum(c => Math.Abs(c.Count - avg));
@@ -321,7 +325,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         {
             // اگر کاربری در سابقه اخیر شیفت اضافه بیشتری داشته، دادن شیفت اضافه به او جریمه شود
             // تعریف ساده: "شیفت اضافه" = بالاتر از میانگین همین ماه
-            var counts = _constraints.UserConstraints.Select(u => (User: u, Count: solution.GetUserAllAssignments(u.UserId).Count)).ToList();
+            var counts = _constraints.UserConstraints
+                .Where(u => u.ShiftType != ShiftTypes.FixedShift)
+                .Select(u => (User: u, Count: solution.GetUserAllAssignments(u.UserId).Count))
+                .ToList();
             if (counts.Count == 0) return 0;
             double avg = counts.Average(c => c.Count);
 
@@ -1156,18 +1163,26 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         }
 
         private IEnumerable<UserConstraint> OrderUsersForShiftAssignment(
+            ShiftSolution solution,
             IEnumerable<UserConstraint> users,
             ShiftLabel shiftLabel,
             bool isOnCall)
         {
+            // عدالت ساختاری: کسی که تاکنون شیفت کمتری گرفته اولویت دارد
+            // (سابقه ماه‌های قبل به‌عنوان معیار دوم)
             if (!isOnCall && RequiresShiftManager(shiftLabel))
             {
                 return users
                     .OrderByDescending(u => u.CanBeShiftManager)
+                    .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
+                    .ThenBy(u => u.RecentTotalShifts)
                     .ThenBy(_ => _random.Next());
             }
 
-            return users.OrderBy(_ => _random.Next());
+            return users
+                .OrderBy(u => solution.GetUserAllAssignments(u.UserId).Count)
+                .ThenBy(u => u.RecentTotalShifts)
+                .ThenBy(_ => _random.Next());
         }
 
 
@@ -1239,7 +1254,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                             GetUserSpecialty(a.UserId) == specialtyId &&
                             GetUserGender(a.UserId) == gender);
 
-            var orderedUsers = OrderUsersForShiftAssignment(eligibleUsers, shiftReq.ShiftLabel, isOnCall);
+            var orderedUsers = OrderUsersForShiftAssignment(solution, eligibleUsers, shiftReq.ShiftLabel, isOnCall);
             foreach (var user in orderedUsers.Where(u => u.Gender == gender))
             {
                 if (assigned >= requiredCount)
@@ -1268,7 +1283,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             bool isOnCall)
         {
             var current = CountSpecialtyAssignments(solution, shiftReq.ShiftId, date, specialtyId, isOnCall);
-            foreach (var user in OrderUsersForShiftAssignment(eligibleUsers, shiftReq.ShiftLabel, isOnCall))
+            foreach (var user in OrderUsersForShiftAssignment(solution, eligibleUsers, shiftReq.ShiftLabel, isOnCall))
             {
                 if (current >= targetCount)
                 {
