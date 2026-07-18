@@ -1601,7 +1601,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 }
 
                 // پرسنل فیکس (صبح/عصر) باید همهٔ روزهای غیرتعطیل شیفت باشند
+                // و در روزهای تعطیل هم نباید شیفت بگیرند (تعطیل = عدم‌حضور سخت)
                 var appliedFixedSlots = 0;
+                var appliedFixedHolidayOffs = 0;
                 foreach (var uc in constraints.UserConstraints.Where(u =>
                              u.IsActive && u.ShiftType == ShiftTypes.FixedShift))
                 {
@@ -1613,6 +1615,18 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     {
                         if (constraints.HolidayDates.Contains(date.Date))
                         {
+                            // درخواست تأییدشدهٔ حضور در همان روز بر تعطیلی مقدم است
+                            var hasApprovedPresence =
+                                uc.RequiredShiftSlots.Any(s => s.Date.Date == date.Date) ||
+                                uc.RequiredPresenceDates.Any(d => d.Date == date.Date);
+
+                            if (!hasApprovedPresence &&
+                                !uc.UnavailableDates.Any(d => d.Date == date.Date))
+                            {
+                                uc.UnavailableDates.Add(date);
+                                appliedFixedHolidayOffs++;
+                            }
+
                             continue;
                         }
 
@@ -1637,11 +1651,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     }
                 }
 
-                if (appliedFixedSlots > 0)
+                if (appliedFixedSlots > 0 || appliedFixedHolidayOffs > 0)
                 {
                     _logger.LogInformation(
-                        "LoadConstraints: Added {Count} mandatory daily slot(s) for fixed-shift staff (excluding holidays/leaves)",
-                        appliedFixedSlots);
+                        "LoadConstraints: Fixed-shift staff — {SlotCount} mandatory daily slot(s), {OffCount} holiday OFF day(s)",
+                        appliedFixedSlots, appliedFixedHolidayOffs);
                 }
 
                 // بارگذاری سابقه اخیر برای عدالت

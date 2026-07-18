@@ -70,10 +70,12 @@ public class FixedShiftDailyPresenceTests
         };
 
         // شبیه‌سازی LoadConstraints: پرسنل فیکس در همه روزهای غیرتعطیل باید شیفت خودش باشد
+        // و روزهای تعطیل برایش عدم‌حضور سخت است
         for (var d = start.Date; d <= constraints.EndDate.Date; d = d.AddDays(1))
         {
             if (constraints.HolidayDates.Contains(d))
             {
+                fixedUser.UnavailableDates.Add(d);
                 continue;
             }
 
@@ -93,7 +95,10 @@ public class FixedShiftDailyPresenceTests
                 var dayAssignments = solution.GetUserAssignments(fixedUser.UserId, d).ToList();
                 if (constraints.HolidayDates.Contains(d))
                 {
-                    continue; // در تعطیلات الزامی نیست
+                    Assert.True(
+                        dayAssignments.Count == 0,
+                        $"Run {run}: fixed-morning user assigned on holiday {d:yyyy-MM-dd}");
+                    continue;
                 }
 
                 Assert.True(
