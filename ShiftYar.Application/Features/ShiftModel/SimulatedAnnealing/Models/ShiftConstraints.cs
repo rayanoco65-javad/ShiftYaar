@@ -19,6 +19,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public DateTime EndDate { get; set; }
         public List<UserConstraint> UserConstraints { get; set; } = new List<UserConstraint>();
         public List<ShiftRequirement> ShiftRequirements { get; set; } = new List<ShiftRequirement>();
+        /// <summary>روزهای تعطیل بازه (پرسنل فیکس در این روزها شیفت نمی‌گیرند)</summary>
+        public HashSet<DateTime> HolidayDates { get; set; } = new HashSet<DateTime>();
         public GlobalConstraints GlobalConstraints { get; set; } = new GlobalConstraints();
         // قوانین قطعی (سراسری برای همه دپارتمان‌ها)
         public HardRuleSet HardRules { get; set; } = HardRuleSet.CreateDefault();

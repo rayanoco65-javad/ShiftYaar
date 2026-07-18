@@ -374,19 +374,20 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             foreach (var userConstraint in _constraints.UserConstraints)
             {
                 var userAssignments = solution.GetUserAllAssignments(userConstraint.UserId);
+                var isDailyFixedStaff = userConstraint.ShiftType == ShiftTypes.FixedShift;
 
                 // قوانین سخت در IsFeasible بررسی می‌شوند؛ اینجا فقط جریمهٔ نرم برای قوانین غیرفعال‌شده
-                if (!_constraints.HardRules.EnforceMaxConsecutiveShifts)
+                if (!_constraints.HardRules.EnforceMaxConsecutiveShifts && !isDailyFixedStaff)
                 {
                     penalty += CheckConsecutiveShifts(userAssignments, userConstraint.MaxConsecutiveShifts, violations);
                 }
 
-                if (!_constraints.HardRules.EnforceMinRestDays)
+                if (!_constraints.HardRules.EnforceMinRestDays && !isDailyFixedStaff)
                 {
                     penalty += CheckRestDays(userAssignments, userConstraint.MinRestDaysBetweenShifts, violations);
                 }
 
-                if (!_constraints.HardRules.EnforceWeeklyMaxShifts)
+                if (!_constraints.HardRules.EnforceWeeklyMaxShifts && !isDailyFixedStaff)
                 {
                     penalty += CheckWeeklyShifts(userAssignments, userConstraint.MaxShiftsPerWeek, violations) *
                               _constraints.SoftWeights.WeeklyMaxWeight;
@@ -643,7 +644,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             foreach (var userConstraint in _constraints.UserConstraints)
             {
                 var userAssignments = solution.GetUserAllAssignments(userConstraint.UserId);
-                if (_constraints.HardRules.EnforceMinRestDays)
+                // پرسنل فیکس هر روز غیرتعطیل شیفت‌اند؛ قواعد استراحت/توالی/سقف هفتگی/موظفی برایشان بی‌معناست
+                var isDailyFixedStaff = userConstraint.ShiftType == ShiftTypes.FixedShift;
+
+                if (_constraints.HardRules.EnforceMinRestDays && !isDailyFixedStaff)
                 {
                     for (int i = 1; i < userAssignments.Count; i++)
                     {
@@ -652,7 +656,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                             return false;
                     }
                 }
-                if (_constraints.HardRules.EnforceMaxConsecutiveShifts)
+                if (_constraints.HardRules.EnforceMaxConsecutiveShifts && !isDailyFixedStaff)
                 {
                     int consecutive = 1;
                     for (int i = 1; i < userAssignments.Count; i++)
@@ -670,7 +674,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     }
                 }
 
-                if (_constraints.HardRules.EnforceProductivityHours && userConstraint.ProductivityRequiredHours.HasValue)
+                if (_constraints.HardRules.EnforceProductivityHours &&
+                    userConstraint.ProductivityRequiredHours.HasValue &&
+                    !isDailyFixedStaff)
                 {
                     var workedHours = CalculateUserWorkedHours(userAssignments);
                     if (workedHours > (double)userConstraint.ProductivityRequiredHours.Value + 0.25)
@@ -679,7 +685,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     }
                 }
 
-                if (_constraints.HardRules.EnforceWeeklyMaxShifts)
+                if (_constraints.HardRules.EnforceWeeklyMaxShifts && !isDailyFixedStaff)
                 {
                     foreach (var week in userAssignments.GroupBy(a => GetWeekNumber(a.Date)))
                     {

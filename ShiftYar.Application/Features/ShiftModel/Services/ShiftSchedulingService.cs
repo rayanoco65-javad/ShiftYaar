@@ -1575,6 +1575,75 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         approvedRequestItems.Count);
                 }
 
+                // بارگذاری روزهای تعطیل بازه (برای قاعدهٔ حضور روزانهٔ پرسنل فیکس)
+                try
+                {
+                    var (rangeDates, _) = await _shiftDateRepository.GetByFilterAsync(
+                        new Application.Common.Filters.SimpleFilter<ShiftDate>(d =>
+                            d.Date != null &&
+                            d.Date >= scheduleStartDate &&
+                            d.Date < scheduleEndExclusive));
+
+                    constraints.HolidayDates = rangeDates
+                        .Where(d => d.IsHoliday == true && d.Date.HasValue)
+                        .Select(d => d.Date.Value.Date)
+                        .ToHashSet();
+
+                    _logger.LogInformation(
+                        "LoadConstraints: Loaded {HolidayCount} holiday(s) in range {Start}..{End}",
+                        constraints.HolidayDates.Count,
+                        scheduleStartDate.ToString("yyyy-MM-dd"),
+                        constraints.EndDate.ToString("yyyy-MM-dd"));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "LoadConstraints: failed to load holiday dates; fixed staff will be scheduled on all days");
+                }
+
+                // پرسنل فیکس (صبح/عصر) باید همهٔ روزهای غیرتعطیل شیفت باشند
+                var appliedFixedSlots = 0;
+                foreach (var uc in constraints.UserConstraints.Where(u =>
+                             u.IsActive && u.ShiftType == ShiftTypes.FixedShift))
+                {
+                    var fixedLabel = uc.ShiftSubType == ShiftSubTypes.FixedEvening
+                        ? ShiftLabel.Evening
+                        : ShiftLabel.Morning;
+
+                    for (var date = scheduleStartDate; date < scheduleEndExclusive; date = date.AddDays(1))
+                    {
+                        if (constraints.HolidayDates.Contains(date.Date))
+                        {
+                            continue;
+                        }
+
+                        // مرخصی تأییدشده (کل‌روز یا همان شیفت) بر حضور فیکس مقدم است
+                        if (uc.UnavailableDates.Any(d => d.Date == date.Date) ||
+                            uc.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == fixedLabel))
+                        {
+                            continue;
+                        }
+
+                        if (uc.RequiredShiftSlots.Any(s => s.Date.Date == date.Date))
+                        {
+                            continue;
+                        }
+
+                        uc.RequiredShiftSlots.Add(new ShiftSlotConstraint
+                        {
+                            Date = date,
+                            ShiftLabel = fixedLabel
+                        });
+                        appliedFixedSlots++;
+                    }
+                }
+
+                if (appliedFixedSlots > 0)
+                {
+                    _logger.LogInformation(
+                        "LoadConstraints: Added {Count} mandatory daily slot(s) for fixed-shift staff (excluding holidays/leaves)",
+                        appliedFixedSlots);
+                }
+
                 // بارگذاری سابقه اخیر برای عدالت
                 try
                 {
