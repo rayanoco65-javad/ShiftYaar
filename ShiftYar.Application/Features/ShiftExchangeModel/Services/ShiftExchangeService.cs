@@ -91,7 +91,7 @@ namespace ShiftYar.Application.Features.ShiftExchangeModel.Services
             }
 
             // پیدا کردن سوپروایزر دپارتمان
-            var requestingUser = await _userRepository.GetByIdAsync(dto.RequestingUserId);
+            var requestingUser = await _userRepository.GetByIdAsync(dto.RequestingUserId, "Department");
             if (requestingUser?.Department?.SupervisorId == null)
             {
                 throw new InvalidOperationException("سوپروایزر دپارتمان تعریف نشده است");
