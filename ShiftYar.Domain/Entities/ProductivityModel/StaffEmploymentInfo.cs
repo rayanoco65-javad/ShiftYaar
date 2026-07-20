@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using ShiftYar.Domain.Entities.UserModel;
 
 namespace ShiftYar.Domain.Entities.ProductivityModel
@@ -31,8 +32,9 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
                 return 0;
             }
 
-            var totalMonths = (referenceDate.Year - DateOfEmployment.Value.Year) * 12
-                              + (referenceDate.Month - DateOfEmployment.Value.Month);
+            var employment = NormalizeEmploymentDate(DateOfEmployment.Value);
+            var totalMonths = (referenceDate.Year - employment.Year) * 12
+                              + (referenceDate.Month - employment.Month);
 
             if (totalMonths < 0)
             {
@@ -40,6 +42,28 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
             }
 
             return (int)Math.Floor(totalMonths / 12m);
+        }
+
+        /// <summary>
+        /// بعضی رکوردهای قدیمی، اجزای تاریخ شمسی را داخل DateTime میلادی ذخیره کرده‌اند (مثلاً سال ۱۳۸۰).
+        /// </summary>
+        public static DateTime NormalizeEmploymentDate(DateTime stored)
+        {
+            if (stored.Year < 1200 || stored.Year > 1500)
+            {
+                return stored;
+            }
+
+            try
+            {
+                var persian = new PersianCalendar();
+                var day = Math.Clamp(stored.Day, 1, persian.GetDaysInMonth(stored.Year, stored.Month));
+                return persian.ToDateTime(stored.Year, stored.Month, day, 0, 0, 0, 0);
+            }
+            catch
+            {
+                return stored;
+            }
         }
 
         /// <summary>

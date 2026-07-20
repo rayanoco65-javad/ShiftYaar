@@ -266,8 +266,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             // جریمه‌های عدالت و چرخش
             score += CalculateFairShiftCountBalancePenalty(solution) * _constraints.SoftWeights.FairShiftCountBalanceWeight;
+            score += CalculateFairWorkedHoursBalancePenalty(solution) * _constraints.SoftWeights.FairWorkedHoursBalanceWeight;
+            score += CalculateFairNightShiftBalancePenalty(solution) * _constraints.SoftWeights.FairNightShiftBalanceWeight;
             score += CalculateExtraShiftRotationPenalty(solution) * _constraints.SoftWeights.ExtraShiftRotationWeight;
             score += CalculateShiftLabelBalancePenalty(solution) * _constraints.SoftWeights.ShiftLabelBalanceWeight;
+            score += CalculateNightShiftSeniorityPenalty(solution) * _constraints.SoftWeights.NightShiftDistributionBySeniorityWeight;
 
             solution.Violations = violations;
 
@@ -320,6 +323,58 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             double avg = counts.Average(c => c.Count);
             double sumAbs = counts.Sum(c => Math.Abs(c.Count - avg));
             return sumAbs; // وزن بیرونی اعمال می‌شود
+        }
+
+        private double CalculateFairWorkedHoursBalancePenalty(ShiftSolution solution)
+        {
+            var hours = _constraints.UserConstraints
+                .Where(u => u.ShiftType != ShiftTypes.FixedShift)
+                .Select(u => CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)))
+                .ToList();
+            if (hours.Count < 2) return 0;
+
+            var avg = hours.Average();
+            return hours.Sum(h => Math.Abs(h - avg));
+        }
+
+        private double CalculateFairNightShiftBalancePenalty(ShiftSolution solution)
+        {
+            var nightEligible = _constraints.UserConstraints
+                .Where(u => u.ShiftType != ShiftTypes.FixedShift)
+                .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Night))
+                .ToList();
+            if (nightEligible.Count < 2) return 0;
+
+            var nightCounts = nightEligible
+                .Select(u => solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall))
+                .ToList();
+            var avg = nightCounts.Average();
+            return nightCounts.Sum(c => Math.Abs(c - avg)) * 2.0;
+        }
+
+        private double CalculateNightShiftSeniorityPenalty(ShiftSolution solution)
+        {
+            if (_constraints.SoftWeights.NightShiftDistributionBySeniorityWeight <= 0)
+            {
+                return 0;
+            }
+
+            var eligible = _constraints.UserConstraints
+                .Where(u => u.ShiftType != ShiftTypes.FixedShift)
+                .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Night))
+                .ToList();
+            if (eligible.Count < 2) return 0;
+
+            var totalNights = eligible.Sum(u =>
+                solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall));
+            if (totalNights == 0) return 0;
+
+            double fair = totalNights / (double)eligible.Count;
+            return eligible.Sum(u =>
+            {
+                var nights = solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+                return Math.Abs(nights - fair);
+            });
         }
 
         private double CalculateExtraShiftRotationPenalty(ShiftSolution solution)
@@ -1194,21 +1249,38 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftLabel shiftLabel,
             bool isOnCall)
         {
-            // عدالت ساختاری: کسی که تاکنون شیفت کمتری گرفته اولویت دارد
-            // (سابقه ماه‌های قبل به‌عنوان معیار دوم)
+            // اولویت: ساعات مؤثر کمتر، سپس تعداد شب کمتر (برای شیفت شب)، سپس تعداد شیفت کمتر
             if (!isOnCall && RequiresShiftManager(shiftLabel))
             {
                 return users
                     .OrderByDescending(u => u.CanBeShiftManager)
+                    .ThenBy(u => CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)))
+                    .ThenBy(u => CountUserNightShifts(solution, u.UserId))
+                    .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
+                    .ThenBy(u => u.RecentTotalShifts)
+                    .ThenBy(_ => _random.Next());
+            }
+
+            if (shiftLabel == ShiftLabel.Night)
+            {
+                return users
+                    .OrderBy(u => CountUserNightShifts(solution, u.UserId))
+                    .ThenBy(u => CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)))
                     .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
                     .ThenBy(u => u.RecentTotalShifts)
                     .ThenBy(_ => _random.Next());
             }
 
             return users
-                .OrderBy(u => solution.GetUserAllAssignments(u.UserId).Count)
+                .OrderBy(u => CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)))
+                .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
                 .ThenBy(u => u.RecentTotalShifts)
                 .ThenBy(_ => _random.Next());
+        }
+
+        private static int CountUserNightShifts(ShiftSolution solution, int userId)
+        {
+            return solution.GetUserAllAssignments(userId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
         }
 
 

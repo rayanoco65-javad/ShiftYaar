@@ -52,8 +52,11 @@ public class FairDistributionTests
             SoftWeights = new SoftRuleWeights
             {
                 FairShiftCountBalanceWeight = 2.0,
+                FairWorkedHoursBalanceWeight = 2.5,
+                FairNightShiftBalanceWeight = 2.5,
                 ExtraShiftRotationWeight = 1.0,
-                ShiftLabelBalanceWeight = 1.0
+                ShiftLabelBalanceWeight = 1.0,
+                NightShiftDistributionBySeniorityWeight = 1.0
             }
         };
 

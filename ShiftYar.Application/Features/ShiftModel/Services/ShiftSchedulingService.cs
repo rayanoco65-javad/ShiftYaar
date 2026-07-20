@@ -9,6 +9,7 @@ using ShiftYar.Application.Interfaces.ShiftModel;
 using ShiftYar.Application.Interfaces.ProductivityModel;
 using ShiftYar.Application.Interfaces.Settings;
 using ShiftYar.Domain.Entities.DepartmentModel;
+using ShiftYar.Domain.Entities.ProductivityModel;
 using ShiftYar.Domain.Entities.ShiftModel;
 using ShiftYar.Domain.Entities.ShiftDateModel;
 using ShiftYar.Domain.Entities.UserModel;
@@ -778,35 +779,40 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
         private WorkingHoursCalculationResultDto? CalculateProductivitySnapshot(User user, UserConstraint userConstraint, ShiftConstraints constraints, DepartmentSchedulingSettings? deptSetting, double nightShiftDurationHours)
         {
-            if (user.IncludedProductivityPlan != true)
+            // فقط opt-out صریح؛ null برای پرسنل گردشی به‌معنی مشمول بودن است
+            if (user.IncludedProductivityPlan == false)
             {
                 return null;
             }
+
+            if (user.IncludedProductivityPlan != true && userConstraint.ShiftType != ShiftTypes.RotatingShift)
+            {
+                return null;
+            }
+
+            var employmentDate = user.DateOfEmployment.HasValue
+                ? StaffEmploymentInfo.NormalizeEmploymentDate(user.DateOfEmployment.Value)
+                : (DateTime?)null;
 
             var staffInfo = new StaffEmploymentInfoDto
             {
                 StaffId = user.Id ?? 0,
                 StaffFullName = user.FullName,
-                DateOfEmployment = user.DateOfEmployment,
+                DateOfEmployment = employmentDate,
                 HardshipPercent = user.HardshipPercent ?? 0m,
                 HasUncommonRotatingShifts = userConstraint.ShiftType == ShiftTypes.RotatingShift
             };
 
             var weeks = CalculateWeekSpan(constraints.StartDate, constraints.EndDate);
-            var nightCap = userConstraint.MaxNightShiftsPerMonth > 0
-                ? userConstraint.MaxNightShiftsPerMonth
-                : deptSetting?.MaxNightShiftsPerMonth ?? 0;
 
-            var nightHolidayHours = nightCap > 0 && nightShiftDurationHours > 0
-                ? (decimal)(nightCap * nightShiftDurationHours)
-                : 0m;
-
+            // برای سقف زمان‌بندی، اعتبار شب/تعطیل را از موظفی کم نمی‌کنیم
+            // (ساعات مؤثر با ضریب ۱.۵ جداگانه در SA محاسبه می‌شوند).
             var request = new WorkingHoursCalculationRequestDto
             {
                 Staff = staffInfo,
                 TargetMonth = new DateTime(constraints.StartDate.Year, constraints.StartDate.Month, 1),
                 NumberOfWeeksInMonth = weeks,
-                NightHolidayHours = nightHolidayHours
+                NightHolidayHours = 0m
             };
 
             try
@@ -1165,9 +1171,14 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     constraints.SoftWeights.UserPreferredShiftWeight = deptSettingEarly.UserPreferredShiftWeight ?? 1.0;
                     constraints.SoftWeights.WeeklyMaxWeight = deptSettingEarly.WeeklyMaxWeight ?? 1.0;
                     constraints.SoftWeights.MonthlyNightCapWeight = deptSettingEarly.MonthlyNightCapWeight ?? 1.0;
-                    constraints.SoftWeights.FairShiftCountBalanceWeight = deptSettingEarly.FairShiftCountBalanceWeight ?? 1.0;
+                    constraints.SoftWeights.FairShiftCountBalanceWeight = deptSettingEarly.FairShiftCountBalanceWeight ?? 2.0;
                     constraints.SoftWeights.ExtraShiftRotationWeight = deptSettingEarly.ExtraShiftRotationWeight ?? 1.0;
-                    constraints.SoftWeights.ShiftLabelBalanceWeight = deptSettingEarly.ShiftLabelBalanceWeight ?? 1.0;
+                    constraints.SoftWeights.ShiftLabelBalanceWeight = Math.Max(1.0, deptSettingEarly.ShiftLabelBalanceWeight ?? 1.0);
+                    constraints.SoftWeights.FairWorkedHoursBalanceWeight = 2.5;
+                    constraints.SoftWeights.FairNightShiftBalanceWeight = 2.5;
+                    constraints.SoftWeights.NightShiftDistributionBySeniorityWeight =
+                        Math.Max(1.0, deptSettingEarly.NightShiftDistributionWeight ?? 1.0);
+                    constraints.HardRules.EnforceProductivityHours = true;
 
                     constraints.GlobalConstraints.RequireManagerForEveningShift = deptSettingEarly.RequireManagerForEveningShift ?? false;
                     constraints.GlobalConstraints.RequireManagerForNightShift = deptSettingEarly.RequireManagerForNightShift ?? false;
@@ -1764,11 +1775,21 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     // Fairness weights
                     if (deptSetting.FairShiftCountBalanceWeight.HasValue) constraints.SoftWeights.FairShiftCountBalanceWeight = deptSetting.FairShiftCountBalanceWeight.Value;
                     if (deptSetting.ExtraShiftRotationWeight.HasValue) constraints.SoftWeights.ExtraShiftRotationWeight = deptSetting.ExtraShiftRotationWeight.Value;
-                    if (deptSetting.ShiftLabelBalanceWeight.HasValue) constraints.SoftWeights.ShiftLabelBalanceWeight = deptSetting.ShiftLabelBalanceWeight.Value;
+                    if (deptSetting.ShiftLabelBalanceWeight.HasValue)
+                        constraints.SoftWeights.ShiftLabelBalanceWeight = Math.Max(1.0, deptSetting.ShiftLabelBalanceWeight.Value);
                     if (deptSetting.FairnessLookbackMonths.HasValue) constraints.SoftWeights.FairnessLookbackMonths = deptSetting.FairnessLookbackMonths.Value;
 
+                    // تعادل ساعت مؤثر و شیفت شب (پیش‌فرض قوی؛ قابل‌جایگزینی با وزن شب از تنظیمات)
+                    constraints.SoftWeights.FairWorkedHoursBalanceWeight = Math.Max(2.0, constraints.SoftWeights.FairWorkedHoursBalanceWeight);
+                    constraints.SoftWeights.FairNightShiftBalanceWeight = Math.Max(2.0, constraints.SoftWeights.FairNightShiftBalanceWeight);
+
                     // Night shift distribution weights
-                    if (deptSetting.NightShiftDistributionWeight.HasValue) constraints.SoftWeights.NightShiftDistributionBySeniorityWeight = deptSetting.NightShiftDistributionWeight.Value;
+                    if (deptSetting.NightShiftDistributionWeight.HasValue)
+                        constraints.SoftWeights.NightShiftDistributionBySeniorityWeight = Math.Max(1.0, deptSetting.NightShiftDistributionWeight.Value);
+                    else
+                        constraints.SoftWeights.NightShiftDistributionBySeniorityWeight = Math.Max(1.0, constraints.SoftWeights.NightShiftDistributionBySeniorityWeight);
+
+                    constraints.HardRules.EnforceProductivityHours = true;
                 }
 
                 _logger.LogInformation(

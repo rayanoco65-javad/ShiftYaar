@@ -223,13 +223,15 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public double MonthlyNightCapWeight { get; set; } = 1.0;
 
         // Fairness weights
-        public double FairShiftCountBalanceWeight { get; set; } = 0.0; // تعادل تعداد شیفت بین افراد در این ماه
-        public double ExtraShiftRotationWeight { get; set; } = 0.0;     // جلوگیری از دادن شیفت اضافه به کسانی که اخیراً زیاد گرفته‌اند
-        public double ShiftLabelBalanceWeight { get; set; } = 0.0;      // تعادل Morning/Evening/Night برای کاربران گردشی
+        public double FairShiftCountBalanceWeight { get; set; } = 1.0; // تعادل تعداد شیفت بین افراد در این ماه
+        public double FairWorkedHoursBalanceWeight { get; set; } = 2.5; // تعادل ساعات مؤثر کار (با ضریب شب/تعطیل)
+        public double FairNightShiftBalanceWeight { get; set; } = 2.5; // تعادل تعداد شیفت شب بین افراد واجد شرایط
+        public double ExtraShiftRotationWeight { get; set; } = 1.0;     // جلوگیری از دادن شیفت اضافه به کسانی که اخیراً زیاد گرفته‌اند
+        public double ShiftLabelBalanceWeight { get; set; } = 1.0;      // تعادل Morning/Evening/Night برای کاربران گردشی
         public int FairnessLookbackMonths { get; set; } = 1;            // بازه سابقه برای محاسبات عدالت
 
         // Night shift distribution weights
-        public double NightShiftDistributionBySeniorityWeight { get; set; } = 0.0; // وزن توزیع شیفت‌های شب بر اساس سابقه
+        public double NightShiftDistributionBySeniorityWeight { get; set; } = 1.0; // وزن توزیع شیفت‌های شب بر اساس سابقه
         public double ProductivityOvertimeWeight { get; set; } = 2.0; // وزن جریمه مازاد ساعات موظفی
 
         public static SoftRuleWeights CreateDefault()
