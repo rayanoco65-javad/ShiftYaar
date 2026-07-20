@@ -60,6 +60,9 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools.Models
         public int MinRestDaysBetweenShifts { get; set; } = 1; // حداقل روز استراحت
         public int MaxShiftsPerWeek { get; set; } = 5; // سقف شیفت هفتگی
         public int MaxNightShiftsPerMonth { get; set; } = 8; // سقف شیفت شب ماهانه
+        public int? ExactNightShiftCount { get; set; }
+        public int? ExactHolidayWeekendNightShiftCount { get; set; }
+        public int MinDaysBetweenNightShifts { get; set; } = 1;
         public bool CanBeShiftManager { get; set; } // توانایی مدیر شیفت بودن
         public ShiftTypes ShiftType { get; set; } // نوع شیفت
         public ShiftSubTypes ShiftSubType { get; set; } // زیرنوع شیفت

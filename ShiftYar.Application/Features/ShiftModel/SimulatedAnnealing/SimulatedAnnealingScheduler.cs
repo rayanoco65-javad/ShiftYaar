@@ -268,6 +268,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             score += CalculateFairShiftCountBalancePenalty(solution) * _constraints.SoftWeights.FairShiftCountBalanceWeight;
             score += CalculateFairWorkedHoursBalancePenalty(solution) * _constraints.SoftWeights.FairWorkedHoursBalanceWeight;
             score += CalculateFairNightShiftBalancePenalty(solution) * _constraints.SoftWeights.FairNightShiftBalanceWeight;
+            score += CalculateMorningEveningBalancePenalty(solution) * _constraints.SoftWeights.MorningEveningBalanceWeight;
+            score += CalculateExactNightQuotaPenalty(solution) * _constraints.SoftWeights.ExactNightQuotaWeight;
             score += CalculateExtraShiftRotationPenalty(solution) * _constraints.SoftWeights.ExtraShiftRotationWeight;
             score += CalculateShiftLabelBalancePenalty(solution) * _constraints.SoftWeights.ShiftLabelBalanceWeight;
             score += CalculateNightShiftSeniorityPenalty(solution) * _constraints.SoftWeights.NightShiftDistributionBySeniorityWeight;
@@ -341,6 +343,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         {
             var nightEligible = _constraints.UserConstraints
                 .Where(u => u.ShiftType != ShiftTypes.FixedShift)
+                .Where(u => !u.HasExactNightQuota) // سهمیه دقیق از تعادل نرم خارج است
                 .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Night))
                 .ToList();
             if (nightEligible.Count < 2) return 0;
@@ -350,6 +353,51 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .ToList();
             var avg = nightCounts.Average();
             return nightCounts.Sum(c => Math.Abs(c - avg)) * 2.0;
+        }
+
+        private double CalculateExactNightQuotaPenalty(ShiftSolution solution)
+        {
+            double penalty = 0;
+            foreach (var user in _constraints.UserConstraints)
+            {
+                var nights = solution.GetUserAllAssignments(user.UserId)
+                    .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall)
+                    .ToList();
+
+                if (user.ExactNightShiftCount.HasValue)
+                {
+                    penalty += Math.Abs(nights.Count - user.ExactNightShiftCount.Value) * 20;
+                }
+
+                if (user.ExactHolidayWeekendNightShiftCount.HasValue)
+                {
+                    var holidayNights = nights.Count(a => _constraints.IsHoliday(a.Date));
+                    penalty += Math.Abs(holidayNights - user.ExactHolidayWeekendNightShiftCount.Value) * 25;
+                }
+            }
+
+            return penalty;
+        }
+
+        private double CalculateMorningEveningBalancePenalty(ShiftSolution solution)
+        {
+            double penalty = 0;
+            foreach (var u in _constraints.UserConstraints)
+            {
+                if (u.ShiftType != ShiftTypes.RotatingShift) continue;
+                if (!ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Morning) ||
+                    !ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Evening))
+                {
+                    continue;
+                }
+
+                var ua = solution.GetUserAllAssignments(u.UserId);
+                var morning = ua.Count(a => a.ShiftLabel == ShiftLabel.Morning && !a.IsOnCall);
+                var evening = ua.Count(a => a.ShiftLabel == ShiftLabel.Evening && !a.IsOnCall);
+                penalty += Math.Abs(morning - evening) * 2.0;
+            }
+
+            return penalty;
         }
 
         private double CalculateNightShiftSeniorityPenalty(ShiftSolution solution)
@@ -775,15 +823,46 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     }
                 }
 
-                if (_constraints.HardRules.EnforceNightShiftMonthlyCap)
+                if (_constraints.HardRules.EnforceNightShiftMonthlyCap || userConstraint.HasExactNightQuota)
                 {
-                    foreach (var month in userAssignments
-                                 .Where(a => a.ShiftLabel == ShiftLabel.Night)
-                                 .GroupBy(a => new { a.Date.Year, a.Date.Month }))
+                    var nights = userAssignments.Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall).ToList();
+                    if (userConstraint.HasExactNightQuota)
                     {
-                        if (month.Count() > userConstraint.MaxNightShiftsPerMonth)
+                        if (nights.Count > userConstraint.ExactNightShiftCount!.Value)
                         {
                             return false;
+                        }
+                    }
+                    else
+                    {
+                        foreach (var month in nights.GroupBy(a => new { a.Date.Year, a.Date.Month }))
+                        {
+                            if (month.Count() > userConstraint.MaxNightShiftsPerMonth)
+                            {
+                                return false;
+                            }
+                        }
+                    }
+
+                    if (userConstraint.ExactHolidayWeekendNightShiftCount.HasValue)
+                    {
+                        var holidayNights = nights.Count(a => _constraints.IsHoliday(a.Date));
+                        if (holidayNights > userConstraint.ExactHolidayWeekendNightShiftCount.Value)
+                        {
+                            return false;
+                        }
+                    }
+
+                    if (userConstraint.MinDaysBetweenNightShifts > 0 && nights.Count > 1)
+                    {
+                        var ordered = nights.OrderBy(a => a.Date).ToList();
+                        for (var i = 1; i < ordered.Count; i++)
+                        {
+                            if (Math.Abs((ordered[i].Date.Date - ordered[i - 1].Date.Date).Days) <=
+                                userConstraint.MinDaysBetweenNightShifts)
+                            {
+                                return false;
+                            }
                         }
                     }
                 }
@@ -959,11 +1038,41 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ApprovedRequestGuard.ForceApply(solution, _constraints);
             ShiftEligibilityGuard.StripIneligibleAssignments(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+            ExactNightQuotaGuard.Enforce(solution, _constraints);
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(managerWarnings);
             solution.Violations.AddRange(ApprovedRequestGuard.GetUnmetViolations(solution, _constraints));
             solution.Violations.AddRange(ShiftEligibilityGuard.GetViolations(solution, _constraints));
             solution.Violations.AddRange(AdjacentShiftRestGuard.GetViolations(solution, _constraints));
+            solution.Violations.AddRange(GetExactNightQuotaViolations(solution));
+        }
+
+        private List<string> GetExactNightQuotaViolations(ShiftSolution solution)
+        {
+            var violations = new List<string>();
+            foreach (var user in _constraints.UserConstraints)
+            {
+                var nights = solution.GetUserAllAssignments(user.UserId)
+                    .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall)
+                    .ToList();
+                if (user.ExactNightShiftCount.HasValue && nights.Count != user.ExactNightShiftCount.Value)
+                {
+                    violations.Add(
+                        $"User {user.UserId} night quota mismatch ({nights.Count}/{user.ExactNightShiftCount.Value}).");
+                }
+
+                if (user.ExactHolidayWeekendNightShiftCount.HasValue)
+                {
+                    var holidayNights = nights.Count(a => _constraints.IsHoliday(a.Date));
+                    if (holidayNights != user.ExactHolidayWeekendNightShiftCount.Value)
+                    {
+                        violations.Add(
+                            $"User {user.UserId} holiday/weekend night quota mismatch ({holidayNights}/{user.ExactHolidayWeekendNightShiftCount.Value}).");
+                    }
+                }
+            }
+
+            return violations;
         }
 
         /// <summary>
@@ -1184,6 +1293,55 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return false;
             }
 
+            if (shiftLabel == ShiftLabel.Night && solution != null)
+            {
+                var nights = solution.GetUserAllAssignments(user.UserId)
+                    .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall)
+                    .ToList();
+
+                if (user.ExactNightShiftCount.HasValue && nights.Count >= user.ExactNightShiftCount.Value)
+                {
+                    return false;
+                }
+
+                if (!user.HasExactNightQuota && nights.Count >= user.MaxNightShiftsPerMonth)
+                {
+                    return false;
+                }
+
+                var holidayNights = nights.Count(a => _constraints.IsHoliday(a.Date));
+                if (user.ExactHolidayWeekendNightShiftCount.HasValue &&
+                    _constraints.IsHoliday(date) &&
+                    holidayNights >= user.ExactHolidayWeekendNightShiftCount.Value)
+                {
+                    return false;
+                }
+
+                // رزرو شب‌های باقی‌مانده برای تکمیل سهمیه تعطیل
+                if (user.ExactNightShiftCount.HasValue &&
+                    user.ExactHolidayWeekendNightShiftCount.HasValue &&
+                    !_constraints.IsHoliday(date))
+                {
+                    var remainingTotal = user.ExactNightShiftCount.Value - nights.Count;
+                    var remainingHoliday = user.ExactHolidayWeekendNightShiftCount.Value - holidayNights;
+                    if (remainingHoliday > 0 && remainingTotal <= remainingHoliday)
+                    {
+                        return false;
+                    }
+                }
+
+                if (user.MinDaysBetweenNightShifts > 0)
+                {
+                    foreach (var n in nights)
+                    {
+                        if (Math.Abs((date.Date - n.Date.Date).Days) <= user.MinDaysBetweenNightShifts)
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+
             return true;
         }
 
@@ -1247,8 +1405,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftSolution solution,
             IEnumerable<UserConstraint> users,
             ShiftLabel shiftLabel,
-            bool isOnCall)
+            bool isOnCall,
+            DateTime date)
         {
+            var isHoliday = _constraints.IsHoliday(date);
+
             // اولویت: ساعات مؤثر کمتر، سپس تعداد شب کمتر (برای شیفت شب)، سپس تعداد شیفت کمتر
             if (!isOnCall && RequiresShiftManager(shiftLabel))
             {
@@ -1264,7 +1425,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             if (shiftLabel == ShiftLabel.Night)
             {
                 return users
-                    .OrderBy(u => CountUserNightShifts(solution, u.UserId))
+                    .OrderBy(u => NightQuotaPriority(solution, u, isHoliday))
+                    .ThenBy(u => CountUserNightShifts(solution, u.UserId))
                     .ThenBy(u => CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)))
                     .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
                     .ThenBy(u => u.RecentTotalShifts)
@@ -1273,16 +1435,65 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             return users
                 .OrderBy(u => CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)))
+                .ThenBy(u => MorningEveningImbalance(solution, u, shiftLabel))
                 .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
                 .ThenBy(u => u.RecentTotalShifts)
                 .ThenBy(_ => _random.Next());
+        }
+
+        private int NightQuotaPriority(ShiftSolution solution, UserConstraint user, bool dateIsHoliday)
+        {
+            if (!user.HasExactNightQuota && !user.ExactHolidayWeekendNightShiftCount.HasValue)
+            {
+                return CountUserNightShifts(solution, user.UserId);
+            }
+
+            var nights = solution.GetUserAllAssignments(user.UserId)
+                .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall)
+                .ToList();
+            var holidayNights = nights.Count(a => _constraints.IsHoliday(a.Date));
+
+            if (dateIsHoliday && user.ExactHolidayWeekendNightShiftCount.HasValue)
+            {
+                var holidayDeficit = user.ExactHolidayWeekendNightShiftCount.Value - holidayNights;
+                if (holidayDeficit > 0)
+                {
+                    return -2000 - holidayDeficit;
+                }
+            }
+
+            var deficit = (user.ExactNightShiftCount ?? 0) - nights.Count;
+            if (deficit > 0)
+            {
+                return -1000 - deficit;
+            }
+
+            return 1000 + nights.Count;
+        }
+
+        private static int MorningEveningImbalance(ShiftSolution solution, UserConstraint user, ShiftLabel assigningLabel)
+        {
+            var ua = solution.GetUserAllAssignments(user.UserId);
+            var m = ua.Count(a => a.ShiftLabel == ShiftLabel.Morning && !a.IsOnCall);
+            var e = ua.Count(a => a.ShiftLabel == ShiftLabel.Evening && !a.IsOnCall);
+            // کسی که صبح بیشتر دارد برای عصر اولویت بگیرد و برعکس
+            if (assigningLabel == ShiftLabel.Morning)
+            {
+                return m - e;
+            }
+
+            if (assigningLabel == ShiftLabel.Evening)
+            {
+                return e - m;
+            }
+
+            return Math.Abs(m - e);
         }
 
         private static int CountUserNightShifts(ShiftSolution solution, int userId)
         {
             return solution.GetUserAllAssignments(userId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
         }
-
 
         private void AssignRequiredPersonnel(ShiftSolution solution, List<UserConstraint> eligibleUsers,
             ShiftRequirement shiftReq, DateTime date, SpecialtyRequirement specialtyReq)
@@ -1353,7 +1564,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                             GetUserSpecialty(a.UserId) == specialtyId &&
                             GetUserGender(a.UserId) == gender);
 
-            var orderedUsers = OrderUsersForShiftAssignment(solution, eligibleUsers, shiftReq.ShiftLabel, isOnCall);
+            var orderedUsers = OrderUsersForShiftAssignment(solution, eligibleUsers, shiftReq.ShiftLabel, isOnCall, date);
             foreach (var user in orderedUsers.Where(u => u.Gender == gender))
             {
                 if (assigned >= requiredCount)
@@ -1382,7 +1593,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             bool isOnCall)
         {
             var current = CountSpecialtyAssignments(solution, shiftReq.ShiftId, date, specialtyId, isOnCall);
-            foreach (var user in OrderUsersForShiftAssignment(solution, eligibleUsers, shiftReq.ShiftLabel, isOnCall))
+            foreach (var user in OrderUsersForShiftAssignment(solution, eligibleUsers, shiftReq.ShiftLabel, isOnCall, date))
             {
                 if (current >= targetCount)
                 {

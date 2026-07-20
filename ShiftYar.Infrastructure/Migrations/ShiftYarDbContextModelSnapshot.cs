@@ -1158,6 +1158,12 @@ namespace ShiftYar.Infrastructure.Migrations
                     b.Property<decimal?>("HardshipPercent")
                         .HasColumnType("decimal(5,2)");
 
+                    b.Property<int?>("ExactHolidayWeekendNightShiftCount")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ExactNightShiftCount")
+                        .HasColumnType("int");
+
                     b.Property<bool?>("IncludedProductivityPlan")
                         .HasColumnType("bit");
 

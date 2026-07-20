@@ -38,6 +38,16 @@ namespace ShiftYar.Domain.Entities.UserModel
         public decimal? HardshipPercent { get; set; }   //درصد صعوبت (سختی) کار (۰–۱۰۰) برای کاهش ساعت موظفی هفتگی
         public bool? OvertimeConsent { get; set; }  //رضایت پرسنل به اضافه‌کاری (حداکثر ۸۰ ساعت در ماه) ر
 
+        /// <summary>
+        /// تعداد دقیق شیفت شب در بازه برنامه‌ریزی. null = طبق تنظیمات قبلی دپارتمان.
+        /// </summary>
+        public int? ExactNightShiftCount { get; set; }
+
+        /// <summary>
+        /// از میان شیفت‌های شب، چند مورد باید در شب‌های تعطیل/آخرهفته باشد. null = بدون اجبار.
+        /// </summary>
+        public int? ExactHolidayWeekendNightShiftCount { get; set; }
+
         public string? Image { get; set; }
 
         [ForeignKey("Department")]

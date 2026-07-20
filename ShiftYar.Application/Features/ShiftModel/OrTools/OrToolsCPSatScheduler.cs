@@ -206,11 +206,8 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools
                 AddWeeklyMaxShiftsConstraints(model, variables);
             }
 
-            // محدودیت نرم: حداکثر شیفت شب ماهانه
-            if (!_constraints.HardRules.EnforceNightShiftMonthlyCap)
-            {
-                AddMonthlyNightShiftsConstraints(model, variables);
-            }
+            // محدودیت شیفت شب: سهمیه دقیق / سقف سخت / سقف نرم
+            AddMonthlyNightShiftsConstraints(model, variables);
         }
 
         /// <summary>
@@ -513,6 +510,7 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools
             {
                 var user = _constraints.UserConstraints[userIndex];
                 var nightShifts = new List<IntVar>();
+                var holidayNightShifts = new List<IntVar>();
 
                 for (int dateIndex = 0; dateIndex < _constraints.NumDays; dateIndex++)
                 {
@@ -526,16 +524,80 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools
                             if (variables.ContainsKey(key))
                             {
                                 nightShifts.Add(variables[key]);
+                                if (_constraints.IsHolidayDayIndex(dateIndex))
+                                {
+                                    holidayNightShifts.Add(variables[key]);
+                                }
                             }
                         }
                     }
                 }
 
-                if (nightShifts.Count > 0)
+                if (nightShifts.Count == 0)
                 {
-                    // محدودیت نرم: جریمه برای تجاوز از حد مجاز
+                    continue;
+                }
+
+                if (user.ExactNightShiftCount.HasValue)
+                {
+                    model.Add(LinearExpr.Sum(nightShifts) == user.ExactNightShiftCount.Value);
+                }
+                else if (_constraints.HardRules.EnforceNightShiftMonthlyCap)
+                {
+                    model.Add(LinearExpr.Sum(nightShifts) <= user.MaxNightShiftsPerMonth);
+                }
+                else
+                {
                     var excessVar = model.NewIntVar(0, _constraints.NumDays, $"monthly_night_excess_{userIndex}");
                     model.Add(excessVar >= LinearExpr.Sum(nightShifts) - user.MaxNightShiftsPerMonth);
+                }
+
+                if (user.ExactHolidayWeekendNightShiftCount.HasValue && holidayNightShifts.Count > 0)
+                {
+                    model.Add(LinearExpr.Sum(holidayNightShifts) == user.ExactHolidayWeekendNightShiftCount.Value);
+                }
+
+                // فاصله بین شب‌ها
+                if (user.MinDaysBetweenNightShifts > 0)
+                {
+                    var nightByDay = new Dictionary<int, List<IntVar>>();
+                    for (int dateIndex = 0; dateIndex < _constraints.NumDays; dateIndex++)
+                    {
+                        for (int shiftIndex = 0; shiftIndex < _constraints.NumShifts; shiftIndex++)
+                        {
+                            var shift = _constraints.ShiftRequirements[shiftIndex];
+                            if (shift.ShiftLabel != ShiftLabel.Night) continue;
+                            var key = OrToolsVariableKeys.GetAssignmentKey(userIndex, shiftIndex, dateIndex);
+                            if (!variables.ContainsKey(key)) continue;
+                            if (!nightByDay.ContainsKey(dateIndex))
+                            {
+                                nightByDay[dateIndex] = new List<IntVar>();
+                            }
+
+                            nightByDay[dateIndex].Add(variables[key]);
+                        }
+                    }
+
+                    var days = nightByDay.Keys.OrderBy(d => d).ToList();
+                    for (var i = 0; i < days.Count; i++)
+                    {
+                        for (var j = i + 1; j < days.Count; j++)
+                        {
+                            if (days[j] - days[i] > user.MinDaysBetweenNightShifts)
+                            {
+                                break;
+                            }
+
+                            // اگر فاصله <= MinDaysBetweenNightShifts باشد، هر دو همزمان نمی‌توانند ۱ باشند
+                            foreach (var a in nightByDay[days[i]])
+                            {
+                                foreach (var b in nightByDay[days[j]])
+                                {
+                                    model.Add(a + b <= 1);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

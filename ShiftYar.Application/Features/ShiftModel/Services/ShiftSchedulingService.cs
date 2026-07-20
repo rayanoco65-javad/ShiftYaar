@@ -1219,8 +1219,23 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         ShiftSubType = user.ShiftSubType ?? ShiftSubTypes.FixedMorning,
                         TwoShiftRotationPattern = user.TwoShiftRotationPattern,
                         HardshipPercent = user.HardshipPercent ?? 0m,
-                        OvertimeConsent = user.OvertimeConsent ?? false
+                        OvertimeConsent = user.OvertimeConsent ?? false,
+                        ExactNightShiftCount = user.ExactNightShiftCount,
+                        ExactHolidayWeekendNightShiftCount = user.ExactHolidayWeekendNightShiftCount,
+                        MinDaysBetweenNightShifts = 1 // شب‌ها با فاصله؛ شب متوالی ممنوع
                     };
+
+                    if (userConstraint.ExactNightShiftCount.HasValue &&
+                        userConstraint.ExactHolidayWeekendNightShiftCount.HasValue &&
+                        userConstraint.ExactHolidayWeekendNightShiftCount.Value > userConstraint.ExactNightShiftCount.Value)
+                    {
+                        userConstraint.ExactHolidayWeekendNightShiftCount = userConstraint.ExactNightShiftCount;
+                    }
+
+                    if (userConstraint.ExactNightShiftCount.HasValue)
+                    {
+                        userConstraint.MaxNightShiftsPerMonth = userConstraint.ExactNightShiftCount.Value;
+                    }
 
                     userConstraint.AllowedShiftLabels = ShiftEligibilityResolver
                         .GetAllowedLabels(
@@ -1233,7 +1248,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     userConstraint.MaxConsecutiveShifts = 3; // پیش‌فرض
                     userConstraint.MinRestDaysBetweenShifts = 1; // پیش‌فرض
                     userConstraint.MaxShiftsPerWeek = 5; // پیش‌فرض
-                    userConstraint.MaxNightShiftsPerMonth = 8; // پیش‌فرض
+                    if (!userConstraint.HasExactNightQuota)
+                    {
+                        userConstraint.MaxNightShiftsPerMonth = 8; // پیش‌فرض
+                    }
 
                     // Override from department settings if enforcement is on
                     if (deptSettingEarly != null)
@@ -1250,7 +1268,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         {
                             userConstraint.MaxShiftsPerWeek = Math.Clamp(deptSettingEarly.MaxShiftsPerWeek.Value, 1, 7);
                         }
-                        if (constraints.HardRules.EnforceNightShiftMonthlyCap && deptSettingEarly.MaxNightShiftsPerMonth.HasValue)
+                        if (!userConstraint.HasExactNightQuota &&
+                            constraints.HardRules.EnforceNightShiftMonthlyCap &&
+                            deptSettingEarly.MaxNightShiftsPerMonth.HasValue)
                         {
                             userConstraint.MaxNightShiftsPerMonth = Math.Max(0, deptSettingEarly.MaxNightShiftsPerMonth.Value);
                         }
@@ -1931,6 +1951,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     MinRestDaysBetweenShifts = user.MinRestDaysBetweenShifts,
                     MaxShiftsPerWeek = user.MaxShiftsPerWeek,
                     MaxNightShiftsPerMonth = user.MaxNightShiftsPerMonth,
+                    ExactNightShiftCount = user.ExactNightShiftCount,
+                    ExactHolidayWeekendNightShiftCount = user.ExactHolidayWeekendNightShiftCount,
+                    MinDaysBetweenNightShifts = user.MinDaysBetweenNightShifts,
                     CanBeShiftManager = user.CanBeShiftManager,
                     ShiftType = user.ShiftType,
                     ShiftSubType = user.ShiftSubType,

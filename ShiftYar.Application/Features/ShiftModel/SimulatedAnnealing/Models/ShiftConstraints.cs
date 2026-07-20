@@ -50,7 +50,14 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public int MaxConsecutiveShifts { get; set; } = 3;    //حداکثر شیفت‌های متوالی
         public int MinRestDaysBetweenShifts { get; set; } = 1;  //حداقل استراحت بین شیفت‌ها
         public int MaxShiftsPerWeek { get; set; } = 5;   //حداکثر شیفت در هر هفته
-        public int MaxNightShiftsPerMonth { get; set; } = 8;    //حداکثر شیفت شب در ماه
+        public int MaxNightShiftsPerMonth { get; set; } = 8;    //حداکثر شیفت شب در ماه (حالت بدون سهمیه دقیق)
+        /// <summary>تعداد دقیق شیفت شب؛ در صورت مقدار داشتن، دقیقاً همین تعداد باید باشد.</summary>
+        public int? ExactNightShiftCount { get; set; }
+        /// <summary>تعداد دقیق شیفت شب روی روزهای تعطیل/آخرهفته (IsHoliday).</summary>
+        public int? ExactHolidayWeekendNightShiftCount { get; set; }
+        /// <summary>حداقل فاصله روزهای تقویمی بین دو شیفت شب (۱ = بدون شب متوالی).</summary>
+        public int MinDaysBetweenNightShifts { get; set; } = 1;
+        public bool HasExactNightQuota => ExactNightShiftCount.HasValue;
         public bool CanBeShiftManager { get; set; }
         public bool IsActive { get; set; } = true; // وضعیت فعال بودن کاربر
         public ShiftTypes ShiftType { get; set; }
@@ -226,6 +233,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public double FairShiftCountBalanceWeight { get; set; } = 1.0; // تعادل تعداد شیفت بین افراد در این ماه
         public double FairWorkedHoursBalanceWeight { get; set; } = 2.5; // تعادل ساعات مؤثر کار (با ضریب شب/تعطیل)
         public double FairNightShiftBalanceWeight { get; set; } = 2.5; // تعادل تعداد شیفت شب بین افراد واجد شرایط
+        public double MorningEveningBalanceWeight { get; set; } = 2.0; // تناسب تعداد شیفت صبح و عصر
+        public double ExactNightQuotaWeight { get; set; } = 50.0; // جریمه انحراف از سهمیه دقیق شب
         public double ExtraShiftRotationWeight { get; set; } = 1.0;     // جلوگیری از دادن شیفت اضافه به کسانی که اخیراً زیاد گرفته‌اند
         public double ShiftLabelBalanceWeight { get; set; } = 1.0;      // تعادل Morning/Evening/Night برای کاربران گردشی
         public int FairnessLookbackMonths { get; set; } = 1;            // بازه سابقه برای محاسبات عدالت
