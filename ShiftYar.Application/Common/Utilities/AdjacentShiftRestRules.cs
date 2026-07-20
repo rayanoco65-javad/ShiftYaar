@@ -40,6 +40,14 @@ public static class AdjacentShiftRestRules
             return true;
         }
 
+        // صبح و شب در همان روز (ترکیب غیرمجاز؛ فقط صبح+عصر مجاز است)
+        if (earlierLabel == ShiftLabel.Morning &&
+            laterLabel == ShiftLabel.Night &&
+            d0 == d1)
+        {
+            return true;
+        }
+
         // شب روز D بلافاصله صبح روز D+1
         if (earlierLabel == ShiftLabel.Night &&
             laterLabel == ShiftLabel.Morning &&

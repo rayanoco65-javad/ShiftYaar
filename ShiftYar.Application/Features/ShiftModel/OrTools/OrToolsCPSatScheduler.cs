@@ -211,28 +211,51 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools
         }
 
         /// <summary>
-        /// محدودیت: هر کاربر حداکثر یک شیفت در روز
+        /// محدودیت: سقف شیفت روزانه (پیش‌فرض ۲ = صبح+عصر)
         /// </summary>
-        private void AddDailyAssignmentConstraints(CpModel model, Dictionary<string, IntVar> variables) // محدودیت یک‌شیفت در روز برای هر کاربر
+        private void AddDailyAssignmentConstraints(CpModel model, Dictionary<string, IntVar> variables) // محدودیت سقف روزانه برای هر کاربر
         {
             for (int userIndex = 0; userIndex < _constraints.NumUsers; userIndex++)
             {
                 for (int dateIndex = 0; dateIndex < _constraints.NumDays; dateIndex++)
                 {
                     var dailyAssignments = new List<IntVar>();
+                    var nightAssignments = new List<IntVar>();
 
                     for (int shiftIndex = 0; shiftIndex < _constraints.NumShifts; shiftIndex++)
                     {
                         var key = OrToolsVariableKeys.GetAssignmentKey(userIndex, shiftIndex, dateIndex);
-                        if (variables.ContainsKey(key))
+                        if (!variables.ContainsKey(key))
                         {
-                            dailyAssignments.Add(variables[key]);
+                            continue;
+                        }
+
+                        dailyAssignments.Add(variables[key]);
+                        if (_constraints.ShiftRequirements[shiftIndex].ShiftLabel ==
+                            Domain.Enums.ShiftModel.ShiftEnums.ShiftLabel.Night)
+                        {
+                            nightAssignments.Add(variables[key]);
                         }
                     }
 
                     if (dailyAssignments.Count > 0)
                     {
                         model.Add(LinearExpr.Sum(dailyAssignments) <= _constraints.GlobalConstraints.MaxShiftsPerDay);
+                    }
+
+                    // اگر شب باشد، هیچ شیفت دیگری در همان روز مجاز نیست
+                    if (nightAssignments.Count > 0 && dailyAssignments.Count > nightAssignments.Count)
+                    {
+                        var nonNight = dailyAssignments.Except(nightAssignments).ToList();
+                        // night => no other: sum(nonNight) + sum(night)*M style: sum(all) <= 1 + (1-night)*1
+                        // simpler: for each night var n and each other o: n + o <= 1
+                        foreach (var nightVar in nightAssignments)
+                        {
+                            foreach (var other in nonNight)
+                            {
+                                model.Add(nightVar + other <= 1);
+                            }
+                        }
                     }
                 }
             }

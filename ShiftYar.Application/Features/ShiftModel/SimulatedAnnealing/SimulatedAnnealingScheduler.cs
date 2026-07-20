@@ -183,13 +183,33 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             // تا پر کردن ظرفیت باقی‌مانده با آگاهی از آنها انجام شود.
             ApplyHardRequiredAssignments(solution);
 
+            // سهمیه دقیق شب را قبل از پر کردن ظرفیت روزانه قفل کن
+            ExactNightQuotaGuard.Enforce(solution, _constraints);
+
             // تولید انتساب‌های تصادفی اولیه
             var availableUsers = _constraints.UserConstraints.ToList();
             var dateRange = GetDateRange();
 
+            // اول شیفت‌های شب را پر کن تا سهمیه‌دارها جایشان را از دست ندهند
             foreach (var date in dateRange)
             {
-                foreach (var shiftReq in _constraints.ShiftRequirements)
+                foreach (var shiftReq in _constraints.ShiftRequirements.Where(s => s.ShiftLabel == ShiftLabel.Night))
+                {
+                    foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
+                    {
+                        var eligibleUsers = availableUsers
+                            .Where(u => u.SpecialtyId == specialtyReq.SpecialtyId)
+                            .Where(u => IsUserAvailableForShift(u, date, shiftReq.ShiftLabel, solution))
+                            .Where(u => u.IsActive)
+                            .ToList();
+                        AssignRequiredPersonnel(solution, eligibleUsers, shiftReq, date, specialtyReq);
+                    }
+                }
+            }
+
+            foreach (var date in dateRange)
+            {
+                foreach (var shiftReq in _constraints.ShiftRequirements.Where(s => s.ShiftLabel != ShiftLabel.Night))
                 {
                     foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
                     {
@@ -204,6 +224,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     }
                 }
             }
+
+            ExactNightQuotaGuard.Enforce(solution, _constraints);
 
             // محاسبه امتیاز راه‌حل
             solution.Score = CalculateSolutionScore(solution);
@@ -738,17 +760,18 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
             }
 
-            // یک شیفت در روز و حداکثر شیفت روزانه
-            if (_constraints.HardRules.ForbidDuplicateDailyAssignments || _constraints.HardRules.EnforceMaxShiftsPerDay)
+            // ترکیب روزانه: صبح+عصر مجاز؛ شب تنها؛ سقف MaxShiftsPerDay
             {
-                var byUserDate = solution.Assignments.Values
-                    .GroupBy(a => new { a.UserId, Date = a.Date.Date });
-                foreach (var grp in byUserDate)
+                var maxPerDay = _constraints.HardRules.EnforceMaxShiftsPerDay
+                    ? Math.Max(1, _constraints.GlobalConstraints.MaxShiftsPerDay)
+                    : 2;
+                var forbidDup = _constraints.HardRules.ForbidDuplicateDailyAssignments;
+                foreach (var grp in solution.Assignments.Values.GroupBy(a => new { a.UserId, Date = a.Date.Date }))
                 {
-                    if (_constraints.HardRules.ForbidDuplicateDailyAssignments && grp.Count() > 1)
+                    if (!DailyAssignmentRules.IsValidDaySet(grp.Select(a => a.ShiftLabel), maxPerDay, forbidDup))
+                    {
                         return false;
-                    if (_constraints.HardRules.EnforceMaxShiftsPerDay && grp.Count() > _constraints.GlobalConstraints.MaxShiftsPerDay)
-                        return false;
+                    }
                 }
             }
 
@@ -764,16 +787,27 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     for (int i = 1; i < userAssignments.Count; i++)
                     {
                         var daysBetween = (userAssignments[i].Date - userAssignments[i - 1].Date).Days;
+                        // صبح+عصر همان روز (daysBetween=0) مجاز است
+                        if (daysBetween == 0)
+                        {
+                            continue;
+                        }
+
                         if (daysBetween < userConstraint.MinRestDaysBetweenShifts + 1)
                             return false;
                     }
                 }
                 if (_constraints.HardRules.EnforceMaxConsecutiveShifts && !isDailyFixedStaff)
                 {
+                    var workDates = userAssignments
+                        .Select(a => a.Date.Date)
+                        .Distinct()
+                        .OrderBy(d => d)
+                        .ToList();
                     int consecutive = 1;
-                    for (int i = 1; i < userAssignments.Count; i++)
+                    for (int i = 1; i < workDates.Count; i++)
                     {
-                        if ((userAssignments[i].Date - userAssignments[i - 1].Date).Days == 1)
+                        if ((workDates[i] - workDates[i - 1]).Days == 1)
                         {
                             consecutive++;
                             if (consecutive > userConstraint.MaxConsecutiveShifts)
@@ -984,7 +1018,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
-                    RemoveConflictingDailyAssignments(solution, userConstraint.UserId, required.Date, shiftReq.ShiftId);
+                    RemoveConflictingDailyAssignments(
+                        solution, userConstraint.UserId, required.Date, shiftReq.ShiftId, required.ShiftLabel);
 
                     var existing = solution.GetShiftAssignments(shiftReq.ShiftId, required.Date)
                         .FirstOrDefault(a => a.UserId == userConstraint.UserId);
@@ -1015,7 +1050,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                                      return req?.RequiredTotalCount ?? 0;
                                  }))
                     {
-                        RemoveConflictingDailyAssignments(solution, userConstraint.UserId, presenceDate, shiftReq.ShiftId);
+                        RemoveConflictingDailyAssignments(
+                            solution, userConstraint.UserId, presenceDate, shiftReq.ShiftId, shiftReq.ShiftLabel);
                         solution.AddAssignment(
                             userConstraint.UserId,
                             shiftReq.ShiftId,
@@ -1036,14 +1072,17 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         {
             var managerWarnings = EnsureShiftManagers(solution);
             ApprovedRequestGuard.ForceApply(solution, _constraints);
+            DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             ShiftEligibilityGuard.StripIneligibleAssignments(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
+            DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(managerWarnings);
             solution.Violations.AddRange(ApprovedRequestGuard.GetUnmetViolations(solution, _constraints));
             solution.Violations.AddRange(ShiftEligibilityGuard.GetViolations(solution, _constraints));
             solution.Violations.AddRange(AdjacentShiftRestGuard.GetViolations(solution, _constraints));
+            solution.Violations.AddRange(DailyDuplicateAssignmentGuard.GetViolations(solution, _constraints));
             solution.Violations.AddRange(GetExactNightQuotaViolations(solution));
         }
 
@@ -1219,11 +1258,28 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             return warnings;
         }
 
-        private void RemoveConflictingDailyAssignments(ShiftSolution solution, int userId, DateTime date, int keepShiftId)
+        private void RemoveConflictingDailyAssignments(
+            ShiftSolution solution,
+            int userId,
+            DateTime date,
+            int keepShiftId,
+            ShiftLabel keepLabel)
         {
+            var maxPerDay = _constraints.HardRules.EnforceMaxShiftsPerDay
+                ? Math.Max(1, _constraints.GlobalConstraints.MaxShiftsPerDay)
+                : 2;
+            var forbidDup = _constraints.HardRules.ForbidDuplicateDailyAssignments;
+
             foreach (var assignment in solution.GetUserAssignments(userId, date).ToList())
             {
-                if (assignment.ShiftId != keepShiftId)
+                if (assignment.ShiftId == keepShiftId)
+                {
+                    continue;
+                }
+
+                // صبح+عصر قابل نگه‌داشتن با هم هستند؛ فقط ناسازگارها حذف شوند
+                var trial = new[] { assignment.ShiftLabel, keepLabel };
+                if (!DailyAssignmentRules.IsValidDaySet(trial, maxPerDay, forbidDup))
                 {
                     solution.RemoveAssignment(userId, assignment.ShiftId, date);
                 }
@@ -1289,6 +1345,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             if (solution != null &&
                 AdjacentShiftRestRules.WouldConflict(
                     solution.GetUserAllAssignments(user.UserId), date, shiftLabel))
+            {
+                return false;
+            }
+
+            if (solution != null &&
+                HasDailyConflict(solution, user.UserId, date, shiftLabel))
             {
                 return false;
             }
@@ -1573,7 +1635,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
 
                 if (!solution.HasAssignment(user.UserId, shiftReq.ShiftId, date) &&
-                    !HasDailyConflict(solution, user.UserId, date) &&
+                    !HasDailyConflict(solution, user.UserId, date, shiftReq.ShiftLabel) &&
                     !AdjacentShiftRestRules.WouldConflict(
                         solution.GetUserAllAssignments(user.UserId), date, shiftReq.ShiftLabel))
                 {
@@ -1601,7 +1663,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
 
                 if (!solution.HasAssignment(user.UserId, shiftReq.ShiftId, date) &&
-                    !HasDailyConflict(solution, user.UserId, date) &&
+                    !HasDailyConflict(solution, user.UserId, date, shiftReq.ShiftLabel) &&
                     !AdjacentShiftRestRules.WouldConflict(
                         solution.GetUserAllAssignments(user.UserId), date, shiftReq.ShiftLabel))
                 {
@@ -1612,23 +1674,20 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         }
 
         /// <summary>
-        /// آیا انتساب جدید در این روز باعث نقض قانون «یک شیفت در روز» می‌شود؟
+        /// آیا انتساب جدید با قوانین ترکیب روزانه ناسازگار است؟
+        /// صبح+عصر مجاز؛ شب تنها؛ تکرار لیبل ممنوع.
         /// </summary>
-        private bool HasDailyConflict(ShiftSolution solution, int userId, DateTime date)
+        private bool HasDailyConflict(ShiftSolution solution, int userId, DateTime date, ShiftLabel newLabel)
         {
-            var dailyCount = solution.GetUserAssignments(userId, date).Count;
-            if (dailyCount == 0)
-            {
-                return false;
-            }
-
-            if (_constraints.HardRules.ForbidDuplicateDailyAssignments)
-            {
-                return true;
-            }
-
-            return _constraints.HardRules.EnforceMaxShiftsPerDay &&
-                   dailyCount >= _constraints.GlobalConstraints.MaxShiftsPerDay;
+            var existing = solution.GetUserAssignments(userId, date).Select(a => a.ShiftLabel);
+            var maxPerDay = _constraints.HardRules.EnforceMaxShiftsPerDay
+                ? Math.Max(1, _constraints.GlobalConstraints.MaxShiftsPerDay)
+                : 2;
+            return !DailyAssignmentRules.CanAddShift(
+                existing,
+                newLabel,
+                maxPerDay,
+                _constraints.HardRules.ForbidDuplicateDailyAssignments);
         }
 
         private int CountSpecialtyAssignments(ShiftSolution solution, int shiftId, DateTime date, int specialtyId, bool isOnCall)
@@ -1710,13 +1769,15 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             solution.RemoveAssignment(assignment1.UserId, assignment1.ShiftId, assignment1.Date);
             solution.RemoveAssignment(assignment2.UserId, assignment2.ShiftId, assignment2.Date);
 
-            // همان شیفت/روز جابه‌جا می‌شود؛ فقط توالی با سایر روزها را چک کن
+            // همان شیفت/روز جابه‌جا می‌شود؛ توالی و ترکیب روزانه را چک کن
             if (AdjacentShiftRestRules.WouldConflict(
                     solution.GetUserAllAssignments(assignment2.UserId),
                     assignment1.Date, assignment1.ShiftLabel) ||
                 AdjacentShiftRestRules.WouldConflict(
                     solution.GetUserAllAssignments(assignment1.UserId),
-                    assignment2.Date, assignment2.ShiftLabel))
+                    assignment2.Date, assignment2.ShiftLabel) ||
+                HasDailyConflict(solution, assignment2.UserId, assignment1.Date, assignment1.ShiftLabel) ||
+                HasDailyConflict(solution, assignment1.UserId, assignment2.Date, assignment2.ShiftLabel))
             {
                 // برگرداندن
                 solution.AddAssignment(assignment1.UserId, assignment1.ShiftId, assignment1.Date, assignment1.ShiftLabel, assignment1.IsOnCall);
@@ -1941,17 +2002,23 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         private double CheckConsecutiveShifts(List<SaShiftAssignment> assignments, int maxConsecutive, List<string> violations)
         {
             double penalty = 0;
+            var workDates = assignments
+                .Select(a => a.Date.Date)
+                .Distinct()
+                .OrderBy(d => d)
+                .ToList();
             int consecutiveCount = 1;
+            int? userId = assignments.FirstOrDefault()?.UserId;
 
-            for (int i = 1; i < assignments.Count; i++)
+            for (int i = 1; i < workDates.Count; i++)
             {
-                if ((assignments[i].Date - assignments[i - 1].Date).Days == 1)
+                if ((workDates[i] - workDates[i - 1]).Days == 1)
                 {
                     consecutiveCount++;
                     if (consecutiveCount > maxConsecutive)
                     {
                         penalty += 50;
-                        violations.Add($"User {assignments[i].UserId} has {consecutiveCount} consecutive shifts (max: {maxConsecutive})");
+                        violations.Add($"User {userId} has {consecutiveCount} consecutive shifts (max: {maxConsecutive})");
                     }
                 }
                 else
@@ -1970,6 +2037,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             for (int i = 1; i < assignments.Count; i++)
             {
                 var daysBetween = (assignments[i].Date - assignments[i - 1].Date).Days;
+                // صبح+عصر همان روز مجاز است
+                if (daysBetween == 0)
+                {
+                    continue;
+                }
+
                 if (daysBetween < minRestDays + 1)
                 {
                     penalty += 30;

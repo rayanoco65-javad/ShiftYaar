@@ -56,7 +56,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         /// <summary>تعداد دقیق شیفت شب روی روزهای تعطیل/آخرهفته (IsHoliday).</summary>
         public int? ExactHolidayWeekendNightShiftCount { get; set; }
         /// <summary>حداقل فاصله روزهای تقویمی بین دو شیفت شب (۱ = بدون شب متوالی).</summary>
-        public int MinDaysBetweenNightShifts { get; set; } = 1;
+        public int MinDaysBetweenNightShifts { get; set; } = 2;
         public bool HasExactNightQuota => ExactNightShiftCount.HasValue;
         public bool CanBeShiftManager { get; set; }
         public bool IsActive { get; set; } = true; // وضعیت فعال بودن کاربر
@@ -173,7 +173,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public bool RequireGenderBalance { get; set; } = true;  //نیازمند تعادل جنسیتی
         public double MinGenderBalanceRatio { get; set; } = 0.3; // حداقل 30% از هر جنسیت
         public bool PreferSpecialtyMatch { get; set; } = true;  //مطابقت با تخصص
-        public int MaxShiftsPerDay { get; set; } = 1;   //حداکثر شیفت در روز
+        public int MaxShiftsPerDay { get; set; } = 2;   // حداکثر شیفت در روز (صبح+عصر مجاز)
         public bool AllowWeekendShifts { get; set; } = true;    //مجاز کردن شیفت‌های آخر هفته
         public bool RequireShiftManager { get; set; } = true;   //نیاز به مدیر شیفت (legacy)
         public bool RequireManagerForEveningShift { get; set; } // الزام حضور مدیر در شیفت عصر
@@ -200,8 +200,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
 	/// </summary>
 	public class HardRuleSet
     {
-        public bool ForbidDuplicateDailyAssignments { get; set; } = true; // هر کاربر حداکثر یک شیفت در روز
-        public bool EnforceMaxShiftsPerDay { get; set; } = true; // از GlobalConstraints.MaxShiftsPerDay
+        public bool ForbidDuplicateDailyAssignments { get; set; } = true; // ممنوعیت تکرار همان نوع شیفت در یک روز
+        public bool EnforceMaxShiftsPerDay { get; set; } = true; // از GlobalConstraints.MaxShiftsPerDay (پیش‌فرض ۲ = صبح+عصر)
         public bool EnforceMinRestDays { get; set; } = true; // حداقل فاصله استراحت
         public bool EnforceMaxConsecutiveShifts { get; set; } = true; // حداکثر شیفت‌های متوالی
         public bool EnforceWeeklyMaxShifts { get; set; } = false; // می‌تواند نرم نیز باشد

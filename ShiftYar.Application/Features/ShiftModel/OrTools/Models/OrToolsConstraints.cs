@@ -147,7 +147,7 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools.Models
         public bool RequireGenderBalance { get; set; } = true; // الزام تعادل جنسیتی
         public double MinGenderBalanceRatio { get; set; } = 0.3; // حداقل نسبت هر جنسیت
         public bool PreferSpecialtyMatch { get; set; } = true; // ترجیح تطابق تخصص
-        public int MaxShiftsPerDay { get; set; } = 1; // حداکثر شیفت روزانه هر نفر
+        public int MaxShiftsPerDay { get; set; } = 2; // حداکثر شیفت روزانه (صبح+عصر مجاز)
         public bool AllowWeekendShifts { get; set; } = true; // مجاز بودن آخر هفته
         public bool RequireShiftManager { get; set; } = true; // نیاز به مدیر شیفت
     }
@@ -157,8 +157,8 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools.Models
     /// </summary>
     public class OrToolsHardRules // قوانین قطعی
     {
-        public bool ForbidDuplicateDailyAssignments { get; set; } = true; // یک شیفت در روز
-        public bool EnforceMaxShiftsPerDay { get; set; } = true; // اعمال سقف روزانه
+        public bool ForbidDuplicateDailyAssignments { get; set; } = true; // ممنوعیت تکرار همان نوع شیفت در روز
+        public bool EnforceMaxShiftsPerDay { get; set; } = true; // اعمال سقف روزانه (پیش‌فرض ۲)
         public bool EnforceMinRestDays { get; set; } = true; // اعمال استراحت
         public bool EnforceMaxConsecutiveShifts { get; set; } = true; // اعمال سقف متوالی
         public bool EnforceWeeklyMaxShifts { get; set; } = false; // اعمال سقف هفتگی

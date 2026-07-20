@@ -77,8 +77,8 @@ public class ExactNightQuotaTests
         for (var i = 1; i < ordered.Count; i++)
         {
             Assert.True(
-                Math.Abs((ordered[i].Date.Date - ordered[i - 1].Date.Date).Days) > 1,
-                "Night shifts must be spaced apart");
+                Math.Abs((ordered[i].Date.Date - ordered[i - 1].Date.Date).Days) > 2,
+                "Night shifts must be spaced at least 2 days apart");
         }
     }
 
@@ -124,7 +124,7 @@ public class ExactNightQuotaTests
         ExactNightShiftCount = exactNights,
         ExactHolidayWeekendNightShiftCount = exactHolidayNights,
         MaxNightShiftsPerMonth = exactNights ?? 8,
-        MinDaysBetweenNightShifts = 1,
+        MinDaysBetweenNightShifts = 2,
         MaxConsecutiveShifts = 30,
         MinRestDaysBetweenShifts = 0,
         MaxShiftsPerWeek = 7

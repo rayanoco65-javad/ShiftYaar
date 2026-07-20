@@ -1182,6 +1182,25 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                     constraints.GlobalConstraints.RequireManagerForEveningShift = deptSettingEarly.RequireManagerForEveningShift ?? false;
                     constraints.GlobalConstraints.RequireManagerForNightShift = deptSettingEarly.RequireManagerForNightShift ?? false;
+
+                    // صبح+عصر در یک روز مجاز است (سقف پیش‌فرض ۲؛ نه ۱)
+                    constraints.HardRules.ForbidDuplicateDailyAssignments = true;
+                    constraints.HardRules.EnforceMaxShiftsPerDay = true;
+                    var maxPerDay = deptSettingEarly.MaxShiftsPerDay ?? 2;
+                    constraints.GlobalConstraints.MaxShiftsPerDay = Math.Clamp(maxPerDay, 1, 2);
+
+                    if (constraints.HardRules.EnforceMaxConsecutiveShifts == false)
+                    {
+                        // حتی اگر سخت خاموش باشد، برای گزارش/جریمه نرم سقف معقول نگه دار
+                        constraints.HardRules.EnforceMaxConsecutiveShifts = true;
+                    }
+                }
+                else
+                {
+                    constraints.HardRules.ForbidDuplicateDailyAssignments = true;
+                    constraints.HardRules.EnforceMaxShiftsPerDay = true;
+                    constraints.GlobalConstraints.MaxShiftsPerDay = 2;
+                    constraints.HardRules.EnforceMaxConsecutiveShifts = true;
                 }
 
                 // بارگذاری کاربران دپارتمان
@@ -1221,8 +1240,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         HardshipPercent = user.HardshipPercent ?? 0m,
                         OvertimeConsent = user.OvertimeConsent ?? false,
                         ExactNightShiftCount = user.ExactNightShiftCount,
-                        ExactHolidayWeekendNightShiftCount = user.ExactHolidayWeekendNightShiftCount,
-                        MinDaysBetweenNightShifts = 1 // شب‌ها با فاصله؛ شب متوالی ممنوع
+                        ExactHolidayWeekendNightShiftCount = user.ExactHolidayWeekendNightShiftCount
                     };
 
                     if (userConstraint.ExactNightShiftCount.HasValue &&
@@ -1244,10 +1262,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                             userConstraint.TwoShiftRotationPattern)
                         .ToList();
 
-                    // همه محدودیت‌های عددی از تنظیمات دپارتمان خوانده می‌شوند (مقادیر پیش‌فرض)
                     userConstraint.MaxConsecutiveShifts = 3; // پیش‌فرض
                     userConstraint.MinRestDaysBetweenShifts = 1; // پیش‌فرض
                     userConstraint.MaxShiftsPerWeek = 5; // پیش‌فرض
+                    userConstraint.MinDaysBetweenNightShifts = 2; // حداقل ۲ روز فاصله بین شب‌ها
                     if (!userConstraint.HasExactNightQuota)
                     {
                         userConstraint.MaxNightShiftsPerMonth = 8; // پیش‌فرض
@@ -1260,7 +1278,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         {
                             userConstraint.MinRestDaysBetweenShifts = Math.Max(0, deptSettingEarly.MinRestDaysBetweenShifts.Value);
                         }
-                        if (constraints.HardRules.EnforceMaxConsecutiveShifts && deptSettingEarly.MaxConsecutiveShifts.HasValue)
+                        if (deptSettingEarly.MaxConsecutiveShifts.HasValue && deptSettingEarly.MaxConsecutiveShifts.Value > 0)
                         {
                             userConstraint.MaxConsecutiveShifts = Math.Max(1, deptSettingEarly.MaxConsecutiveShifts.Value);
                         }
@@ -1774,11 +1792,17 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     if (deptSetting.EnforceNightShiftMonthlyCap.HasValue) constraints.HardRules.EnforceNightShiftMonthlyCap = deptSetting.EnforceNightShiftMonthlyCap.Value;
                     if (deptSetting.EnforceSpecialtyCapacity.HasValue) constraints.HardRules.EnforceSpecialtyCapacity = deptSetting.EnforceSpecialtyCapacity.Value;
 
-                    // Apply department-level numeric values to global constraints if enforced
-                    if (constraints.HardRules.EnforceMaxShiftsPerDay && deptSetting.MaxShiftsPerDay.HasValue)
+                    // صبح+عصر مجاز؛ سقف حداکثر ۲ (حتی اگر در DB مقدار بالاتر باشد)
+                    constraints.HardRules.ForbidDuplicateDailyAssignments = true;
+                    constraints.HardRules.EnforceMaxShiftsPerDay = true;
+                    var maxPerDay = deptSetting.MaxShiftsPerDay ?? constraints.GlobalConstraints.MaxShiftsPerDay;
+                    if (maxPerDay <= 0) maxPerDay = 2;
+                    constraints.GlobalConstraints.MaxShiftsPerDay = Math.Clamp(maxPerDay, 1, 2);
+                    if (constraints.HardRules.EnforceMaxConsecutiveShifts != true)
                     {
-                        constraints.GlobalConstraints.MaxShiftsPerDay = Math.Max(1, deptSetting.MaxShiftsPerDay.Value);
+                        constraints.HardRules.EnforceMaxConsecutiveShifts = true;
                     }
+
                     if (deptSetting.MaxConsecutiveNightShifts.HasValue)
                     {
                         constraints.GlobalConstraints.MaxConsecutiveNightShifts = Math.Max(1, deptSetting.MaxConsecutiveNightShifts.Value);

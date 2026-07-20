@@ -254,7 +254,7 @@ public static class ExactNightQuotaGuard
             .Select(a => a.Date.Date);
         foreach (var nightDate in nights)
         {
-            // MinDaysBetweenNightShifts=1 ⇒ شب‌های متوالی (فاصله ۱ روز) ممنوع
+            // MinDaysBetweenNightShifts=2 ⇒ فاصله تقویمی حداکثر ۲ روز (شب‌های خیلی نزدیک) ممنوع
             if (Math.Abs((candidateDate.Date - nightDate).Days) <= minGap)
             {
                 return true;
