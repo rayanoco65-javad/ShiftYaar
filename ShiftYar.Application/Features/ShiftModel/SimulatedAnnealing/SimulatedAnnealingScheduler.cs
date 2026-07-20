@@ -286,19 +286,20 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 {
                     foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
                     {
+                        var day = specialtyReq.ForDay(_constraints.IsHoliday(date));
                         var regularCount = CountSpecialtyAssignments(
                             solution, shiftReq.ShiftId, date, specialtyReq.SpecialtyId, isOnCall: false);
                         var onCallCount = CountSpecialtyAssignments(
                             solution, shiftReq.ShiftId, date, specialtyReq.SpecialtyId, isOnCall: true);
 
-                        if (specialtyReq.RequiredTotalCount > 0 && regularCount < specialtyReq.RequiredTotalCount)
+                        if (day.RequiredTotalCount > 0 && regularCount < day.RequiredTotalCount)
                         {
-                            penalty += (specialtyReq.RequiredTotalCount - regularCount) * 120;
+                            penalty += (day.RequiredTotalCount - regularCount) * 120;
                         }
 
-                        if (specialtyReq.OnCallTotalCount > 0 && onCallCount < specialtyReq.OnCallTotalCount)
+                        if (day.OnCallTotalCount > 0 && onCallCount < day.OnCallTotalCount)
                         {
-                            penalty += (specialtyReq.OnCallTotalCount - onCallCount) * 100;
+                            penalty += (day.OnCallTotalCount - onCallCount) * 100;
                         }
                     }
                 }
@@ -452,6 +453,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                     foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
                     {
+                        var day = specialtyReq.ForDay(_constraints.IsHoliday(date));
                         var regularForSpec = assignments
                             .Where(a => GetUserSpecialty(a.UserId) == specialtyReq.SpecialtyId && !a.IsOnCall)
                             .ToList();
@@ -460,42 +462,42 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                             .ToList();
 
                         var hasExplicitRegularGender =
-                            specialtyReq.RequiredMaleCount > 0 || specialtyReq.RequiredFemaleCount > 0;
+                            day.RequiredMaleCount > 0 || day.RequiredFemaleCount > 0;
                         var hasExplicitOnCallGender =
-                            specialtyReq.OnCallMaleCount > 0 || specialtyReq.OnCallFemaleCount > 0;
+                            day.OnCallMaleCount > 0 || day.OnCallFemaleCount > 0;
 
                         if (hasExplicitRegularGender)
                         {
-                            if (specialtyReq.RequiredMaleCount > 0)
+                            if (day.RequiredMaleCount > 0)
                             {
-                                penalty += Math.Abs(CountGenderAssignments(regularForSpec, UserGender.Male) - specialtyReq.RequiredMaleCount) * 80;
+                                penalty += Math.Abs(CountGenderAssignments(regularForSpec, UserGender.Male) - day.RequiredMaleCount) * 80;
                             }
 
-                            if (specialtyReq.RequiredFemaleCount > 0)
+                            if (day.RequiredFemaleCount > 0)
                             {
-                                penalty += Math.Abs(CountGenderAssignments(regularForSpec, UserGender.Female) - specialtyReq.RequiredFemaleCount) * 80;
+                                penalty += Math.Abs(CountGenderAssignments(regularForSpec, UserGender.Female) - day.RequiredFemaleCount) * 80;
                             }
                         }
-                        else if (specialtyReq.RequiredTotalCount > 0 && regularForSpec.Count < specialtyReq.RequiredTotalCount)
+                        else if (day.RequiredTotalCount > 0 && regularForSpec.Count < day.RequiredTotalCount)
                         {
-                            penalty += (specialtyReq.RequiredTotalCount - regularForSpec.Count) * 50;
+                            penalty += (day.RequiredTotalCount - regularForSpec.Count) * 50;
                         }
 
                         if (hasExplicitOnCallGender)
                         {
-                            if (specialtyReq.OnCallMaleCount > 0)
+                            if (day.OnCallMaleCount > 0)
                             {
-                                penalty += Math.Abs(CountGenderAssignments(onCallForSpec, UserGender.Male) - specialtyReq.OnCallMaleCount) * 80;
+                                penalty += Math.Abs(CountGenderAssignments(onCallForSpec, UserGender.Male) - day.OnCallMaleCount) * 80;
                             }
 
-                            if (specialtyReq.OnCallFemaleCount > 0)
+                            if (day.OnCallFemaleCount > 0)
                             {
-                                penalty += Math.Abs(CountGenderAssignments(onCallForSpec, UserGender.Female) - specialtyReq.OnCallFemaleCount) * 80;
+                                penalty += Math.Abs(CountGenderAssignments(onCallForSpec, UserGender.Female) - day.OnCallFemaleCount) * 80;
                             }
                         }
-                        else if (specialtyReq.OnCallTotalCount > 0 && onCallForSpec.Count < specialtyReq.OnCallTotalCount)
+                        else if (day.OnCallTotalCount > 0 && onCallForSpec.Count < day.OnCallTotalCount)
                         {
-                            penalty += (specialtyReq.OnCallTotalCount - onCallForSpec.Count) * 60;
+                            penalty += (day.OnCallTotalCount - onCallForSpec.Count) * 60;
                         }
                     }
                 }
@@ -726,49 +728,55 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     foreach (var shiftReq in _constraints.ShiftRequirements)
                     {
                         var assignments = solution.GetShiftAssignments(shiftReq.ShiftId, date);
-                        int totalRequired = shiftReq.SpecialtyRequirements.Sum(r => r.RequiredTotalCount + r.OnCallTotalCount);
+                        var isHoliday = _constraints.IsHoliday(date);
+                        int totalRequired = shiftReq.SpecialtyRequirements.Sum(r =>
+                        {
+                            var d = r.ForDay(isHoliday);
+                            return d.RequiredTotalCount + d.OnCallTotalCount;
+                        });
                         if (assignments.Count > totalRequired)
                         {
                             return false;
                         }
                         foreach (var specReq in shiftReq.SpecialtyRequirements)
                         {
+                            var day = specReq.ForDay(isHoliday);
                             var specAssignments = assignments
                                 .Where(a => GetUserSpecialty(a.UserId) == specReq.SpecialtyId)
                                 .ToList();
                             var regular = specAssignments.Where(a => !a.IsOnCall).ToList();
                             var onCall = specAssignments.Where(a => a.IsOnCall).ToList();
 
-                            if (specAssignments.Count > specReq.RequiredTotalCount + specReq.OnCallTotalCount)
+                            if (specAssignments.Count > day.RequiredTotalCount + day.OnCallTotalCount)
                             {
                                 return false;
                             }
 
-                            if (regular.Count > specReq.RequiredTotalCount)
+                            if (regular.Count > day.RequiredTotalCount)
                             {
                                 return false;
                             }
 
-                            if (onCall.Count > specReq.OnCallTotalCount)
+                            if (onCall.Count > day.OnCallTotalCount)
                             {
                                 return false;
                             }
 
                             var hasExplicitRegularGender =
-                                specReq.RequiredMaleCount > 0 || specReq.RequiredFemaleCount > 0;
+                                day.RequiredMaleCount > 0 || day.RequiredFemaleCount > 0;
                             var hasExplicitOnCallGender =
-                                specReq.OnCallMaleCount > 0 || specReq.OnCallFemaleCount > 0;
+                                day.OnCallMaleCount > 0 || day.OnCallFemaleCount > 0;
 
                             if (hasExplicitRegularGender)
                             {
-                                if (specReq.RequiredMaleCount > 0 &&
-                                    CountGenderAssignments(regular, UserGender.Male) != specReq.RequiredMaleCount)
+                                if (day.RequiredMaleCount > 0 &&
+                                    CountGenderAssignments(regular, UserGender.Male) != day.RequiredMaleCount)
                                 {
                                     return false;
                                 }
 
-                                if (specReq.RequiredFemaleCount > 0 &&
-                                    CountGenderAssignments(regular, UserGender.Female) != specReq.RequiredFemaleCount)
+                                if (day.RequiredFemaleCount > 0 &&
+                                    CountGenderAssignments(regular, UserGender.Female) != day.RequiredFemaleCount)
                                 {
                                     return false;
                                 }
@@ -776,14 +784,14 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                             if (hasExplicitOnCallGender)
                             {
-                                if (specReq.OnCallMaleCount > 0 &&
-                                    CountGenderAssignments(onCall, UserGender.Male) != specReq.OnCallMaleCount)
+                                if (day.OnCallMaleCount > 0 &&
+                                    CountGenderAssignments(onCall, UserGender.Male) != day.OnCallMaleCount)
                                 {
                                     return false;
                                 }
 
-                                if (specReq.OnCallFemaleCount > 0 &&
-                                    CountGenderAssignments(onCall, UserGender.Female) != specReq.OnCallFemaleCount)
+                                if (day.OnCallFemaleCount > 0 &&
+                                    CountGenderAssignments(onCall, UserGender.Female) != day.OnCallFemaleCount)
                                 {
                                     return false;
                                 }
@@ -910,23 +918,25 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         {
             var specialtyReq = shiftReq.SpecialtyRequirements
                 .FirstOrDefault(r => r.SpecialtyId == incomingUser.SpecialtyId);
-            if (specialtyReq == null || specialtyReq.RequiredTotalCount <= 0)
+            var day = specialtyReq?.ForDay(_constraints.IsHoliday(date));
+            if (specialtyReq == null || day == null || day.Value.RequiredTotalCount <= 0)
             {
                 return;
             }
 
+            var dayCounts = day.Value;
             var regulars = solution.GetShiftAssignments(shiftReq.ShiftId, date)
                 .Where(a => !a.IsOnCall &&
                             a.UserId != incomingUser.UserId &&
                             GetUserSpecialty(a.UserId) == incomingUser.SpecialtyId)
                 .ToList();
 
-            if (regulars.Count < specialtyReq.RequiredTotalCount)
+            if (regulars.Count < dayCounts.RequiredTotalCount)
             {
                 return; // هنوز جا هست
             }
 
-            var hasExplicitGender = specialtyReq.RequiredMaleCount > 0 || specialtyReq.RequiredFemaleCount > 0;
+            var hasExplicitGender = dayCounts.RequiredMaleCount > 0 || dayCounts.RequiredFemaleCount > 0;
 
             // ۱) غیرمحافظت‌شده
             // ۲) فقط محافظت حضور کل‌روز (نه شیفت مشخص)
@@ -997,8 +1007,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         var occupantGender = GetUserGender(occupant.UserId);
                         var specialtyReq = shiftReq.SpecialtyRequirements
                             .FirstOrDefault(r => r.SpecialtyId == occupantSpecialty);
-                        var genderLocked = specialtyReq != null &&
-                            (specialtyReq.RequiredMaleCount > 0 || specialtyReq.RequiredFemaleCount > 0);
+                        var day = specialtyReq?.ForDay(_constraints.IsHoliday(date));
+                        var genderLocked = day != null &&
+                            (day.Value.RequiredMaleCount > 0 || day.Value.RequiredFemaleCount > 0);
 
                         var candidate = _constraints.UserConstraints
                             .Where(u => u.CanBeShiftManager && u.IsActive)
@@ -1135,7 +1146,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                 var specialtyReq = shiftReq.SpecialtyRequirements
                     .FirstOrDefault(r => r.SpecialtyId == other.SpecialtyId);
-                var capacity = specialtyReq?.RequiredTotalCount ?? 0;
+                var capacity = specialtyReq?.ForDay(_constraints.IsHoliday(date)).RequiredTotalCount ?? 0;
                 if (capacity <= 1)
                 {
                     return true;
@@ -1189,47 +1200,48 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         private void AssignRequiredPersonnel(ShiftSolution solution, List<UserConstraint> eligibleUsers,
             ShiftRequirement shiftReq, DateTime date, SpecialtyRequirement specialtyReq)
         {
+            var day = specialtyReq.ForDay(_constraints.IsHoliday(date));
             var hasExplicitOnCallGender =
-                specialtyReq.OnCallMaleCount > 0 || specialtyReq.OnCallFemaleCount > 0;
+                day.OnCallMaleCount > 0 || day.OnCallFemaleCount > 0;
             var hasExplicitRegularGender =
-                specialtyReq.RequiredMaleCount > 0 || specialtyReq.RequiredFemaleCount > 0;
+                day.RequiredMaleCount > 0 || day.RequiredFemaleCount > 0;
 
             // آنکال
             if (hasExplicitOnCallGender)
             {
-                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId, specialtyReq.OnCallMaleCount, UserGender.Male, isOnCall: true);
-                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId, specialtyReq.OnCallFemaleCount, UserGender.Female, isOnCall: true);
-                if (specialtyReq.OnCallTotalCount > specialtyReq.OnCallMaleCount + specialtyReq.OnCallFemaleCount)
+                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId, day.OnCallMaleCount, UserGender.Male, isOnCall: true);
+                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId, day.OnCallFemaleCount, UserGender.Female, isOnCall: true);
+                if (day.OnCallTotalCount > day.OnCallMaleCount + day.OnCallFemaleCount)
                 {
                     AssignRemainingBySpecialty(
                         solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId,
-                        specialtyReq.OnCallTotalCount, isOnCall: true);
+                        day.OnCallTotalCount, isOnCall: true);
                 }
             }
-            else if (specialtyReq.OnCallTotalCount > 0)
+            else if (day.OnCallTotalCount > 0)
             {
                 AssignRemainingBySpecialty(
                     solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId,
-                    specialtyReq.OnCallTotalCount, isOnCall: true);
+                    day.OnCallTotalCount, isOnCall: true);
             }
 
             // نیروی حاضر در محل
             if (hasExplicitRegularGender)
             {
-                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId, specialtyReq.RequiredMaleCount, UserGender.Male, isOnCall: false);
-                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId, specialtyReq.RequiredFemaleCount, UserGender.Female, isOnCall: false);
-                if (specialtyReq.RequiredTotalCount > specialtyReq.RequiredMaleCount + specialtyReq.RequiredFemaleCount)
+                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId, day.RequiredMaleCount, UserGender.Male, isOnCall: false);
+                AssignByGenderCount(solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId, day.RequiredFemaleCount, UserGender.Female, isOnCall: false);
+                if (day.RequiredTotalCount > day.RequiredMaleCount + day.RequiredFemaleCount)
                 {
                     AssignRemainingBySpecialty(
                         solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId,
-                        specialtyReq.RequiredTotalCount, isOnCall: false);
+                        day.RequiredTotalCount, isOnCall: false);
                 }
             }
-            else if (specialtyReq.RequiredTotalCount > 0)
+            else if (day.RequiredTotalCount > 0)
             {
                 AssignRemainingBySpecialty(
                     solution, eligibleUsers, shiftReq, date, specialtyReq.SpecialtyId,
-                    specialtyReq.RequiredTotalCount, isOnCall: false);
+                    day.RequiredTotalCount, isOnCall: false);
             }
         }
 
@@ -1432,9 +1444,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var specialtyId = GetUserSpecialty(assignment.UserId);
             var shiftReq = _constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftId == assignment.ShiftId);
             var specialtyReq = shiftReq?.SpecialtyRequirements.FirstOrDefault(s => s.SpecialtyId == specialtyId);
-            var lockGender = specialtyReq != null && (
-                (assignment.IsOnCall && (specialtyReq.OnCallMaleCount > 0 || specialtyReq.OnCallFemaleCount > 0)) ||
-                (!assignment.IsOnCall && (specialtyReq.RequiredMaleCount > 0 || specialtyReq.RequiredFemaleCount > 0)));
+            var day = specialtyReq?.ForDay(_constraints.IsHoliday(assignment.Date));
+            var lockGender = day != null && (
+                (assignment.IsOnCall && (day.Value.OnCallMaleCount > 0 || day.Value.OnCallFemaleCount > 0)) ||
+                (!assignment.IsOnCall && (day.Value.RequiredMaleCount > 0 || day.Value.RequiredFemaleCount > 0)));
 
             var eligibleUsers = _constraints.UserConstraints
                 .Where(u => u.SpecialtyId == specialtyId)
@@ -1525,15 +1538,16 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             SpecialtyRequirement specialtyReq,
             bool isOnCall)
         {
+            var day = specialtyReq.ForDay(_constraints.IsHoliday(date));
             var current = CountSpecialtyAssignments(solution, shiftReq.ShiftId, date, specialtyReq.SpecialtyId, isOnCall);
             var hasExplicitGender = isOnCall
-                ? specialtyReq.OnCallMaleCount > 0 || specialtyReq.OnCallFemaleCount > 0
-                : specialtyReq.RequiredMaleCount > 0 || specialtyReq.RequiredFemaleCount > 0;
+                ? day.OnCallMaleCount > 0 || day.OnCallFemaleCount > 0
+                : day.RequiredMaleCount > 0 || day.RequiredFemaleCount > 0;
 
             if (hasExplicitGender)
             {
-                int maleTarget = isOnCall ? specialtyReq.OnCallMaleCount : specialtyReq.RequiredMaleCount;
-                int femaleTarget = isOnCall ? specialtyReq.OnCallFemaleCount : specialtyReq.RequiredFemaleCount;
+                int maleTarget = isOnCall ? day.OnCallMaleCount : day.RequiredMaleCount;
+                int femaleTarget = isOnCall ? day.OnCallFemaleCount : day.RequiredFemaleCount;
                 var assignments = solution.GetShiftAssignments(shiftReq.ShiftId, date)
                     .Where(a => a.IsOnCall == isOnCall && GetUserSpecialty(a.UserId) == specialtyReq.SpecialtyId);
 
@@ -1552,7 +1566,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
             else
             {
-                int target = isOnCall ? specialtyReq.OnCallTotalCount : specialtyReq.RequiredTotalCount;
+                int target = isOnCall ? day.OnCallTotalCount : day.RequiredTotalCount;
                 int shortfall = target - current;
                 for (int i = 0; i < shortfall; i++)
                 {
@@ -1566,10 +1580,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var removable = new List<SaShiftAssignment>();
             foreach (var date in GetDateRange())
             {
+                var isHoliday = _constraints.IsHoliday(date);
                 foreach (var shiftReq in _constraints.ShiftRequirements)
                 {
                     foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
                     {
+                        var day = specialtyReq.ForDay(isHoliday);
                         var regular = solution.GetShiftAssignments(shiftReq.ShiftId, date)
                             .Where(a => !a.IsOnCall && GetUserSpecialty(a.UserId) == specialtyReq.SpecialtyId)
                             .ToList();
@@ -1577,14 +1593,14 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                             .Where(a => a.IsOnCall && GetUserSpecialty(a.UserId) == specialtyReq.SpecialtyId)
                             .ToList();
 
-                        if (regular.Count > specialtyReq.RequiredTotalCount)
+                        if (regular.Count > day.RequiredTotalCount)
                         {
-                            removable.AddRange(regular.OrderByDescending(_ => _random.Next()).Take(regular.Count - specialtyReq.RequiredTotalCount));
+                            removable.AddRange(regular.OrderByDescending(_ => _random.Next()).Take(regular.Count - day.RequiredTotalCount));
                         }
 
-                        if (onCall.Count > specialtyReq.OnCallTotalCount)
+                        if (onCall.Count > day.OnCallTotalCount)
                         {
-                            removable.AddRange(onCall.OrderByDescending(_ => _random.Next()).Take(onCall.Count - specialtyReq.OnCallTotalCount));
+                            removable.AddRange(onCall.OrderByDescending(_ => _random.Next()).Take(onCall.Count - day.OnCallTotalCount));
                         }
                     }
                 }

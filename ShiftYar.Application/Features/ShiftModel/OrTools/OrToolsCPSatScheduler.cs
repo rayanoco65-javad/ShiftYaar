@@ -282,22 +282,23 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools
                             }
                         }
 
-                        // محدودیت تعداد کل
+                        // محدودیت تعداد کل / جنسیت — با توجه به تعطیل بودن روز
+                        var day = specialtyReq.ForDay(_constraints.IsHolidayDayIndex(dateIndex));
                         if (totalAssignments.Count > 0)
                         {
-                            model.Add(LinearExpr.Sum(totalAssignments) >= specialtyReq.RequiredTotalCount);
-                            model.Add(LinearExpr.Sum(totalAssignments) <= specialtyReq.RequiredTotalCount + 2); // انعطاف‌پذیری
+                            model.Add(LinearExpr.Sum(totalAssignments) >= day.RequiredTotalCount);
+                            model.Add(LinearExpr.Sum(totalAssignments) <= day.RequiredTotalCount + 2); // انعطاف‌پذیری
                         }
 
                         // محدودیت جنسیت
                         if (maleAssignments.Count > 0)
                         {
-                            model.Add(LinearExpr.Sum(maleAssignments) >= specialtyReq.RequiredMaleCount);
+                            model.Add(LinearExpr.Sum(maleAssignments) >= day.RequiredMaleCount);
                         }
 
                         if (femaleAssignments.Count > 0)
                         {
-                            model.Add(LinearExpr.Sum(femaleAssignments) >= specialtyReq.RequiredFemaleCount);
+                            model.Add(LinearExpr.Sum(femaleAssignments) >= day.RequiredFemaleCount);
                         }
                     }
                 }

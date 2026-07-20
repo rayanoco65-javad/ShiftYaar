@@ -1,15 +1,13 @@
 ﻿using ShiftYar.Domain.Entities.BaseModel;
-using System;
-using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace ShiftYar.Domain.Entities.ShiftModel
 {
-    ///این مدل مشخص می‌کند در یک شیفت خاص، چه تخصص‌هایی با چه تعداد نیرو لازم هستند
+    /// <summary>
+    /// نیازمندی تخصص در یک شیفت — با امکان تعریف جداگانه برای روزهای غیرتعطیل و تعطیل.
+    /// اگر فیلدهای Holiday* خالی باشند، همان مقادیر روز غیرتعطیل اعمال می‌شود.
+    /// </summary>
     public class ShiftRequiredSpecialty : BaseEntity
     {
         [Key]
@@ -23,13 +21,23 @@ namespace ShiftYar.Domain.Entities.ShiftModel
         public int? SpecialtyId { get; set; }
         public Specialty? Specialty { get; set; }
 
-        public int? RequiredMaleCount { get; set; } //حداقل تعداد نیروهای مرد
-        public int? RequiredFemaleCount { get; set; } //حداقل تعداد نیروهای زن
-        public int? RequiredTottalCount { get; set; }  //تعداد کل نیروهای موردنیاز در شیفت صرفنظر از جنسیت
+        // --- روزهای غیرتعطیل (پیش‌فرض) ---
+        public int? RequiredMaleCount { get; set; }
+        public int? RequiredFemaleCount { get; set; }
+        public int? RequiredTottalCount { get; set; }
 
-        public int? OnCallMaleCount { get; set; } //حداقل تعداد نیروهای مرد آنکال
-        public int? OnCallFemaleCount { get; set; } //حداقل تعداد نیروهای زن آنکال
-        public int? OnCallTottalCount { get; set; }  //تعداد کل نیروهای آنکال شیفت صرفنظر از جنسیت
+        public int? OnCallMaleCount { get; set; }
+        public int? OnCallFemaleCount { get; set; }
+        public int? OnCallTottalCount { get; set; }
+
+        // --- روزهای تعطیل (اختیاری؛ null = همان غیرتعطیل) ---
+        public int? HolidayRequiredMaleCount { get; set; }
+        public int? HolidayRequiredFemaleCount { get; set; }
+        public int? HolidayRequiredTottalCount { get; set; }
+
+        public int? HolidayOnCallMaleCount { get; set; }
+        public int? HolidayOnCallFemaleCount { get; set; }
+        public int? HolidayOnCallTottalCount { get; set; }
 
         public ShiftRequiredSpecialty()
         {
@@ -44,6 +52,12 @@ namespace ShiftYar.Domain.Entities.ShiftModel
             this.OnCallMaleCount = null;
             this.OnCallFemaleCount = null;
             this.OnCallTottalCount = null;
+            this.HolidayRequiredMaleCount = null;
+            this.HolidayRequiredFemaleCount = null;
+            this.HolidayRequiredTottalCount = null;
+            this.HolidayOnCallMaleCount = null;
+            this.HolidayOnCallFemaleCount = null;
+            this.HolidayOnCallTottalCount = null;
         }
     }
 }

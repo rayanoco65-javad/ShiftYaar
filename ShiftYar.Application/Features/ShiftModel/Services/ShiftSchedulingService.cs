@@ -1294,7 +1294,13 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                                 RequiredTotalCount = reqSpecialty.RequiredTottalCount ?? 0,
                                 OnCallMaleCount = reqSpecialty.OnCallMaleCount ?? 0,
                                 OnCallFemaleCount = reqSpecialty.OnCallFemaleCount ?? 0,
-                                OnCallTotalCount = reqSpecialty.OnCallTottalCount ?? 0
+                                OnCallTotalCount = reqSpecialty.OnCallTottalCount ?? 0,
+                                HolidayRequiredMaleCount = reqSpecialty.HolidayRequiredMaleCount,
+                                HolidayRequiredFemaleCount = reqSpecialty.HolidayRequiredFemaleCount,
+                                HolidayRequiredTotalCount = reqSpecialty.HolidayRequiredTottalCount,
+                                HolidayOnCallMaleCount = reqSpecialty.HolidayOnCallMaleCount,
+                                HolidayOnCallFemaleCount = reqSpecialty.HolidayOnCallFemaleCount,
+                                HolidayOnCallTotalCount = reqSpecialty.HolidayOnCallTottalCount
                             };
 
                             shiftRequirement.SpecialtyRequirements.Add(specialtyReq);
@@ -1868,7 +1874,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     UserPreferredShiftWeight = constraints.SoftWeights.UserPreferredShiftWeight,
                     WeeklyMaxWeight = constraints.SoftWeights.WeeklyMaxWeight,
                     MonthlyNightCapWeight = constraints.SoftWeights.MonthlyNightCapWeight
-                }
+                },
+                HolidayDates = new HashSet<DateTime>(constraints.HolidayDates)
             };
 
             // تبدیل محدودیت‌های کاربران
@@ -1928,7 +1935,13 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         RequiredTotalCount = specialtyReq.RequiredTotalCount,
                         OnCallMaleCount = specialtyReq.OnCallMaleCount,
                         OnCallFemaleCount = specialtyReq.OnCallFemaleCount,
-                        OnCallTotalCount = specialtyReq.OnCallTotalCount
+                        OnCallTotalCount = specialtyReq.OnCallTotalCount,
+                        HolidayRequiredMaleCount = specialtyReq.HolidayRequiredMaleCount,
+                        HolidayRequiredFemaleCount = specialtyReq.HolidayRequiredFemaleCount,
+                        HolidayRequiredTotalCount = specialtyReq.HolidayRequiredTotalCount,
+                        HolidayOnCallMaleCount = specialtyReq.HolidayOnCallMaleCount,
+                        HolidayOnCallFemaleCount = specialtyReq.HolidayOnCallFemaleCount,
+                        HolidayOnCallTotalCount = specialtyReq.HolidayOnCallTotalCount
                     };
 
                     ortoolsShift.SpecialtyRequirements.Add(ortoolsSpecialtyReq);

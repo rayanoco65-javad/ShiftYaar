@@ -19,8 +19,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public DateTime EndDate { get; set; }
         public List<UserConstraint> UserConstraints { get; set; } = new List<UserConstraint>();
         public List<ShiftRequirement> ShiftRequirements { get; set; } = new List<ShiftRequirement>();
-        /// <summary>روزهای تعطیل بازه (پرسنل فیکس در این روزها شیفت نمی‌گیرند)</summary>
+        /// <summary>روزهای تعطیل بازه (پرسنل فیکس در این روزها شیفت نمی‌گیرند؛ ظرفیت تخصص می‌تواند متفاوت باشد)</summary>
         public HashSet<DateTime> HolidayDates { get; set; } = new HashSet<DateTime>();
+
+        public bool IsHoliday(DateTime date) => HolidayDates.Contains(date.Date);
         public GlobalConstraints GlobalConstraints { get; set; } = new GlobalConstraints();
         // قوانین قطعی (سراسری برای همه دپارتمان‌ها)
         public HardRuleSet HardRules { get; set; } = HardRuleSet.CreateDefault();
@@ -94,19 +96,60 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
     }
 
     /// <summary>
-    /// نیازمندی تخصص در شیفت
+    /// نیازمندی تخصص در شیفت — با پشتیبانی از ظرفیت متفاوت روز تعطیل.
+    /// فیلدهای بدون پیشوند Holiday مربوط به روز غیرتعطیل‌اند.
+    /// اگر Holiday* مقدار نداشته باشد، همان غیرتعطیل اعمال می‌شود.
     /// </summary>
     public class SpecialtyRequirement
     {
         public int SpecialtyId { get; set; }
         public string SpecialtyName { get; set; } = string.Empty;
+
         public int RequiredMaleCount { get; set; }
         public int RequiredFemaleCount { get; set; }
         public int RequiredTotalCount { get; set; }
         public int OnCallMaleCount { get; set; }
         public int OnCallFemaleCount { get; set; }
         public int OnCallTotalCount { get; set; }
+
+        public int? HolidayRequiredMaleCount { get; set; }
+        public int? HolidayRequiredFemaleCount { get; set; }
+        public int? HolidayRequiredTotalCount { get; set; }
+        public int? HolidayOnCallMaleCount { get; set; }
+        public int? HolidayOnCallFemaleCount { get; set; }
+        public int? HolidayOnCallTotalCount { get; set; }
+
+        public SpecialtyDayCounts ForDay(bool isHoliday)
+        {
+            if (!isHoliday)
+            {
+                return new SpecialtyDayCounts(
+                    RequiredMaleCount,
+                    RequiredFemaleCount,
+                    RequiredTotalCount,
+                    OnCallMaleCount,
+                    OnCallFemaleCount,
+                    OnCallTotalCount);
+            }
+
+            return new SpecialtyDayCounts(
+                HolidayRequiredMaleCount ?? RequiredMaleCount,
+                HolidayRequiredFemaleCount ?? RequiredFemaleCount,
+                HolidayRequiredTotalCount ?? RequiredTotalCount,
+                HolidayOnCallMaleCount ?? OnCallMaleCount,
+                HolidayOnCallFemaleCount ?? OnCallFemaleCount,
+                HolidayOnCallTotalCount ?? OnCallTotalCount);
+        }
     }
+
+    /// <summary>نیازمندی مؤثر تخصص برای یک روز مشخص (تعطیل یا غیرتعطیل)</summary>
+    public readonly record struct SpecialtyDayCounts(
+        int RequiredMaleCount,
+        int RequiredFemaleCount,
+        int RequiredTotalCount,
+        int OnCallMaleCount,
+        int OnCallFemaleCount,
+        int OnCallTotalCount);
 
     /// <summary>
     /// محدودیت‌های سراسری

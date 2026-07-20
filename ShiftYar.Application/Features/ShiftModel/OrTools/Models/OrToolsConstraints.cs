@@ -21,6 +21,7 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools.Models
         public OrToolsGlobalConstraints GlobalConstraints { get; set; } = new OrToolsGlobalConstraints(); // قیود سراسری
         public OrToolsHardRules HardRules { get; set; } = OrToolsHardRules.CreateDefault(); // قوانین قطعی
         public OrToolsSoftWeights SoftWeights { get; set; } = OrToolsSoftWeights.CreateDefault(); // وزن قیود نرم
+        public HashSet<DateTime> HolidayDates { get; set; } = new HashSet<DateTime>();
 
         // متغیرهای کمکی برای OR-Tools
         public Dictionary<string, int> UserIndexMap { get; set; } = new Dictionary<string, int>();
@@ -32,6 +33,9 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools.Models
         public int NumShifts => ShiftRequirements.Count; // تعداد شیفت‌ها
         public int NumDays => (EndDate - StartDate).Days + 1; // تعداد روزهای بازه
         public int NumSpecialties => UserConstraints.Select(u => u.SpecialtyId).Distinct().Count(); // تعداد تخصص‌ها
+
+        public bool IsHoliday(DateTime date) => HolidayDates.Contains(date.Date);
+        public bool IsHolidayDayIndex(int dateIndex) => IsHoliday(StartDate.Date.AddDays(dateIndex));
     }
 
     /// <summary>
@@ -94,12 +98,37 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools.Models
         public int SpecialtyId { get; set; } // شناسه تخصص
         public int SpecialtyIndex { get; set; } // ایندکس تخصص
         public string SpecialtyName { get; set; } = string.Empty; // نام تخصص
-        public int RequiredMaleCount { get; set; } // تعداد موردنیاز مرد
-        public int RequiredFemaleCount { get; set; } // تعداد موردنیاز زن
-        public int RequiredTotalCount { get; set; } // تعداد کل موردنیاز
+        public int RequiredMaleCount { get; set; } // تعداد موردنیاز مرد (غیرتعطیل)
+        public int RequiredFemaleCount { get; set; } // تعداد موردنیاز زن (غیرتعطیل)
+        public int RequiredTotalCount { get; set; } // تعداد کل موردنیاز (غیرتعطیل)
         public int OnCallMaleCount { get; set; } // تعداد آماده‌باش مرد
         public int OnCallFemaleCount { get; set; } // تعداد آماده‌باش زن
         public int OnCallTotalCount { get; set; } // تعداد آماده‌باش کل
+
+        public int? HolidayRequiredMaleCount { get; set; }
+        public int? HolidayRequiredFemaleCount { get; set; }
+        public int? HolidayRequiredTotalCount { get; set; }
+        public int? HolidayOnCallMaleCount { get; set; }
+        public int? HolidayOnCallFemaleCount { get; set; }
+        public int? HolidayOnCallTotalCount { get; set; }
+
+        public (int RequiredMaleCount, int RequiredFemaleCount, int RequiredTotalCount,
+                int OnCallMaleCount, int OnCallFemaleCount, int OnCallTotalCount) ForDay(bool isHoliday)
+        {
+            if (!isHoliday)
+            {
+                return (RequiredMaleCount, RequiredFemaleCount, RequiredTotalCount,
+                    OnCallMaleCount, OnCallFemaleCount, OnCallTotalCount);
+            }
+
+            return (
+                HolidayRequiredMaleCount ?? RequiredMaleCount,
+                HolidayRequiredFemaleCount ?? RequiredFemaleCount,
+                HolidayRequiredTotalCount ?? RequiredTotalCount,
+                HolidayOnCallMaleCount ?? OnCallMaleCount,
+                HolidayOnCallFemaleCount ?? OnCallFemaleCount,
+                HolidayOnCallTotalCount ?? OnCallTotalCount);
+        }
     }
 
     /// <summary>

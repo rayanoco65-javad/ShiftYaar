@@ -253,18 +253,20 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         {
             var specialtyReq = shiftReq.SpecialtyRequirements
                 .FirstOrDefault(r => r.SpecialtyId == incoming.SpecialtyId);
-            if (specialtyReq == null || specialtyReq.RequiredTotalCount <= 0)
+            var day = specialtyReq?.ForDay(constraints.IsHoliday(date));
+            if (specialtyReq == null || day == null || day.Value.RequiredTotalCount <= 0)
             {
                 return;
             }
 
+            var dayCounts = day.Value;
             var regulars = solution.GetShiftAssignments(shiftReq.ShiftId, date)
                 .Where(a => !a.IsOnCall &&
                             a.UserId != incoming.UserId &&
                             GetSpecialty(constraints, a.UserId) == incoming.SpecialtyId)
                 .ToList();
 
-            if (regulars.Count < specialtyReq.RequiredTotalCount)
+            if (regulars.Count < dayCounts.RequiredTotalCount)
             {
                 return;
             }
