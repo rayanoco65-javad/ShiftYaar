@@ -11,8 +11,8 @@ namespace ShiftYar.Application.DTOs.ProductivityModel
         public string? StaffFullName { get; set; }
         public DateTime? DateOfEmployment { get; set; }
         public int? YearsOfServiceOverride { get; set; }
-        public bool HasHardshipDuty { get; set; }
+        /// <summary>درصد صعوبت کار (۰ تا ۱۰۰). کاهش هفتگی از ۸٪ به بالا اعمال می‌شود.</summary>
+        public decimal HardshipPercent { get; set; }
         public bool HasUncommonRotatingShifts { get; set; }
     }
 }
-

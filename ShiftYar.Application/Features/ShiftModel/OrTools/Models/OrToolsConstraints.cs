@@ -65,6 +65,9 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools.Models
         public ShiftSubTypes ShiftSubType { get; set; } // زیرنوع شیفت
         public TwoShiftRotationPattern? TwoShiftRotationPattern { get; set; } // الگوی چرخش دوشیفته
         public double? ProductivityRequiredHours { get; set; } // سقف ساعات موظفی بهره‌وری
+        public bool OvertimeConsent { get; set; }
+        public double MaxMonthlyOvertimeHours { get; set; } = 80;
+        public double MaxConsecutiveWorkHours { get; set; } = 12;
 
         // متغیرهای OR-Tools
         public Dictionary<string, int> AssignmentVariables { get; set; } = new Dictionary<string, int>(); // نقشه متغیرهای انتساب

@@ -788,9 +788,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 StaffId = user.Id ?? 0,
                 StaffFullName = user.FullName,
                 DateOfEmployment = user.DateOfEmployment,
-                // Hardship duty must come from a dedicated field or manual override on the request DTO.
-                // isProjectPersonnel only indicates residency (طرحی) and must not affect productivity reductions.
-                HasHardshipDuty = false,
+                HardshipPercent = user.HardshipPercent ?? 0m,
                 HasUncommonRotatingShifts = userConstraint.ShiftType == ShiftTypes.RotatingShift
             };
 
@@ -945,15 +943,23 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 return;
             }
 
-            var shiftDurationMap = constraints.ShiftRequirements
-                .GroupBy(s => s.ShiftId)
-                .ToDictionary(g => g.Key, g => g.First().DurationHours);
+            var shiftInfoLookup = ProductivityWorkedHoursCalculator.BuildShiftInfoLookup(constraints.ShiftRequirements);
 
             var hoursByUser = result.Assignments
                 .GroupBy(a => a.UserId)
                 .ToDictionary(
                     g => g.Key,
-                    g => g.Sum(a => shiftDurationMap.TryGetValue(a.ShiftId, out var duration) ? duration : 0));
+                    g => ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
+                        g.Select(a => new SaShiftAssignment
+                        {
+                            UserId = a.UserId,
+                            ShiftId = a.ShiftId,
+                            Date = a.Date,
+                            ShiftLabel = a.ShiftLabel,
+                            IsOnCall = a.IsOnCall
+                        }),
+                        shiftInfoLookup,
+                        constraints.IsHoliday));
 
             result.Statistics ??= new ShiftSchedulingStatisticsDto();
             result.Statistics.WorkedHoursByUser = hoursByUser;
@@ -969,17 +975,21 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             var compliantCount = 0;
             const double tolerance = 0.25;
 
-            foreach (var kvp in requiredByUser)
+            foreach (var user in constraints.UserConstraints.Where(u => u.ProductivityRequiredHours.HasValue))
             {
-                var worked = hoursByUser.TryGetValue(kvp.Key, out var value) ? value : 0;
-                var delta = worked - kvp.Value;
+                var worked = hoursByUser.TryGetValue(user.UserId, out var value) ? value : 0;
+                var maxAllowed = ProductivityWorkedHoursCalculator.GetMaxAllowedHours(
+                    user.ProductivityRequiredHours,
+                    user.OvertimeConsent,
+                    user.MaxMonthlyOvertimeHours);
+                var delta = worked - maxAllowed;
                 if (delta > tolerance)
                 {
-                    overtime[kvp.Key] = delta;
+                    overtime[user.UserId] = delta;
                 }
                 else
                 {
-                    overtime[kvp.Key] = 0;
+                    overtime[user.UserId] = 0;
                     compliantCount++;
                 }
             }
@@ -1196,7 +1206,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         IsActive = user.IsActive ?? true,
                         ShiftType = user.ShiftType ?? ShiftTypes.FixedShift,
                         ShiftSubType = user.ShiftSubType ?? ShiftSubTypes.FixedMorning,
-                        TwoShiftRotationPattern = user.TwoShiftRotationPattern
+                        TwoShiftRotationPattern = user.TwoShiftRotationPattern,
+                        HardshipPercent = user.HardshipPercent ?? 0m,
+                        OvertimeConsent = user.OvertimeConsent ?? false
                     };
 
                     userConstraint.AllowedShiftLabels = ShiftEligibilityResolver
@@ -1902,7 +1914,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     ShiftType = user.ShiftType,
                     ShiftSubType = user.ShiftSubType,
                     TwoShiftRotationPattern = user.TwoShiftRotationPattern,
-                    ProductivityRequiredHours = user.ProductivityRequiredHours.HasValue ? (double)user.ProductivityRequiredHours.Value : null
+                    ProductivityRequiredHours = user.ProductivityRequiredHours.HasValue ? (double)user.ProductivityRequiredHours.Value : null,
+                    OvertimeConsent = user.OvertimeConsent,
+                    MaxMonthlyOvertimeHours = user.MaxMonthlyOvertimeHours,
+                    MaxConsecutiveWorkHours = user.MaxConsecutiveWorkHours
                 };
 
                 ortoolsConstraints.UserConstraints.Add(ortoolsUser);

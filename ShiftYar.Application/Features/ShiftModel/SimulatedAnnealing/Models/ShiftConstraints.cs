@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using ShiftYar.Application.DTOs.ProductivityModel;
+using ShiftYar.Application.Common.Utilities;
 using static ShiftYar.Domain.Enums.ShiftModel.ShiftEnums;
 using static ShiftYar.Domain.Enums.UserModel.UserEnums;
 
@@ -62,6 +63,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public bool IncludedInProductivityPlan { get; set; }
         public decimal? ProductivityRequiredHours { get; set; }
         public WorkingHoursCalculationResultDto? ProductivitySnapshot { get; set; }
+        public decimal HardshipPercent { get; set; }
+        public bool OvertimeConsent { get; set; }
+        public double MaxMonthlyOvertimeHours { get; set; } = ProductivityWorkedHoursCalculator.DefaultMaxMonthlyOvertimeHours;
+        public double MaxConsecutiveWorkHours { get; set; } = ProductivityWorkedHoursCalculator.DefaultMaxConsecutiveWorkHours;
 
         // Fairness history (computed from previous months)
         public int RecentTotalShifts { get; set; } = 0;
@@ -196,6 +201,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public bool EnforceNightShiftMonthlyCap { get; set; } = false; // می‌تواند نرم نیز باشد
         public bool EnforceSpecialtyCapacity { get; set; } = true; // عدم تجاوز از ظرفیت موردنیاز هر تخصص/شیفت/روز
         public bool EnforceProductivityHours { get; set; } = true; // رعایت سقف ساعات موظفی بهره‌وری
+        public bool EnforceMaxConsecutiveWorkHours { get; set; } = true; // حداکثر ۱۲ ساعت کار متوالی
+        public bool EnforceOvertimeConsent { get; set; } = true; // اضافه‌کاری فقط با رضایت پرسنل
 
         public static HardRuleSet CreateDefault()
         {

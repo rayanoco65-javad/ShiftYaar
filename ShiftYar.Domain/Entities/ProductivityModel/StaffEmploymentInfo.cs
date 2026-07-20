@@ -12,7 +12,7 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
         public string? StaffFullName { get; init; }
         public DateTime? DateOfEmployment { get; init; }
         public int? YearsOfServiceOverride { get; init; }
-        public bool HasHardshipDuty { get; init; }
+        public decimal HardshipPercent { get; init; }
         public bool HasUncommonRotatingShifts { get; init; }
 
         /// <summary>
@@ -47,7 +47,6 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
         /// </summary>
         public static StaffEmploymentInfo FromUser(
             User user,
-            bool hasHardshipDuty = false,
             bool hasUncommonRotatingShifts = false,
             int? yearsOfServiceOverride = null)
         {
@@ -61,11 +60,10 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
                 StaffId = user.Id ?? 0,
                 StaffFullName = user.FullName,
                 DateOfEmployment = user.DateOfEmployment,
-                HasHardshipDuty = hasHardshipDuty,
+                HardshipPercent = user.HardshipPercent ?? 0m,
                 HasUncommonRotatingShifts = hasUncommonRotatingShifts,
                 YearsOfServiceOverride = yearsOfServiceOverride
             };
         }
     }
 }
-

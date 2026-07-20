@@ -28,6 +28,9 @@ namespace ShiftYar.Application.DTOs.UserModel
         public string? Address { get; set; }
         public bool? IsActive { get; set; }
         public bool? CanBeShiftManager { get; set; }
+        public bool? IncludedProductivityPlan { get; set; }
+        public decimal? HardshipPercent { get; set; }
+        public bool? OvertimeConsent { get; set; }
         public string? Image { get; set; }
         public int? DepartmentId { get; set; }
         public Department? Department { get; set; }

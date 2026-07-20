@@ -43,7 +43,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("ProvinceId");
 
-                    b.ToTable("Cities");
+                    b.ToTable("Cities", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.AddressModel.Province", b =>
@@ -62,7 +62,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Provinces");
+                    b.ToTable("Provinces", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.DepartmentModel.Department", b =>
@@ -106,7 +106,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("SupervisorId");
 
-                    b.ToTable("Departments");
+                    b.ToTable("Departments", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.DepartmentModel.DepartmentName", b =>
@@ -131,7 +131,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("DepartmentNames");
+                    b.ToTable("DepartmentNames", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.DepartmentModel.DepartmentSchedulingSettings", b =>
@@ -275,7 +275,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("DepartmentId");
 
-                    b.ToTable("DepartmentSchedulingSettings");
+                    b.ToTable("DepartmentSchedulingSettings", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.HospitalModel.Hospital", b =>
@@ -327,7 +327,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Hospitals");
+                    b.ToTable("Hospitals", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.HospitalModel.HospitalPhoneNumber", b =>
@@ -360,7 +360,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("HospitalId");
 
-                    b.ToTable("HospitalPhoneNumbers");
+                    b.ToTable("HospitalPhoneNumbers", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.PermissionModel.Permission", b =>
@@ -391,7 +391,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Permissions");
+                    b.ToTable("Permissions", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.RoleModel.Role", b =>
@@ -419,7 +419,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Roles");
+                    b.ToTable("Roles", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.RolePermissionModel.RolePermission", b =>
@@ -451,7 +451,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("RoleId");
 
-                    b.ToTable("RolePermissions");
+                    b.ToTable("RolePermissions", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.SecurityModel.OtpCode", b =>
@@ -490,7 +490,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("OtpCodes");
+                    b.ToTable("OtpCodes", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.SecurityModel.PasswordResetCode", b =>
@@ -529,7 +529,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("PasswordResetCodes");
+                    b.ToTable("PasswordResetCodes", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.SecurityModel.RefreshToken", b =>
@@ -565,7 +565,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("RefreshTokens");
+                    b.ToTable("RefreshTokens", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.Settings.AlgorithmSettings", b =>
@@ -634,7 +634,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("DepartmentId");
 
-                    b.ToTable("AlgorithmSettings");
+                    b.ToTable("AlgorithmSettings", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.ShiftDateModel.ShiftDate", b =>
@@ -671,7 +671,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ShiftDates");
+                    b.ToTable("ShiftDates", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.ShiftExchangeModel.ShiftExchange", b =>
@@ -736,7 +736,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("SupervisorId");
 
-                    b.ToTable("ShiftExchanges");
+                    b.ToTable("ShiftExchanges", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.ShiftModel.SchedulingJobRecord", b =>
@@ -789,7 +789,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("SchedulingJobRecords");
+                    b.ToTable("SchedulingJobRecords", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.ShiftModel.Shift", b =>
@@ -825,7 +825,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("DepartmentId");
 
-                    b.ToTable("Shifts");
+                    b.ToTable("Shifts", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.ShiftModel.ShiftAssignment", b =>
@@ -868,7 +868,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("ShiftAssignments");
+                    b.ToTable("ShiftAssignments", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.ShiftModel.ShiftRequiredSpecialty", b =>
@@ -936,7 +936,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("SpecialtyId");
 
-                    b.ToTable("ShiftRequiredSpecialties");
+                    b.ToTable("ShiftRequiredSpecialties", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.ShiftModel.Specialty", b =>
@@ -966,7 +966,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("DepartmentId");
 
-                    b.ToTable("Specialties");
+                    b.ToTable("Specialties", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.ShiftModel.SpecialtyName", b =>
@@ -991,7 +991,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("SpecialtyNames");
+                    b.ToTable("SpecialtyNames", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.ShiftRequestModel.ShiftRequest", b =>
@@ -1047,7 +1047,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("ShiftRequests");
+                    b.ToTable("ShiftRequests", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.SmsModel.SmsTemplate", b =>
@@ -1078,7 +1078,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("SmsTemplates");
+                    b.ToTable("SmsTemplates", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.UserModel.LoginHistory", b =>
@@ -1114,7 +1114,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("LoginHistories");
+                    b.ToTable("LoginHistories", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.UserModel.User", b =>
@@ -1155,6 +1155,9 @@ namespace ShiftYar.Infrastructure.Migrations
                     b.Property<string>("Image")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<decimal?>("HardshipPercent")
+                        .HasColumnType("decimal(5,2)");
+
                     b.Property<bool?>("IncludedProductivityPlan")
                         .HasColumnType("bit");
 
@@ -1166,6 +1169,9 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.Property<string>("NationalCode")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool?>("OvertimeConsent")
+                        .HasColumnType("bit");
 
                     b.Property<string>("Password")
                         .HasColumnType("nvarchar(max)");
@@ -1203,7 +1209,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("SpecialtyId");
 
-                    b.ToTable("Users");
+                    b.ToTable("Users", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.UserModel.UserPhoneNumber", b =>
@@ -1236,7 +1242,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("UserPhoneNumber");
+                    b.ToTable("UserPhoneNumber", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.UserModel.UserRole", b =>
@@ -1268,7 +1274,7 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("UserRoles");
+                    b.ToTable("UserRoles", (string)null);
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.AddressModel.City", b =>

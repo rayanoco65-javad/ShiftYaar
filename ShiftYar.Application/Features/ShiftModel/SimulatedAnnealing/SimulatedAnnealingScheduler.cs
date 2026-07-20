@@ -21,6 +21,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         private readonly SimulatedAnnealingParameters _parameters;
         private readonly AlgorithmStatistics _statistics;
         private readonly Dictionary<int, double> _shiftDurationLookup;
+        private readonly Dictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> _shiftInfoLookup;
 
         public SimulatedAnnealingScheduler(ShiftConstraints constraints, SimulatedAnnealingParameters parameters)
         {
@@ -28,11 +29,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             _parameters = parameters;
             _random = new Random();
             _statistics = new AlgorithmStatistics();
-            _shiftDurationLookup = constraints.ShiftRequirements
-                .GroupBy(s => s.ShiftId)
-                .ToDictionary(
-                    g => g.Key,
-                    g => g.First().DurationHours > 0 ? g.First().DurationHours : 8);
+            _shiftInfoLookup = ProductivityWorkedHoursCalculator.BuildShiftInfoLookup(constraints.ShiftRequirements);
+            _shiftDurationLookup = _shiftInfoLookup.ToDictionary(
+                kvp => kvp.Key,
+                kvp => kvp.Value.DurationHours > 0 ? kvp.Value.DurationHours : 8);
         }
 
         /// <summary>
@@ -688,7 +688,22 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     !isDailyFixedStaff)
                 {
                     var workedHours = CalculateUserWorkedHours(userAssignments);
-                    if (workedHours > (double)userConstraint.ProductivityRequiredHours.Value + 0.25)
+                    var maxAllowed = ProductivityWorkedHoursCalculator.GetMaxAllowedHours(
+                        userConstraint.ProductivityRequiredHours,
+                        userConstraint.OvertimeConsent,
+                        userConstraint.MaxMonthlyOvertimeHours);
+                    if (workedHours > maxAllowed + 0.25)
+                    {
+                        return false;
+                    }
+                }
+
+                if (_constraints.HardRules.EnforceMaxConsecutiveWorkHours && !isDailyFixedStaff)
+                {
+                    if (ProductivityWorkedHoursCalculator.ExceedsMaxConsecutiveWorkHours(
+                            userAssignments,
+                            _shiftInfoLookup,
+                            userConstraint.MaxConsecutiveWorkHours))
                     {
                         return false;
                     }
@@ -1352,24 +1367,25 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             var workedHours = CalculateUserWorkedHours(assignments);
-            var maxHours = (double)userConstraint.ProductivityRequiredHours.Value;
-            if (workedHours <= maxHours + 0.25)
+            var maxAllowed = ProductivityWorkedHoursCalculator.GetMaxAllowedHours(
+                userConstraint.ProductivityRequiredHours,
+                userConstraint.OvertimeConsent,
+                userConstraint.MaxMonthlyOvertimeHours);
+            if (workedHours <= maxAllowed + 0.25)
             {
                 return 0;
             }
 
-            violations.Add($"User {userConstraint.UserId} exceeds productivity hours ({workedHours:F1}/{maxHours:F1}).");
-            return workedHours - maxHours;
+            violations.Add($"User {userConstraint.UserId} exceeds productivity hours ({workedHours:F1}/{maxAllowed:F1}).");
+            return workedHours - maxAllowed;
         }
 
         private double CalculateUserWorkedHours(List<SaShiftAssignment> assignments)
         {
-            double total = 0;
-            foreach (var assignment in assignments)
-            {
-                total += GetShiftDuration(assignment.ShiftId);
-            }
-            return total;
+            return ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
+                assignments,
+                _shiftInfoLookup,
+                _constraints.IsHoliday);
         }
 
         private double GetShiftDuration(int shiftId)

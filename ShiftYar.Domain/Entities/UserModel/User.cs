@@ -34,6 +34,10 @@ namespace ShiftYar.Domain.Entities.UserModel
         public bool? IsActive { get; set; }
         public bool? CanBeShiftManager { get; set; }   //آیا میتونه مسئول شیفت باشه؟
         public bool? IncludedProductivityPlan { get; set; }  //آیا مشمول طرح بهره وری هست؟ (برای محاسبه درست ساعت شیفت شب و تعطیلات) ر
+        
+        public decimal? HardshipPercent { get; set; }   //درصد صعوبت (سختی) کار (۰–۱۰۰) برای کاهش ساعت موظفی هفتگی
+        public bool? OvertimeConsent { get; set; }  //رضایت پرسنل به اضافه‌کاری (حداکثر ۸۰ ساعت در ماه) ر
+
         public string? Image { get; set; }
 
         [ForeignKey("Department")]

@@ -41,7 +41,7 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
             var yearsOfService = staffInfo.ResolveYearsOfService(targetMonth);
 
             var seniorityReduction = ruleConfig.GetSeniorityReduction(yearsOfService);
-            var hardshipReduction = staffInfo.HasHardshipDuty ? ruleConfig.HardshipReductionPerWeek : 0m;
+            var hardshipReduction = ruleConfig.GetHardshipReduction(staffInfo.HardshipPercent);
             var rotatingReduction = staffInfo.HasUncommonRotatingShifts ? ruleConfig.RotatingShiftReductionPerWeek : 0m;
 
             var totalWeeklyReduction = Math.Min(ruleConfig.MaxWeeklyReduction, seniorityReduction + hardshipReduction + rotatingReduction);
@@ -95,7 +95,7 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
                 StaffFullName = dto.StaffFullName,
                 DateOfEmployment = dto.DateOfEmployment,
                 YearsOfServiceOverride = dto.YearsOfServiceOverride,
-                HasHardshipDuty = dto.HasHardshipDuty,
+                HardshipPercent = dto.HardshipPercent,
                 HasUncommonRotatingShifts = dto.HasUncommonRotatingShifts
             };
         }
@@ -119,7 +119,6 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
             {
                 BaseWeeklyHours = overrides.BaseWeeklyHours ?? defaultConfig.BaseWeeklyHours,
                 MaxWeeklyReduction = overrides.MaxWeeklyReduction ?? defaultConfig.MaxWeeklyReduction,
-                HardshipReductionPerWeek = overrides.HardshipReductionPerWeek ?? defaultConfig.HardshipReductionPerWeek,
                 RotatingShiftReductionPerWeek = overrides.RotatingShiftReductionPerWeek ?? defaultConfig.RotatingShiftReductionPerWeek,
                 NightHolidayMultiplier = overrides.NightHolidayMultiplier ?? defaultConfig.NightHolidayMultiplier,
                 SeniorityReductionBands = seniorityBands

@@ -377,6 +377,8 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools
 
         private void AddProductivityHourConstraints(CpModel model, Dictionary<string, IntVar> variables)
         {
+            const double nightHolidayMultiplier = 1.5;
+
             for (int userIndex = 0; userIndex < _constraints.NumUsers; userIndex++)
             {
                 var user = _constraints.UserConstraints[userIndex];
@@ -385,21 +387,29 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools
                     continue;
                 }
 
-                var capMinutes = (long)Math.Round(user.ProductivityRequiredHours.Value * 60);
+                var maxHours = user.OvertimeConsent
+                    ? user.ProductivityRequiredHours.Value + user.MaxMonthlyOvertimeHours
+                    : user.ProductivityRequiredHours.Value;
+                var capMinutes = (long)Math.Round(maxHours * 60);
                 var weightedAssignments = new List<LinearExpr>();
 
                 for (int shiftIndex = 0; shiftIndex < _constraints.NumShifts; shiftIndex++)
                 {
                     var shift = _constraints.ShiftRequirements[shiftIndex];
                     var duration = shift.DurationMinutes > 0 ? shift.DurationMinutes : 480;
+                    var isNight = shift.ShiftLabel == ShiftLabel.Night;
 
                     for (int dateIndex = 0; dateIndex < _constraints.NumDays; dateIndex++)
                     {
                         var key = OrToolsVariableKeys.GetAssignmentKey(userIndex, shiftIndex, dateIndex);
-                        if (variables.ContainsKey(key))
+                        if (!variables.ContainsKey(key))
                         {
-                            weightedAssignments.Add(LinearExpr.Term(variables[key], duration));
+                            continue;
                         }
+
+                        var isHoliday = _constraints.IsHolidayDayIndex(dateIndex);
+                        var weightedDuration = (long)Math.Round(duration * ((isNight || isHoliday) ? nightHolidayMultiplier : 1.0));
+                        weightedAssignments.Add(LinearExpr.Term(variables[key], weightedDuration));
                     }
                 }
 
