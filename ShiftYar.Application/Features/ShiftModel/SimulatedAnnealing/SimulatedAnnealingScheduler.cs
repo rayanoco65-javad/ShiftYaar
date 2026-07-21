@@ -227,6 +227,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             ExactNightQuotaGuard.Enforce(solution, _constraints);
 
+            ProductivityHourFillGuard.Enforce(solution, _constraints);
+
             // محاسبه امتیاز راه‌حل
             solution.Score = CalculateSolutionScore(solution);
 
@@ -242,9 +244,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             // حرکت‌های هدفمند بیمارستانی: جابجایی و انتساب مجدد پرتکرارتر از افزودن/حذف تصادفی
             var roll = _random.NextDouble();
-            if (roll < 0.35)
+            if (roll < 0.25)
             {
                 PerformReassignMove(neighbor);
+            }
+            else if (roll < 0.45)
+            {
+                PerformHourBalanceMove(neighbor);
             }
             else if (roll < 0.65)
             {
@@ -289,6 +295,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             // جریمه‌های عدالت و چرخش
             score += CalculateFairShiftCountBalancePenalty(solution) * _constraints.SoftWeights.FairShiftCountBalanceWeight;
             score += CalculateFairWorkedHoursBalancePenalty(solution) * _constraints.SoftWeights.FairWorkedHoursBalanceWeight;
+            score += CalculateProductivityShortfallPenalty(solution) * _constraints.SoftWeights.ProductivityShortfallWeight;
             score += CalculateFairNightShiftBalancePenalty(solution) * _constraints.SoftWeights.FairNightShiftBalanceWeight;
             score += CalculateMorningEveningBalancePenalty(solution) * _constraints.SoftWeights.MorningEveningBalanceWeight;
             score += CalculateExactNightQuotaPenalty(solution) * _constraints.SoftWeights.ExactNightQuotaWeight;
@@ -351,14 +358,53 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private double CalculateFairWorkedHoursBalancePenalty(ShiftSolution solution)
         {
-            var hours = _constraints.UserConstraints
+            var entries = _constraints.UserConstraints
                 .Where(u => u.ShiftType != ShiftTypes.FixedShift)
-                .Select(u => CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)))
+                .Where(u => u.IncludedInProductivityPlan && u.ProductivityRequiredHours.HasValue)
+                .Select(u =>
+                {
+                    var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                    var required = (double)u.ProductivityRequiredHours!.Value;
+                    return required > 0 ? worked / required : 0;
+                })
                 .ToList();
-            if (hours.Count < 2) return 0;
 
-            var avg = hours.Average();
-            return hours.Sum(h => Math.Abs(h - avg));
+            if (entries.Count < 2)
+            {
+                return 0;
+            }
+
+            var avgRatio = entries.Average();
+            // جریمه انحراف از میانگین نسبت تحقق موظفی (تعادل بین پرسنل با سقف‌های متفاوت)
+            return entries.Sum(r => Math.Abs(r - avgRatio)) * 100;
+        }
+
+        private double CalculateProductivityShortfallPenalty(ShiftSolution solution)
+        {
+            double penalty = 0;
+            foreach (var user in _constraints.UserConstraints)
+            {
+                if (!user.IncludedInProductivityPlan || !user.ProductivityRequiredHours.HasValue)
+                {
+                    continue;
+                }
+
+                if (user.ShiftType == ShiftTypes.FixedShift)
+                {
+                    continue;
+                }
+
+                var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(user.UserId));
+                var required = (double)user.ProductivityRequiredHours.Value;
+                var shortfall = required - worked;
+                if (shortfall > 2)
+                {
+                    // جریمه درجه دوم برای کمبود بزرگ ساعت موظفی
+                    penalty += shortfall * shortfall;
+                }
+            }
+
+            return penalty;
         }
 
         private double CalculateFairNightShiftBalancePenalty(ShiftSolution solution)
@@ -1085,6 +1131,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftEligibilityGuard.StripIneligibleAssignments(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
+            ProductivityHourFillGuard.Enforce(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(managerWarnings);
@@ -1826,7 +1873,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => IsUserAvailableForShift(u, assignment.Date, assignment.ShiftLabel, solution))
                 .Where(u => !IsRequiredShiftSlotForOtherUser(u.UserId, assignment.Date, assignment.ShiftLabel))
                 .Where(u => !solution.HasAssignment(u.UserId, assignment.ShiftId, assignment.Date))
-                .OrderBy(u => solution.GetUserAllAssignments(u.UserId).Count)
+                .OrderBy(u => GetProductivityHourDeficit(u, solution))
+                .ThenBy(u => CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)))
+                .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
                 .ThenBy(_ => _random.Next())
                 .ToList();
 
@@ -1857,7 +1906,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => !solution.HasAssignment(u.UserId, slot.ShiftId, slot.Date))
                 .Where(u => !slot.RequireMale || u.Gender == UserGender.Male)
                 .Where(u => !slot.RequireFemale || u.Gender == UserGender.Female)
-                .OrderBy(u => solution.GetUserAllAssignments(u.UserId).Count)
+                .OrderBy(u => GetProductivityHourDeficit(u, solution))
+                .ThenBy(u => CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)))
+                .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
                 .ThenBy(_ => _random.Next())
                 .ToList();
 
@@ -1872,14 +1923,97 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         {
             var overstaffed = FindOverstaffedAssignments(solution)
                 .Where(a => !IsProtectedAssignment(a))
+                .OrderByDescending(a => GetProductivityHourSurplus(GetUserConstraint(a.UserId), solution))
+                .ThenByDescending(a => CalculateUserWorkedHours(solution.GetUserAllAssignments(a.UserId)))
                 .ToList();
             if (overstaffed.Count == 0)
             {
                 return;
             }
 
-            var assignment = overstaffed[_random.Next(overstaffed.Count)];
+            var assignment = overstaffed[_random.Next(Math.Min(3, overstaffed.Count))];
             solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+        }
+
+        private void PerformHourBalanceMove(ShiftSolution solution)
+        {
+            var productivityUsers = _constraints.UserConstraints
+                .Where(u => u.IsActive && u.ShiftType != ShiftTypes.FixedShift)
+                .Where(u => u.IncludedInProductivityPlan && u.ProductivityRequiredHours.HasValue)
+                .ToList();
+            if (productivityUsers.Count < 2)
+            {
+                PerformReassignMove(solution);
+                return;
+            }
+
+            var receiver = productivityUsers
+                .OrderByDescending(u => GetProductivityHourDeficit(u, solution))
+                .FirstOrDefault(u => GetProductivityHourDeficit(u, solution) > 2);
+            if (receiver == null)
+            {
+                return;
+            }
+
+            var donor = productivityUsers
+                .Where(u => u.UserId != receiver.UserId)
+                .OrderByDescending(u => GetProductivityHourSurplus(u, solution))
+                .FirstOrDefault(u => GetProductivityHourSurplus(u, solution) > 2);
+            if (donor == null)
+            {
+                return;
+            }
+
+            var donorAssignments = solution.GetUserAllAssignments(donor.UserId)
+                .Where(a => !a.IsOnCall && !IsProtectedAssignment(a))
+                .OrderByDescending(a => a.ShiftLabel == ShiftLabel.Night ? 1 : 0)
+                .ToList();
+            foreach (var assignment in donorAssignments)
+            {
+                if (solution.HasAssignment(receiver.UserId, assignment.ShiftId, assignment.Date))
+                {
+                    continue;
+                }
+
+                if (!IsUserAvailableForShift(receiver, assignment.Date, assignment.ShiftLabel, solution))
+                {
+                    continue;
+                }
+
+                solution.RemoveAssignment(donor.UserId, assignment.ShiftId, assignment.Date);
+                solution.AddAssignment(
+                    receiver.UserId,
+                    assignment.ShiftId,
+                    assignment.Date,
+                    assignment.ShiftLabel,
+                    assignment.IsOnCall);
+                return;
+            }
+        }
+
+        private UserConstraint? GetUserConstraint(int userId) =>
+            _constraints.UserConstraints.FirstOrDefault(u => u.UserId == userId);
+
+        private double GetProductivityHourDeficit(UserConstraint user, ShiftSolution solution)
+        {
+            if (!user.IncludedInProductivityPlan || !user.ProductivityRequiredHours.HasValue)
+            {
+                return 0;
+            }
+
+            var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(user.UserId));
+            return Math.Max(0, (double)user.ProductivityRequiredHours.Value - worked);
+        }
+
+        private double GetProductivityHourSurplus(UserConstraint user, ShiftSolution solution)
+        {
+            if (!user.IncludedInProductivityPlan || !user.ProductivityRequiredHours.HasValue)
+            {
+                return CalculateUserWorkedHours(solution.GetUserAllAssignments(user.UserId));
+            }
+
+            var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(user.UserId));
+            return Math.Max(0, worked - (double)user.ProductivityRequiredHours.Value);
         }
 
         private List<StaffingSlotGap> FindUnderstaffedSlots(ShiftSolution solution)

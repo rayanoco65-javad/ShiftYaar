@@ -248,6 +248,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         // Night shift distribution weights
         public double NightShiftDistributionBySeniorityWeight { get; set; } = 1.0; // وزن توزیع شیفت‌های شب بر اساس سابقه
         public double ProductivityOvertimeWeight { get; set; } = 2.0; // وزن جریمه مازاد ساعات موظفی
+        public double ProductivityShortfallWeight { get; set; } = 5.0; // وزن جریمه کمبود ساعات موظفی
 
         public static SoftRuleWeights CreateDefault()
         {

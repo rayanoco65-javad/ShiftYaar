@@ -53,7 +53,9 @@ namespace ShiftYar.Application.DTOs.ShiftModel.ShiftSchedulingModel
         public Dictionary<int, double> WorkedHoursByUser { get; set; } = new Dictionary<int, double>(); // ساعات واقعی کار شده
         public Dictionary<int, double> ProductivityRequiredHoursByUser { get; set; } = new Dictionary<int, double>(); // سقف موظفی هر کاربر
         public Dictionary<int, double> ProductivityOvertimeByUser { get; set; } = new Dictionary<int, double>(); // میزان مازاد ساعات
+        public Dictionary<int, double> ProductivityShortfallByUser { get; set; } = new Dictionary<int, double>(); // کمبود نسبت به موظفی
         public double ProductivityComplianceRate { get; set; } // درصد رعایت سقف بهره‌وری
+        public double ProductivityTargetFulfillmentRate { get; set; } // درصد رسیدن به حداقل موظفی
         public double SoftConstraintViolationRate { get; set; } // نسبت نقض قیود نرم به کاربران
         public double TotalScheduledHours { get; set; } // مجموع ساعات برنامه‌ریزی‌شده
     }
