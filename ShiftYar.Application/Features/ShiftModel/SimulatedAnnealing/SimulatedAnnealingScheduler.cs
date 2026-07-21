@@ -226,8 +226,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             ExactNightQuotaGuard.Enforce(solution, _constraints);
-
+            ShiftCoverageGuard.Enforce(solution, _constraints);
             ProductivityHourFillGuard.Enforce(solution, _constraints);
+            ShiftCoverageGuard.Enforce(solution, _constraints);
 
             // محاسبه امتیاز راه‌حل
             solution.Score = CalculateSolutionScore(solution);
@@ -1207,9 +1208,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftEligibilityGuard.StripIneligibleAssignments(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
+            // پوشش ظرفیت اجباری اولویت مطلق دارد (عدالت نرم نباید جای خالی بسازد)
+            ShiftCoverageGuard.Enforce(solution, _constraints);
             ProductivityHourFillGuard.Enforce(solution, _constraints);
-            // بعد از پر کردن ساعات، دوباره حداقل شب را تضمین کن (ممکن است hour-fill شب را جابه‌جا کرده باشد)
             ExactNightQuotaGuard.Enforce(solution, _constraints);
+            ShiftCoverageGuard.Enforce(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(managerWarnings);
@@ -1489,10 +1492,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return false;
             }
 
-            if (solution != null && WouldExceedWorkdayLimits(solution, user, date))
-            {
-                return false;
-            }
+            // سقف هفته/روزهای متوالی فقط جریمه نرم و اولویت‌بندی است؛
+            // اینجا اعمال سخت نمی‌شود تا ظرفیت اجباری صبح/عصر خالی نماند.
 
             if (shiftLabel == ShiftLabel.Night && solution != null)
             {
@@ -1735,51 +1736,6 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             return count;
-        }
-
-        private bool WouldExceedWorkdayLimits(ShiftSolution solution, UserConstraint user, DateTime date)
-        {
-            if (user.ShiftType == ShiftTypes.FixedShift)
-            {
-                return false;
-            }
-
-            var workDates = solution.GetUserAllAssignments(user.UserId)
-                .Where(a => !a.IsOnCall)
-                .Select(a => a.Date.Date)
-                .ToHashSet();
-            if (workDates.Contains(date.Date))
-            {
-                return false; // همان روز قبلاً شیفت دارد؛ روز کاری جدید نیست
-            }
-
-            if (_constraints.HardRules.EnforceWeeklyMaxShifts || user.MaxShiftsPerWeek < 7)
-            {
-                var weekDays = workDates.Count(d => GetWeekNumber(d) == GetWeekNumber(date));
-                if (weekDays >= user.MaxShiftsPerWeek)
-                {
-                    return true;
-                }
-            }
-
-            if (_constraints.HardRules.EnforceMaxConsecutiveShifts)
-            {
-                var projectedRun = 1 + CountConsecutiveWorkdaysEndingAt(solution, user.UserId, date.Date.AddDays(-1));
-                var forward = 0;
-                var cursor = date.Date.AddDays(1);
-                while (workDates.Contains(cursor))
-                {
-                    forward++;
-                    cursor = cursor.AddDays(1);
-                }
-
-                if (projectedRun + forward > user.MaxConsecutiveShifts)
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
 
         private void AssignRequiredPersonnel(ShiftSolution solution, List<UserConstraint> eligibleUsers,

@@ -1210,8 +1210,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     constraints.SoftWeights.FairWorkedHoursBalanceWeight = 4.0;
                     constraints.SoftWeights.FairNightShiftBalanceWeight = 2.5;
                     constraints.SoftWeights.MorningEveningBalanceWeight = 2.5;
-                    constraints.SoftWeights.FairMorningEveningPeerWeight = 4.5;
-                    constraints.SoftWeights.WorkdaySpreadWeight = 4.0;
+                    constraints.SoftWeights.FairMorningEveningPeerWeight = 2.5;
+                    constraints.SoftWeights.WorkdaySpreadWeight = 1.5;
                     constraints.SoftWeights.ProductivityShortfallWeight = 5.0;
                     constraints.SoftWeights.NightShiftDistributionBySeniorityWeight =
                         Math.Max(1.0, deptSettingEarly.NightShiftDistributionWeight ?? 1.0);
@@ -1864,8 +1864,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                     // تعادل ساعت مؤثر و شیفت شب (پیش‌فرض قوی؛ قابل‌جایگزینی با وزن شب از تنظیمات)
                     constraints.SoftWeights.FairWorkedHoursBalanceWeight = Math.Max(4.0, constraints.SoftWeights.FairWorkedHoursBalanceWeight);
-                    constraints.SoftWeights.FairMorningEveningPeerWeight = Math.Max(4.5, constraints.SoftWeights.FairMorningEveningPeerWeight);
-                    constraints.SoftWeights.WorkdaySpreadWeight = Math.Max(4.0, constraints.SoftWeights.WorkdaySpreadWeight);
+                    constraints.SoftWeights.FairMorningEveningPeerWeight = Math.Max(2.5, constraints.SoftWeights.FairMorningEveningPeerWeight);
+                    constraints.SoftWeights.WorkdaySpreadWeight = Math.Max(1.5, constraints.SoftWeights.WorkdaySpreadWeight);
                     constraints.SoftWeights.FairNightShiftBalanceWeight = Math.Max(2.0, constraints.SoftWeights.FairNightShiftBalanceWeight);
                     constraints.SoftWeights.ProductivityShortfallWeight = Math.Max(5.0, constraints.SoftWeights.ProductivityShortfallWeight);
 

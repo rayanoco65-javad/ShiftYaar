@@ -180,7 +180,6 @@ public static class ProductivityHourFillGuard
             .ToHashSet();
 
         return dates
-            .Where(d => !WouldExceedWorkdayLimits(solution, constraints, user, d, workDates))
             .OrderBy(d => ScoreFillDate(workDates, user, d))
             .ThenBy(d => CountLabelOnDate(solution, d, ShiftLabel.Morning) + CountLabelOnDate(solution, d, ShiftLabel.Evening))
             .Select(d => (DateTime?)d)
@@ -406,14 +405,8 @@ public static class ProductivityHourFillGuard
             return false;
         }
 
-        var workDates = solution.GetUserAllAssignments(user.UserId)
-            .Where(a => !a.IsOnCall && !(ignoreShiftId.HasValue && a.ShiftId == ignoreShiftId.Value && a.Date.Date == assignment.Date.Date))
-            .Select(a => a.Date.Date)
-            .ToHashSet();
-        if (WouldExceedWorkdayLimits(solution, constraints, user, assignment.Date, workDates))
-        {
-            return false;
-        }
+        // سقف هفته/متوالی فقط ترجیح نرم در ScoreFillDate است؛ اینجا بلاک سخت نمی‌کنیم
+        // تا پر کردن موظفی و پوشش ظرفیت مختل نشود.
 
         if (assignment.ShiftLabel == ShiftLabel.Night)
         {
@@ -442,51 +435,6 @@ public static class ProductivityHourFillGuard
             user.OvertimeConsent,
             user.MaxMonthlyOvertimeHours);
         return worked <= maxAllowed + 0.25;
-    }
-
-    private static bool WouldExceedWorkdayLimits(
-        ShiftSolution solution,
-        ShiftConstraints constraints,
-        UserConstraint user,
-        DateTime date,
-        HashSet<DateTime> workDates)
-    {
-        if (workDates.Contains(date.Date))
-        {
-            return false;
-        }
-
-        var weekDays = workDates.Count(d => SameWeek(d, date));
-        if (weekDays >= user.MaxShiftsPerWeek)
-        {
-            return true;
-        }
-
-        if (constraints.HardRules.EnforceMaxConsecutiveShifts)
-        {
-            var prev = 0;
-            var cursor = date.Date.AddDays(-1);
-            while (workDates.Contains(cursor))
-            {
-                prev++;
-                cursor = cursor.AddDays(-1);
-            }
-
-            var next = 0;
-            cursor = date.Date.AddDays(1);
-            while (workDates.Contains(cursor))
-            {
-                next++;
-                cursor = cursor.AddDays(1);
-            }
-
-            if (prev + 1 + next > user.MaxConsecutiveShifts)
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static bool SameWeek(DateTime a, DateTime b)

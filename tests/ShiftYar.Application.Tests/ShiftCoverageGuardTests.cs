@@ -1,0 +1,142 @@
+using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
+using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
+using Xunit;
+using static ShiftYar.Domain.Enums.ShiftModel.ShiftEnums;
+using static ShiftYar.Domain.Enums.UserModel.UserEnums;
+
+namespace ShiftYar.Application.Tests;
+
+public class ShiftCoverageGuardTests
+{
+    [Fact]
+    public void ShiftCoverageGuard_FillsEmptyMorningAndEveningSeats()
+    {
+        var start = new DateTime(2026, 6, 22);
+        var end = new DateTime(2026, 7, 5);
+        var users = Enumerable.Range(1, 6).Select(MakeUser).ToList();
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = end,
+            UserConstraints = users,
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning, required: 2),
+                Shift(2, ShiftLabel.Evening, required: 2),
+                Shift(3, ShiftLabel.Night, required: 1)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true,
+                EnforceMaxConsecutiveShifts = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 2 }
+        };
+
+        // فقط شب‌ها پر — صبح و عصر خالی (شبیه خروجی خراب)
+        var solution = new ShiftSolution();
+        foreach (var day in Enumerable.Range(0, (end - start).Days + 1).Select(i => start.AddDays(i)))
+        {
+            solution.AddAssignment(1 + (day.Day % 5), 3, day, ShiftLabel.Night, false);
+        }
+
+        ShiftCoverageGuard.Enforce(solution, constraints);
+
+        foreach (var day in Enumerable.Range(0, (end - start).Days + 1).Select(i => start.AddDays(i)))
+        {
+            var mornings = solution.GetShiftAssignments(1, day).Count(a => !a.IsOnCall);
+            var evenings = solution.GetShiftAssignments(2, day).Count(a => !a.IsOnCall);
+            Assert.True(mornings >= 2, $"Morning understaffed on {day:yyyy-MM-dd}: {mornings}");
+            Assert.True(evenings >= 2, $"Evening understaffed on {day:yyyy-MM-dd}: {evenings}");
+        }
+    }
+
+    [Fact]
+    public void Optimize_DoesNotLeaveMostMorningEveningEmpty()
+    {
+        var start = new DateTime(2026, 6, 22);
+        var users = Enumerable.Range(1, 6).Select(MakeUser).ToList();
+        foreach (var u in users)
+        {
+            u.MaxConsecutiveShifts = 3;
+            u.MaxShiftsPerWeek = 5;
+        }
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(13),
+            UserConstraints = users,
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning, required: 1),
+                Shift(2, ShiftLabel.Evening, required: 1),
+                Shift(3, ShiftLabel.Night, required: 1)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true,
+                EnforceMaxConsecutiveShifts = true,
+                EnforceWeeklyMaxShifts = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 2 },
+            SoftWeights = SoftRuleWeights.CreateDefault()
+        };
+
+        var solution = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            InitialTemperature = 400,
+            FinalTemperature = 0.1,
+            CoolingRate = 0.97,
+            MaxIterations = 1500,
+            MaxIterationsWithoutImprovement = 300,
+            PenaltyWeight = 1000
+        }).Optimize();
+
+        var days = 14;
+        var morningFilled = 0;
+        var eveningFilled = 0;
+        for (var i = 0; i < days; i++)
+        {
+            var day = start.AddDays(i);
+            if (solution.GetShiftAssignments(1, day).Any(a => !a.IsOnCall)) morningFilled++;
+            if (solution.GetShiftAssignments(2, day).Any(a => !a.IsOnCall)) eveningFilled++;
+        }
+
+        Assert.True(morningFilled >= days - 1, $"Morning coverage {morningFilled}/{days}");
+        Assert.True(eveningFilled >= days - 1, $"Evening coverage {eveningFilled}/{days}");
+    }
+
+    private static UserConstraint MakeUser(int id) => new()
+    {
+        UserId = id,
+        Gender = id % 2 == 0 ? UserGender.Female : UserGender.Male,
+        SpecialtyId = 10,
+        IsActive = true,
+        ShiftType = ShiftTypes.RotatingShift,
+        ShiftSubType = ShiftSubTypes.ThreeShifts,
+        AllowedShiftLabels = [ShiftLabel.Morning, ShiftLabel.Evening, ShiftLabel.Night],
+        MaxConsecutiveShifts = 3,
+        MaxShiftsPerWeek = 5,
+        MinDaysBetweenNightShifts = 2,
+        MaxNightShiftsPerMonth = 10,
+        MinRestDaysBetweenShifts = 0
+    };
+
+    private static ShiftRequirement Shift(int id, ShiftLabel label, int required) => new()
+    {
+        ShiftId = id,
+        ShiftLabel = label,
+        DurationHours = label == ShiftLabel.Night ? 12 : 6,
+        StartTime = TimeSpan.FromHours(8),
+        EndTime = TimeSpan.FromHours(14),
+        SpecialtyRequirements =
+        [
+            new SpecialtyRequirement { SpecialtyId = 10, RequiredTotalCount = required }
+        ]
+    };
+}
