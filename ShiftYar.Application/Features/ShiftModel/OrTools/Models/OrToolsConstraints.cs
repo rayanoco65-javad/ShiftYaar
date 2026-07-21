@@ -36,6 +36,15 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools.Models
 
         public bool IsHoliday(DateTime date) => HolidayDates.Contains(date.Date);
         public bool IsHolidayDayIndex(int dateIndex) => IsHoliday(StartDate.Date.AddDays(dateIndex));
+
+        /// <summary>
+        /// شب آخر هفته/تعطیل: خود روز تعطیل، یا شب روز قبل از تعطیل.
+        /// </summary>
+        public bool IsHolidayWeekendNight(DateTime date) =>
+            Application.Common.Utilities.HolidayWeekendNightRules.IsHolidayWeekendNight(date, IsHoliday);
+
+        public bool IsHolidayWeekendNightDayIndex(int dateIndex) =>
+            IsHolidayWeekendNight(StartDate.Date.AddDays(dateIndex));
     }
 
     /// <summary>

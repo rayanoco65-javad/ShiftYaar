@@ -547,7 +547,7 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools
                             if (variables.ContainsKey(key))
                             {
                                 nightShifts.Add(variables[key]);
-                                if (_constraints.IsHolidayDayIndex(dateIndex))
+                                if (_constraints.IsHolidayWeekendNightDayIndex(dateIndex))
                                 {
                                     holidayNightShifts.Add(variables[key]);
                                 }

@@ -393,8 +393,17 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                 if (user.ExactHolidayWeekendNightShiftCount.HasValue)
                 {
-                    var holidayNights = nights.Count(a => _constraints.IsHoliday(a.Date));
+                    var holidayNights = nights.Count(a => _constraints.IsHolidayWeekendNight(a.Date));
                     penalty += Math.Abs(holidayNights - user.ExactHolidayWeekendNightShiftCount.Value) * 25;
+                }
+
+                if (nights.Count >= 2 &&
+                    (user.HasExactNightQuota || user.ExactHolidayWeekendNightShiftCount.HasValue))
+                {
+                    penalty += ExactNightQuotaGuard.CalculateSpreadPenalty(
+                        nights.Select(a => a.Date).ToList(),
+                        _constraints.StartDate,
+                        _constraints.EndDate) * 0.5;
                 }
             }
 
@@ -880,7 +889,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                     if (userConstraint.ExactHolidayWeekendNightShiftCount.HasValue)
                     {
-                        var holidayNights = nights.Count(a => _constraints.IsHoliday(a.Date));
+                        var holidayNights = nights.Count(a => _constraints.IsHolidayWeekendNight(a.Date));
                         if (holidayNights > userConstraint.ExactHolidayWeekendNightShiftCount.Value)
                         {
                             return false;
@@ -1102,7 +1111,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                 if (user.ExactHolidayWeekendNightShiftCount.HasValue)
                 {
-                    var holidayNights = nights.Count(a => _constraints.IsHoliday(a.Date));
+                    var holidayNights = nights.Count(a => _constraints.IsHolidayWeekendNight(a.Date));
                     if (holidayNights != user.ExactHolidayWeekendNightShiftCount.Value)
                     {
                         violations.Add(
@@ -1371,18 +1380,18 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     return false;
                 }
 
-                var holidayNights = nights.Count(a => _constraints.IsHoliday(a.Date));
+                var holidayNights = nights.Count(a => _constraints.IsHolidayWeekendNight(a.Date));
                 if (user.ExactHolidayWeekendNightShiftCount.HasValue &&
-                    _constraints.IsHoliday(date) &&
+                    _constraints.IsHolidayWeekendNight(date) &&
                     holidayNights >= user.ExactHolidayWeekendNightShiftCount.Value)
                 {
                     return false;
                 }
 
-                // رزرو شب‌های باقی‌مانده برای تکمیل سهمیه تعطیل
+                // رزرو شب‌های باقی‌مانده برای تکمیل سهمیه تعطیل/آخر هفته
                 if (user.ExactNightShiftCount.HasValue &&
                     user.ExactHolidayWeekendNightShiftCount.HasValue &&
-                    !_constraints.IsHoliday(date))
+                    !_constraints.IsHolidayWeekendNight(date))
                 {
                     var remainingTotal = user.ExactNightShiftCount.Value - nights.Count;
                     var remainingHoliday = user.ExactHolidayWeekendNightShiftCount.Value - holidayNights;
@@ -1486,8 +1495,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             if (shiftLabel == ShiftLabel.Night)
             {
+                var isHolidayWeekendNight = _constraints.IsHolidayWeekendNight(date);
                 return users
-                    .OrderBy(u => NightQuotaPriority(solution, u, isHoliday))
+                    .OrderBy(u => NightQuotaPriority(solution, u, isHolidayWeekendNight))
                     .ThenBy(u => CountUserNightShifts(solution, u.UserId))
                     .ThenBy(u => CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)))
                     .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
@@ -1503,7 +1513,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .ThenBy(_ => _random.Next());
         }
 
-        private int NightQuotaPriority(ShiftSolution solution, UserConstraint user, bool dateIsHoliday)
+        private int NightQuotaPriority(ShiftSolution solution, UserConstraint user, bool dateIsHolidayWeekendNight)
         {
             if (!user.HasExactNightQuota && !user.ExactHolidayWeekendNightShiftCount.HasValue)
             {
@@ -1513,9 +1523,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var nights = solution.GetUserAllAssignments(user.UserId)
                 .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall)
                 .ToList();
-            var holidayNights = nights.Count(a => _constraints.IsHoliday(a.Date));
+            var holidayNights = nights.Count(a => _constraints.IsHolidayWeekendNight(a.Date));
 
-            if (dateIsHoliday && user.ExactHolidayWeekendNightShiftCount.HasValue)
+            if (dateIsHolidayWeekendNight && user.ExactHolidayWeekendNightShiftCount.HasValue)
             {
                 var holidayDeficit = user.ExactHolidayWeekendNightShiftCount.Value - holidayNights;
                 if (holidayDeficit > 0)

@@ -24,6 +24,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public HashSet<DateTime> HolidayDates { get; set; } = new HashSet<DateTime>();
 
         public bool IsHoliday(DateTime date) => HolidayDates.Contains(date.Date);
+
+        /// <summary>
+        /// شب آخر هفته/تعطیل: خود روز تعطیل، یا شب روز قبل از تعطیل.
+        /// </summary>
+        public bool IsHolidayWeekendNight(DateTime date) =>
+            HolidayWeekendNightRules.IsHolidayWeekendNight(date, IsHoliday);
         public GlobalConstraints GlobalConstraints { get; set; } = new GlobalConstraints();
         // قوانین قطعی (سراسری برای همه دپارتمان‌ها)
         public HardRuleSet HardRules { get; set; } = HardRuleSet.CreateDefault();
