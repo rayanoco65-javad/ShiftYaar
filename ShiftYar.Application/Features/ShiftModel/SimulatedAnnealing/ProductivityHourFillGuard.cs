@@ -9,7 +9,8 @@ using static ShiftYar.Domain.Enums.UserModel.UserEnums;
 namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 
 /// <summary>
-/// تلاش برای نزدیک کردن ساعات مؤثر کاربران به سقف موظفی و تعادل بین پرسنل.
+/// تلاش برای نزدیک کردن ساعات مؤثر کاربران به سقف موظفی و تعادل بین پرسنل،
+/// بدون ایجاد تراکم هفتگی/روزهای متوالی و بدون به‌هم‌ریختن تعادل صبح/عصر.
 /// </summary>
 public static class ProductivityHourFillGuard
 {
@@ -30,6 +31,7 @@ public static class ProductivityHourFillGuard
 
         BalanceByReassignment(solution, constraints, lookup, productivityUsers);
         FillUnderstaffedSlots(solution, constraints, lookup, productivityUsers);
+        BalanceMorningEveningPeers(solution, constraints, lookup, productivityUsers);
         BalanceByReassignment(solution, constraints, lookup, productivityUsers);
     }
 
@@ -63,6 +65,7 @@ public static class ProductivityHourFillGuard
             var moved = false;
             foreach (var assignment in solution.GetUserAllAssignments(donor.UserId)
                          .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, a))
+                         .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, donor, a))
                          .OrderByDescending(a => EstimateShiftHours(a, lookup, constraints)))
             {
                 if (!CanUserTakeShift(solution, constraints, lookup, receiver, assignment, ignoreShiftId: null))
@@ -99,14 +102,14 @@ public static class ProductivityHourFillGuard
         IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
         List<UserConstraint> productivityUsers)
     {
-        var dates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
+        var allDates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
             .Select(i => constraints.StartDate.Date.AddDays(i))
             .ToList();
 
         foreach (var user in productivityUsers.OrderByDescending(u =>
                      GetDeficit(u, CalculateWorked(solution, u.UserId, lookup, constraints))))
         {
-            foreach (var date in dates)
+            for (var attempt = 0; attempt < allDates.Count * 2; attempt++)
             {
                 var deficit = GetDeficit(user, CalculateWorked(solution, user.UserId, lookup, constraints));
                 if (deficit <= DeficitToleranceHours)
@@ -114,19 +117,196 @@ public static class ProductivityHourFillGuard
                     break;
                 }
 
-                // صبح+عصر همان روز بیشترین ساعت مؤثر را می‌دهد
-                if (TryAddLabel(solution, constraints, lookup, user, date, ShiftLabel.Morning) &&
-                    TryAddLabel(solution, constraints, lookup, user, date, ShiftLabel.Evening))
+                var date = PickBestFillDate(solution, constraints, user, allDates);
+                if (date == null)
                 {
-                    continue;
+                    break;
                 }
 
-                foreach (var label in new[] { ShiftLabel.Morning, ShiftLabel.Evening, ShiftLabel.Night })
+                var added = false;
+                // اول تک‌برچسب برای جلوگیری از پر کردن هر روز با صبح+عصر
+                foreach (var label in PreferLabelsForUser(solution, user))
                 {
-                    if (TryAddLabel(solution, constraints, lookup, user, date, label))
+                    if (TryAddLabel(solution, constraints, lookup, user, date.Value, label))
+                    {
+                        added = true;
+                        break;
+                    }
+                }
+
+                // فقط اگر هنوز کسری زیاد است و روز خالی مانده، صبح+عصر همان روز
+                if (!added && deficit > 10)
+                {
+                    var m = TryAddLabel(solution, constraints, lookup, user, date.Value, ShiftLabel.Morning);
+                    var e = TryAddLabel(solution, constraints, lookup, user, date.Value, ShiftLabel.Evening);
+                    added = m || e;
+                }
+
+                if (!added)
+                {
+                    // این تاریخ را دیگر امتحان نکن
+                    allDates.Remove(date.Value);
+                    if (allDates.Count == 0)
                     {
                         break;
                     }
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<ShiftLabel> PreferLabelsForUser(ShiftSolution solution, UserConstraint user)
+    {
+        var ua = solution.GetUserAllAssignments(user.UserId);
+        var m = ua.Count(a => a.ShiftLabel == ShiftLabel.Morning && !a.IsOnCall);
+        var e = ua.Count(a => a.ShiftLabel == ShiftLabel.Evening && !a.IsOnCall);
+        if (m <= e)
+        {
+            return [ShiftLabel.Morning, ShiftLabel.Evening, ShiftLabel.Night];
+        }
+
+        return [ShiftLabel.Evening, ShiftLabel.Morning, ShiftLabel.Night];
+    }
+
+    private static DateTime? PickBestFillDate(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user,
+        List<DateTime> dates)
+    {
+        var workDates = solution.GetUserAllAssignments(user.UserId)
+            .Where(a => !a.IsOnCall)
+            .Select(a => a.Date.Date)
+            .ToHashSet();
+
+        return dates
+            .Where(d => !WouldExceedWorkdayLimits(solution, constraints, user, d, workDates))
+            .OrderBy(d => ScoreFillDate(workDates, user, d))
+            .ThenBy(d => CountLabelOnDate(solution, d, ShiftLabel.Morning) + CountLabelOnDate(solution, d, ShiftLabel.Evening))
+            .Select(d => (DateTime?)d)
+            .FirstOrDefault();
+    }
+
+    private static int ScoreFillDate(HashSet<DateTime> workDates, UserConstraint user, DateTime date)
+    {
+        if (workDates.Contains(date.Date))
+        {
+            return 0; // همان روز قبلاً شیفت دارد — برای تکمیل صبح/عصر خوب است
+        }
+
+        var prevRun = 0;
+        var cursor = date.Date.AddDays(-1);
+        while (workDates.Contains(cursor))
+        {
+            prevRun++;
+            cursor = cursor.AddDays(-1);
+        }
+
+        var nextRun = 0;
+        cursor = date.Date.AddDays(1);
+        while (workDates.Contains(cursor))
+        {
+            nextRun++;
+            cursor = cursor.AddDays(1);
+        }
+
+        var projectedRun = prevRun + 1 + nextRun;
+        var weekCount = workDates.Count(d => SameWeek(d, date)) + 1;
+        var score = 0;
+        if (projectedRun > user.MaxConsecutiveShifts)
+        {
+            score += 1000 + projectedRun * 50;
+        }
+        else
+        {
+            score += projectedRun * 10;
+        }
+
+        if (weekCount > user.MaxShiftsPerWeek)
+        {
+            score += 500 + weekCount * 40;
+        }
+        else
+        {
+            score += weekCount * 5;
+        }
+
+        // فاصله از نزدیک‌ترین روز کاری موجود — هرچه دورتر بهتر
+        if (workDates.Count > 0)
+        {
+            var minGap = workDates.Min(d => Math.Abs((d - date.Date).Days));
+            score -= Math.Min(minGap, 7) * 3;
+        }
+
+        return score;
+    }
+
+    private static int CountLabelOnDate(ShiftSolution solution, DateTime date, ShiftLabel label) =>
+        solution.Assignments.Values.Count(a => a.Date.Date == date.Date && a.ShiftLabel == label && !a.IsOnCall);
+
+    private static void BalanceMorningEveningPeers(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        List<UserConstraint> productivityUsers)
+    {
+        foreach (var label in new[] { ShiftLabel.Morning, ShiftLabel.Evening })
+        {
+            for (var pass = 0; pass < 24; pass++)
+            {
+                var ranked = productivityUsers
+                    .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, label))
+                    .Select(u => (
+                        User: u,
+                        Count: solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == label && !a.IsOnCall)))
+                    .OrderByDescending(x => x.Count)
+                    .ToList();
+                if (ranked.Count < 2)
+                {
+                    break;
+                }
+
+                var donor = ranked.First();
+                var receiver = ranked.Last();
+                if (donor.Count - receiver.Count < 2)
+                {
+                    break;
+                }
+
+                var moved = false;
+                foreach (var assignment in solution.GetUserAllAssignments(donor.User.UserId)
+                             .Where(a => a.ShiftLabel == label && !a.IsOnCall)
+                             .Where(a => !IsProtectedAssignment(constraints, a))
+                             .OrderByDescending(a => CountConsecutiveEnding(solution, donor.User.UserId, a.Date.Date)))
+                {
+                    if (!CanUserTakeShift(solution, constraints, lookup, receiver.User, assignment, ignoreShiftId: null))
+                    {
+                        continue;
+                    }
+
+                    // جابه‌جایی نباید کسری شدید ساعت برای اهداکننده بسازد
+                    var donorHours = CalculateWorked(solution, donor.User.UserId, lookup, constraints);
+                    var shiftHours = EstimateShiftHours(assignment, lookup, constraints);
+                    if (donor.User.ProductivityRequiredHours.HasValue &&
+                        donorHours - shiftHours < (double)donor.User.ProductivityRequiredHours.Value - 8)
+                    {
+                        continue;
+                    }
+
+                    solution.RemoveAssignment(donor.User.UserId, assignment.ShiftId, assignment.Date);
+                    solution.AddAssignment(
+                        receiver.User.UserId,
+                        assignment.ShiftId,
+                        assignment.Date,
+                        assignment.ShiftLabel,
+                        assignment.IsOnCall);
+                    moved = true;
+                    break;
+                }
+
+                if (!moved)
+                {
+                    break;
                 }
             }
         }
@@ -226,6 +406,15 @@ public static class ProductivityHourFillGuard
             return false;
         }
 
+        var workDates = solution.GetUserAllAssignments(user.UserId)
+            .Where(a => !a.IsOnCall && !(ignoreShiftId.HasValue && a.ShiftId == ignoreShiftId.Value && a.Date.Date == assignment.Date.Date))
+            .Select(a => a.Date.Date)
+            .ToHashSet();
+        if (WouldExceedWorkdayLimits(solution, constraints, user, assignment.Date, workDates))
+        {
+            return false;
+        }
+
         if (assignment.ShiftLabel == ShiftLabel.Night)
         {
             var nights = solution.GetUserAllAssignments(user.UserId)
@@ -253,6 +442,80 @@ public static class ProductivityHourFillGuard
             user.OvertimeConsent,
             user.MaxMonthlyOvertimeHours);
         return worked <= maxAllowed + 0.25;
+    }
+
+    private static bool WouldExceedWorkdayLimits(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user,
+        DateTime date,
+        HashSet<DateTime> workDates)
+    {
+        if (workDates.Contains(date.Date))
+        {
+            return false;
+        }
+
+        var weekDays = workDates.Count(d => SameWeek(d, date));
+        if (weekDays >= user.MaxShiftsPerWeek)
+        {
+            return true;
+        }
+
+        if (constraints.HardRules.EnforceMaxConsecutiveShifts)
+        {
+            var prev = 0;
+            var cursor = date.Date.AddDays(-1);
+            while (workDates.Contains(cursor))
+            {
+                prev++;
+                cursor = cursor.AddDays(-1);
+            }
+
+            var next = 0;
+            cursor = date.Date.AddDays(1);
+            while (workDates.Contains(cursor))
+            {
+                next++;
+                cursor = cursor.AddDays(1);
+            }
+
+            if (prev + 1 + next > user.MaxConsecutiveShifts)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool SameWeek(DateTime a, DateTime b)
+    {
+        // هفته از شنبه — هم‌تراز GetWeekNumber در SimulatedAnnealingScheduler
+        static DateTime WeekStart(DateTime d)
+        {
+            var offset = ((int)d.DayOfWeek - (int)DayOfWeek.Saturday + 7) % 7;
+            return d.Date.AddDays(-offset);
+        }
+
+        return WeekStart(a) == WeekStart(b);
+    }
+
+    private static int CountConsecutiveEnding(ShiftSolution solution, int userId, DateTime endDate)
+    {
+        var workDates = solution.GetUserAllAssignments(userId)
+            .Where(a => !a.IsOnCall)
+            .Select(a => a.Date.Date)
+            .ToHashSet();
+        var count = 0;
+        var cursor = endDate.Date;
+        while (workDates.Contains(cursor))
+        {
+            count++;
+            cursor = cursor.AddDays(-1);
+        }
+
+        return count;
     }
 
     private static bool HasSpecialtyCapacity(

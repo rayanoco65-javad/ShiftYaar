@@ -9,20 +9,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 
 /// <summary>
 /// تضمین حداقل تعداد شیفت شب (و شب‌های تعطیل/آخرهفته) و توزیع یکنواخت آن‌ها در طول بازه.
+/// اگر ظرفیت روز پر باشد، شب را از کاربری که هنوز بالای حداقل خودش است می‌گیرد.
 /// </summary>
 public static class ExactNightQuotaGuard
 {
     public static void Enforce(ShiftSolution solution, ShiftConstraints constraints)
-    {
-        foreach (var user in constraints.UserConstraints
-                     .Where(u => u.HasExactNightQuota || u.ExactHolidayWeekendNightShiftCount.HasValue)
-                     .OrderByDescending(u => u.ExactNightShiftCount ?? 0))
-        {
-            EnforceForUser(solution, constraints, user);
-        }
-    }
-
-    private static void EnforceForUser(ShiftSolution solution, ShiftConstraints constraints, UserConstraint user)
     {
         var nightShift = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftLabel == ShiftLabel.Night);
         if (nightShift == null)
@@ -30,6 +21,50 @@ public static class ExactNightQuotaGuard
             return;
         }
 
+        // اول کسری‌های شدیدتر (شب تعطیل، سپس کل)، بعد سهمیه‌های کوچک‌تر تا روی صندلی‌های کمیاب گیر نکنند
+        for (var pass = 0; pass < 2; pass++)
+        {
+            foreach (var user in OrderUsersByDeficit(solution, constraints))
+            {
+                EnforceForUser(solution, constraints, user, nightShift);
+            }
+        }
+
+        // پخش شب‌ها برای همه سهمیه‌دارها (حتی اگر حداقلشان پر باشد)
+        foreach (var user in constraints.UserConstraints
+                     .Where(u => u.HasExactNightQuota || u.ExactHolidayWeekendNightShiftCount.HasValue))
+        {
+            ImproveNightSpread(solution, constraints, user, nightShift);
+        }
+    }
+
+    private static IEnumerable<UserConstraint> OrderUsersByDeficit(
+        ShiftSolution solution,
+        ShiftConstraints constraints)
+    {
+        return constraints.UserConstraints
+            .Where(u => u.HasExactNightQuota || u.ExactHolidayWeekendNightShiftCount.HasValue)
+            .Select(u =>
+            {
+                var nights = GetNights(solution, u.UserId);
+                var holiday = nights.Count(a => constraints.IsHolidayWeekendNight(a.Date));
+                var holidayDeficit = Math.Max(0, (u.ExactHolidayWeekendNightShiftCount ?? 0) - holiday);
+                var totalDeficit = Math.Max(0, (u.ExactNightShiftCount ?? 0) - nights.Count);
+                return (User: u, HolidayDeficit: holidayDeficit, TotalDeficit: totalDeficit);
+            })
+            .Where(x => x.HolidayDeficit > 0 || x.TotalDeficit > 0)
+            .OrderByDescending(x => x.HolidayDeficit)
+            .ThenByDescending(x => x.TotalDeficit)
+            .ThenBy(x => x.User.ExactNightShiftCount ?? 0)
+            .Select(x => x.User);
+    }
+
+    private static void EnforceForUser(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user,
+        ShiftRequirement nightShift)
+    {
         var targetTotal = user.ExactNightShiftCount;
         var targetHoliday = user.ExactHolidayWeekendNightShiftCount;
 
@@ -64,7 +99,7 @@ public static class ExactNightQuotaGuard
             }
         }
 
-        ImproveNightSpread(solution, constraints, user, nightShift);
+        // ImproveNightSpread در Enforce سراسری بعد از رفع کسری‌ها اجرا می‌شود
     }
 
     private static List<SaShiftAssignment> GetNights(ShiftSolution solution, int userId) =>
@@ -89,19 +124,44 @@ public static class ExactNightQuotaGuard
             return;
         }
 
-        var existingNightDates = GetNights(solution, user.UserId).Select(a => a.Date.Date).ToList();
         var minGap = Math.Max(1, user.MinDaysBetweenNightShifts);
+        var filled = 0;
 
-        var candidates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
-            .Select(offset => constraints.StartDate.Date.AddDays(offset))
-            .Where(d => !holidayOnly || constraints.IsHolidayWeekendNight(d))
+        // ۱) صندلی‌های خالی
+        filled += FillIntoOpenCapacity(solution, constraints, user, nightShift, needed, holidayOnly, minGap);
+        needed -= filled;
+        if (needed <= 0)
+        {
+            return;
+        }
+
+        // ۲) گرفتن شب از اهداکننده‌ای که بالای حداقل خودش است
+        ClaimNightsFromDonors(solution, constraints, user, nightShift, needed, holidayOnly, minGap);
+    }
+
+    private static int FillIntoOpenCapacity(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user,
+        ShiftRequirement nightShift,
+        int needed,
+        bool holidayOnly,
+        int minGap)
+    {
+        var existingNightDates = GetNights(solution, user.UserId).Select(a => a.Date.Date).ToList();
+        var candidates = AllCandidateDates(constraints, holidayOnly)
             .Where(d => IsFeasibleNightDate(solution, constraints, user, nightShift, d, holidayOnly, ignoreUserNightOnDate: false))
             .ToList();
 
         var picks = PickSpreadDates(candidates, existingNightDates, needed, minGap);
-
+        var added = 0;
         foreach (var date in picks)
         {
+            if (added >= needed)
+            {
+                break;
+            }
+
             if (!IsFeasibleNightDate(solution, constraints, user, nightShift, date, holidayOnly, ignoreUserNightOnDate: false))
             {
                 continue;
@@ -112,9 +172,221 @@ public static class ExactNightQuotaGuard
                 continue;
             }
 
+            ClearConflictingDayShifts(solution, constraints, user, date);
             solution.AddAssignment(user.UserId, nightShift.ShiftId, date, ShiftLabel.Night, isOnCall: false);
+            added++;
+        }
+
+        return added;
+    }
+
+    private static void ClaimNightsFromDonors(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user,
+        ShiftRequirement nightShift,
+        int needed,
+        bool holidayOnly,
+        int minGap)
+    {
+        var claimed = 0;
+        var candidateDates = PickSpreadDates(
+            AllCandidateDates(constraints, holidayOnly).ToList(),
+            GetNights(solution, user.UserId).Select(a => a.Date.Date).ToList(),
+            needed * 4,
+            minGap);
+
+        // اگر spread کافی نبود، همه تاریخ‌های مجاز را هم امتحان کن
+        var dates = candidateDates
+            .Concat(AllCandidateDates(constraints, holidayOnly))
+            .Distinct()
+            .ToList();
+
+        foreach (var date in dates)
+        {
+            if (claimed >= needed)
+            {
+                break;
+            }
+
+            if (!IsPersonallyFeasibleNightDate(solution, constraints, user, nightShift, date, holidayOnly))
+            {
+                continue;
+            }
+
+            if (ViolatesNightSpacing(solution, user, date, minGap))
+            {
+                continue;
+            }
+
+            if (HasSpecialtyCapacity(solution, constraints, nightShift, date, user.SpecialtyId))
+            {
+                ClearConflictingDayShifts(solution, constraints, user, date);
+                solution.AddAssignment(user.UserId, nightShift.ShiftId, date, ShiftLabel.Night, isOnCall: false);
+                claimed++;
+                continue;
+            }
+
+            var donorAssignment = FindBestDonorAssignment(solution, constraints, nightShift, date, user.UserId, holidayOnly);
+            if (donorAssignment == null)
+            {
+                continue;
+            }
+
+            if (!CanAcceptNightAfterClearing(solution, constraints, user, nightShift, date))
+            {
+                continue;
+            }
+
+            ClearConflictingDayShifts(solution, constraints, user, date);
+            solution.RemoveAssignment(donorAssignment.UserId, donorAssignment.ShiftId, donorAssignment.Date);
+            solution.AddAssignment(user.UserId, nightShift.ShiftId, date, ShiftLabel.Night, isOnCall: false);
+            claimed++;
         }
     }
+
+    private static SaShiftAssignment? FindBestDonorAssignment(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        ShiftRequirement nightShift,
+        DateTime date,
+        int receiverUserId,
+        bool holidayClaim)
+    {
+        var occupants = solution.GetShiftAssignments(nightShift.ShiftId, date)
+            .Where(a => !a.IsOnCall && a.UserId != receiverUserId)
+            .ToList();
+
+        return occupants
+            .Select(a =>
+            {
+                var donor = constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId);
+                return (Assignment: a, Donor: donor);
+            })
+            .Where(x => x.Donor != null && CanDonateNight(solution, constraints, x.Donor!, x.Assignment))
+            .OrderBy(x => DonorPriority(solution, constraints, x.Donor!, x.Assignment, holidayClaim))
+            .Select(x => x.Assignment)
+            .FirstOrDefault();
+    }
+
+    private static int DonorPriority(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint donor,
+        SaShiftAssignment assignment,
+        bool holidayClaim)
+    {
+        var nights = GetNights(solution, donor.UserId);
+        var holiday = nights.Count(a => constraints.IsHolidayWeekendNight(a.Date));
+        var totalSurplus = nights.Count - (donor.ExactNightShiftCount ?? 0);
+        var holidaySurplus = holiday - (donor.ExactHolidayWeekendNightShiftCount ?? 0);
+
+        // بدون سهمیه = بهترین اهداکننده
+        if (!donor.HasExactNightQuota && !donor.ExactHolidayWeekendNightShiftCount.HasValue)
+        {
+            return -10000 - nights.Count;
+        }
+
+        if (holidayClaim)
+        {
+            return -(holidaySurplus * 100 + totalSurplus * 10 + nights.Count);
+        }
+
+        return -(totalSurplus * 100 + holidaySurplus * 10 + nights.Count);
+    }
+
+    /// <summary>
+    /// آیا اهداکننده می‌تواند این شب را از دست بدهد بدون افت زیر حداقل؟
+    /// </summary>
+    public static bool CanDonateNight(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user,
+        SaShiftAssignment assignment)
+    {
+        if (assignment.ShiftLabel != ShiftLabel.Night || assignment.IsOnCall)
+        {
+            return true;
+        }
+
+        if (IsProtected(constraints, user.UserId, assignment))
+        {
+            return false;
+        }
+
+        var nights = GetNights(solution, user.UserId);
+        var remainingTotal = nights.Count - 1;
+        if (user.ExactNightShiftCount.HasValue && remainingTotal < user.ExactNightShiftCount.Value)
+        {
+            return false;
+        }
+
+        if (user.ExactHolidayWeekendNightShiftCount.HasValue && constraints.IsHolidayWeekendNight(assignment.Date))
+        {
+            var holidayNights = nights.Count(a => constraints.IsHolidayWeekendNight(a.Date));
+            if (holidayNights - 1 < user.ExactHolidayWeekendNightShiftCount.Value)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static void ClearConflictingDayShifts(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user,
+        DateTime date)
+    {
+        var dayAssignments = solution.GetUserAssignments(user.UserId, date)
+            .Where(a => !a.IsOnCall)
+            .Where(a => a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening)
+            .Where(a => !IsProtected(constraints, user.UserId, a))
+            .ToList();
+
+        foreach (var a in dayAssignments)
+        {
+            solution.RemoveAssignment(a.UserId, a.ShiftId, a.Date);
+        }
+    }
+
+    private static bool CanAcceptNightAfterClearing(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user,
+        ShiftRequirement nightShift,
+        DateTime date)
+    {
+        var protectedConflict = solution.GetUserAssignments(user.UserId, date)
+            .Where(a => !a.IsOnCall)
+            .Where(a => a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening)
+            .Any(a => IsProtected(constraints, user.UserId, a));
+        if (protectedConflict)
+        {
+            return false;
+        }
+
+        if (AdjacentShiftRestRules.WouldConflict(
+                solution.GetUserAllAssignments(user.UserId)
+                    .Where(a => !(a.Date.Date == date.Date &&
+                                  (a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening))),
+                date,
+                ShiftLabel.Night))
+        {
+            return false;
+        }
+
+        return ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, ShiftLabel.Night)
+               && !user.UnavailableDates.Any(d => d.Date == date.Date)
+               && !user.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == ShiftLabel.Night)
+               && !solution.HasAssignment(user.UserId, nightShift.ShiftId, date);
+    }
+
+    private static IEnumerable<DateTime> AllCandidateDates(ShiftConstraints constraints, bool holidayOnly) =>
+        Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
+            .Select(offset => constraints.StartDate.Date.AddDays(offset))
+            .Where(d => !holidayOnly || constraints.IsHolidayWeekendNight(d));
 
     /// <summary>
     /// جابه‌جایی شب‌های موجود به تاریخ‌های خلوت‌تر بدون خالی گذاشتن ظرفیت (در صورت نیاز swap).
@@ -125,11 +397,6 @@ public static class ExactNightQuotaGuard
         UserConstraint user,
         ShiftRequirement nightShift)
     {
-        if (!user.ExactNightShiftCount.HasValue || user.ExactNightShiftCount.Value < 2)
-        {
-            return;
-        }
-
         var minGap = Math.Max(1, user.MinDaysBetweenNightShifts);
 
         for (var iter = 0; iter < 24; iter++)
@@ -163,7 +430,6 @@ public static class ExactNightQuotaGuard
                         continue;
                     }
 
-                    // حفظ حداقل سهمیه تعطیل: swap نباید تعداد شب‌های تعطیل را به زیر حداقل ببرد
                     if (user.ExactHolidayWeekendNightShiftCount.HasValue)
                     {
                         var fromHol = constraints.IsHolidayWeekendNight(night.Date);
@@ -191,7 +457,6 @@ public static class ExactNightQuotaGuard
                         continue;
                     }
 
-                    // آیا خود کاربر می‌تواند برود؟
                     if (IsFeasibleNightDate(solution, constraints, user, nightShift, target, holidayOnly: false, ignoreUserNightOnDate: false)
                         && HasSpecialtyCapacity(solution, constraints, nightShift, target, user.SpecialtyId))
                     {
@@ -202,7 +467,6 @@ public static class ExactNightQuotaGuard
                         continue;
                     }
 
-                    // یا با کاربری که با از دست دادن این شب هنوز زیر حداقل خودش نمی‌رود جابه‌جا شویم
                     var occupant = solution.GetShiftAssignments(nightShift.ShiftId, target)
                         .FirstOrDefault(a => !a.IsOnCall && a.UserId != user.UserId);
                     if (occupant == null)
@@ -211,8 +475,7 @@ public static class ExactNightQuotaGuard
                     }
 
                     var other = constraints.UserConstraints.FirstOrDefault(u => u.UserId == occupant.UserId);
-                    if (other == null ||
-                        !CanDonateNight(solution, constraints, other, occupant))
+                    if (other == null || !CanDonateNight(solution, constraints, other, occupant))
                     {
                         continue;
                     }
@@ -262,7 +525,6 @@ public static class ExactNightQuotaGuard
         ShiftRequirement nightShift,
         int minGap)
     {
-        // user می‌رود به userTo؛ other می‌رود به userFrom
         if (other.UnavailableDates.Any(d => d.Date == userFrom) ||
             user.UnavailableDates.Any(d => d.Date == userTo))
         {
@@ -311,39 +573,6 @@ public static class ExactNightQuotaGuard
                && ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, ShiftLabel.Night);
     }
 
-    private static bool CanDonateNight(
-        ShiftSolution solution,
-        ShiftConstraints constraints,
-        UserConstraint user,
-        SaShiftAssignment assignment)
-    {
-        if (IsProtected(constraints, user.UserId, assignment))
-        {
-            return false;
-        }
-
-        var nights = GetNights(solution, user.UserId);
-        var remainingTotal = nights.Count - 1;
-        if (user.ExactNightShiftCount.HasValue && remainingTotal < user.ExactNightShiftCount.Value)
-        {
-            return false;
-        }
-
-        if (user.ExactHolidayWeekendNightShiftCount.HasValue && constraints.IsHolidayWeekendNight(assignment.Date))
-        {
-            var holidayNights = nights.Count(a => constraints.IsHolidayWeekendNight(a.Date));
-            if (holidayNights - 1 < user.ExactHolidayWeekendNightShiftCount.Value)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// انتخاب تاریخ‌ها با فاصله یکنواخت در طول بازهٔ کاندید (نه از ابتدای ماه).
-    /// </summary>
     public static List<DateTime> PickSpreadDates(
         IReadOnlyList<DateTime> candidates,
         IReadOnlyList<DateTime> alreadyOccupied,
@@ -408,11 +637,46 @@ public static class ExactNightQuotaGuard
         bool holidayOnly,
         bool ignoreUserNightOnDate)
     {
+        if (!IsPersonallyFeasibleNightDate(solution, constraints, user, nightShift, date, holidayOnly))
+        {
+            return false;
+        }
+
+        if (!ignoreUserNightOnDate && solution.HasAssignment(user.UserId, nightShift.ShiftId, date))
+        {
+            return false;
+        }
+
+        var existingLabels = solution.GetUserAssignments(user.UserId, date)
+            .Where(a => !(ignoreUserNightOnDate && a.ShiftLabel == ShiftLabel.Night))
+            .Select(a => a.ShiftLabel);
+        if (!DailyAssignmentRules.CanAddShift(existingLabels, ShiftLabel.Night, maxShiftsPerDay: 2))
+        {
+            return false;
+        }
+
+        if (AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(user.UserId), date, ShiftLabel.Night))
+        {
+            return false;
+        }
+
+        return HasSpecialtyCapacity(solution, constraints, nightShift, date, user.SpecialtyId);
+    }
+
+    private static bool IsPersonallyFeasibleNightDate(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user,
+        ShiftRequirement nightShift,
+        DateTime date,
+        bool holidayOnly)
+    {
         if (holidayOnly && !constraints.IsHolidayWeekendNight(date))
         {
             return false;
         }
 
+        // رزرو ظرفیت باقی‌مانده برای تکمیل حداقل شب تعطیل
         if (!holidayOnly && user.ExactHolidayWeekendNightShiftCount.HasValue)
         {
             var holidayCount = GetNights(solution, user.UserId).Count(a => constraints.IsHolidayWeekendNight(a.Date));
@@ -440,25 +704,7 @@ public static class ExactNightQuotaGuard
             return false;
         }
 
-        var existingLabels = solution.GetUserAssignments(user.UserId, date)
-            .Where(a => !(ignoreUserNightOnDate && a.ShiftLabel == ShiftLabel.Night))
-            .Select(a => a.ShiftLabel);
-        if (!DailyAssignmentRules.CanAddShift(existingLabels, ShiftLabel.Night, maxShiftsPerDay: 2))
-        {
-            return false;
-        }
-
-        if (AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(user.UserId), date, ShiftLabel.Night))
-        {
-            return false;
-        }
-
-        if (!HasSpecialtyCapacity(solution, constraints, nightShift, date, user.SpecialtyId))
-        {
-            return false;
-        }
-
-        return true;
+        return ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, ShiftLabel.Night);
     }
 
     private static bool HasSpecialtyCapacity(
@@ -513,9 +759,6 @@ public static class ExactNightQuotaGuard
             s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel);
     }
 
-    /// <summary>
-    /// جریمهٔ نرم برای تجمع شب‌ها در یک بازهٔ کوتاه.
-    /// </summary>
     public static double CalculateSpreadPenalty(
         IReadOnlyList<DateTime> nightDates,
         DateTime rangeStart,

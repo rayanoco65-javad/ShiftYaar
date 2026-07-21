@@ -757,10 +757,17 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         maxWithoutImprovement = Math.Min(maxWithoutImprovement, 800);
                     }
 
+                    // CoolingRate خیلی پایین (مثل 0.95) عملاً فقط ~180 تکرار می‌دهد؛ حداقل 0.997 نگه دار
+                    var coolingRate = settings.SA_CoolingRate ?? 0.997;
+                    if (coolingRate < 0.99)
+                    {
+                        coolingRate = 0.997;
+                    }
+
                     return (
                         settings.SA_InitialTemperature ?? 1000.0,
                         settings.SA_FinalTemperature ?? 0.1,
-                        settings.SA_CoolingRate ?? 0.95,
+                        coolingRate,
                         maxIterations,
                         maxWithoutImprovement
                     );
@@ -771,10 +778,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 _logger.LogWarning(ex, "خطا در دریافت تنظیمات الگوریتم از دیتابیس، از مقادیر پیش‌فرض استفاده می‌شود");
             }
 
-            // مقادیر پیش‌فرض
+            // مقادیر پیش‌فرض — CoolingRate=0.997 ≈ ۳۰۰۰ تکرار مفید تا رسیدن به دمای نهایی
             var defaultMaxIterations = forBackground ? MaxBackgroundSaIterations : 10000;
             var defaultMaxWithoutImprovement = forBackground ? 800 : 1000;
-            return (1000.0, 0.1, 0.95, defaultMaxIterations, defaultMaxWithoutImprovement);
+            return (1000.0, 0.1, 0.997, defaultMaxIterations, defaultMaxWithoutImprovement);
         }
 
         private WorkingHoursCalculationResultDto? CalculateProductivitySnapshot(User user, UserConstraint userConstraint, ShiftConstraints constraints, DepartmentSchedulingSettings? deptSetting, double nightShiftDurationHours)
@@ -1202,6 +1209,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     constraints.SoftWeights.ShiftLabelBalanceWeight = Math.Max(1.0, deptSettingEarly.ShiftLabelBalanceWeight ?? 1.0);
                     constraints.SoftWeights.FairWorkedHoursBalanceWeight = 4.0;
                     constraints.SoftWeights.FairNightShiftBalanceWeight = 2.5;
+                    constraints.SoftWeights.MorningEveningBalanceWeight = 2.5;
+                    constraints.SoftWeights.FairMorningEveningPeerWeight = 4.5;
+                    constraints.SoftWeights.WorkdaySpreadWeight = 4.0;
                     constraints.SoftWeights.ProductivityShortfallWeight = 5.0;
                     constraints.SoftWeights.NightShiftDistributionBySeniorityWeight =
                         Math.Max(1.0, deptSettingEarly.NightShiftDistributionWeight ?? 1.0);
@@ -1854,6 +1864,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                     // تعادل ساعت مؤثر و شیفت شب (پیش‌فرض قوی؛ قابل‌جایگزینی با وزن شب از تنظیمات)
                     constraints.SoftWeights.FairWorkedHoursBalanceWeight = Math.Max(4.0, constraints.SoftWeights.FairWorkedHoursBalanceWeight);
+                    constraints.SoftWeights.FairMorningEveningPeerWeight = Math.Max(4.5, constraints.SoftWeights.FairMorningEveningPeerWeight);
+                    constraints.SoftWeights.WorkdaySpreadWeight = Math.Max(4.0, constraints.SoftWeights.WorkdaySpreadWeight);
                     constraints.SoftWeights.FairNightShiftBalanceWeight = Math.Max(2.0, constraints.SoftWeights.FairNightShiftBalanceWeight);
                     constraints.SoftWeights.ProductivityShortfallWeight = Math.Max(5.0, constraints.SoftWeights.ProductivityShortfallWeight);
 

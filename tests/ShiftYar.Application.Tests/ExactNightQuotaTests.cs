@@ -227,6 +227,114 @@ public class ExactNightQuotaTests
     }
 
     [Fact]
+    public void ExactNightQuotaGuard_ClaimsHolidayNightWhenAllDaysAreFull()
+    {
+        var start = new DateTime(2026, 6, 22);
+        var end = new DateTime(2026, 7, 5);
+        // جمعه‌ها تعطیل → پنجشنبه و جمعه شبِ تعطیل/آخرهفته‌اند
+        var holidays = new HashSet<DateTime>
+        {
+            new(2026, 6, 26),
+            new(2026, 7, 3)
+        };
+
+        var needy = MakeUser(11, exactNights: 1, exactHolidayNights: 1);
+        var rich = MakeUser(4, exactNights: 2, exactHolidayNights: 1);
+        var filler = MakeUser(5, exactNights: null, exactHolidayNights: null);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = end,
+            HolidayDates = holidays,
+            UserConstraints = [needy, rich, filler],
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning),
+                Shift(2, ShiftLabel.Evening),
+                Shift(3, ShiftLabel.Night)
+            ]
+        };
+
+        var solution = new ShiftSolution();
+        // همه روزها پر؛ needy هیچ شبی ندارد
+        var days = Enumerable.Range(0, (end - start).Days + 1).Select(i => start.AddDays(i)).ToList();
+        foreach (var day in days)
+        {
+            var uid = constraints.IsHolidayWeekendNight(day) ? 4 : 5;
+            solution.AddAssignment(uid, 3, day, ShiftLabel.Night, false);
+        }
+
+        // rich بالای حداقل است (چند شب تعطیل + عادی)
+        Assert.True(solution.GetUserAllAssignments(4).Count(a => a.ShiftLabel == ShiftLabel.Night) > 2);
+
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+
+        var nights = solution.GetUserAllAssignments(11)
+            .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall)
+            .ToList();
+        Assert.True(nights.Count >= 1, "User 11 must receive at least 1 night via claim-from-donor");
+        Assert.True(
+            nights.Count(a => HolidayWeekendNightRules.IsHolidayWeekendNight(a.Date, holidays)) >= 1,
+            "User 11 must receive a holiday/weekend night");
+
+        var richNights = solution.GetUserAllAssignments(4).Count(a => a.ShiftLabel == ShiftLabel.Night);
+        Assert.True(richNights >= 2, "Donor must stay at/above own minimum total nights");
+    }
+
+    [Fact]
+    public void ExactNightQuotaGuard_DoesNotLeaveExactNightOneAtZeroWhenDonorHasSurplus()
+    {
+        var start = new DateTime(2026, 7, 1);
+        var friday = new DateTime(2026, 7, 3);
+        var holidays = new HashSet<DateTime> { friday };
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(6),
+            HolidayDates = holidays,
+            UserConstraints =
+            [
+                MakeUser(11, exactNights: 1, exactHolidayNights: 1),
+                MakeUser(4, exactNights: 2, exactHolidayNights: 1),
+                MakeUser(5, exactNights: null, exactHolidayNights: null)
+            ],
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning),
+                Shift(2, ShiftLabel.Evening),
+                Shift(3, ShiftLabel.Night)
+            ]
+        };
+
+        var solution = new ShiftSolution();
+        // ظرفیت هر روز ۱ نفر — همه پر؛ کاربر ۱۱ صفر شب
+        // rich چند شب تعطیل + عادی دارد تا بتواند یکی را اهدا کند و هنوز ≥ حداقل بماند
+        foreach (var day in Enumerable.Range(0, 7).Select(i => start.AddDays(i)))
+        {
+            var isHolidayNight = HolidayWeekendNightRules.IsHolidayWeekendNight(day, holidays);
+            var uid = isHolidayNight || day.Day % 2 == 0 ? 4 : 5;
+            solution.AddAssignment(uid, 3, day, ShiftLabel.Night, false);
+        }
+
+        Assert.True(solution.GetUserAllAssignments(4).Count(a => a.ShiftLabel == ShiftLabel.Night) >= 3);
+
+        // کاربر ۱۱ صبح همان روز تعطیل را دارد تا ClearConflictingDayShifts هم تست شود
+        solution.AddAssignment(11, 1, friday, ShiftLabel.Morning, false);
+
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+
+        var u11 = solution.GetUserAllAssignments(11).Where(a => a.ShiftLabel == ShiftLabel.Night).ToList();
+        Assert.True(u11.Count >= 1, $"Expected >=1 night for user 11, got {u11.Count}");
+        Assert.Contains(u11, a => HolidayWeekendNightRules.IsHolidayWeekendNight(a.Date, holidays));
+        Assert.DoesNotContain(
+            solution.GetUserAllAssignments(11),
+            a => a.Date.Date == friday && a.ShiftLabel == ShiftLabel.Morning);
+        Assert.True(
+            solution.GetUserAllAssignments(4).Count(a => a.ShiftLabel == ShiftLabel.Night) >= 2,
+            "Donor must remain at/above minimum");
+    }
+
+    [Fact]
     public void ExactNightQuotaGuard_UsesThursdayWhenFridayNightIsFull()
     {
         var start = new DateTime(2026, 7, 20);

@@ -239,8 +239,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public double FairShiftCountBalanceWeight { get; set; } = 1.0; // تعادل تعداد شیفت بین افراد در این ماه
         public double FairWorkedHoursBalanceWeight { get; set; } = 2.5; // تعادل ساعات مؤثر کار (با ضریب شب/تعطیل)
         public double FairNightShiftBalanceWeight { get; set; } = 2.5; // تعادل تعداد شیفت شب بین افراد واجد شرایط
-        public double MorningEveningBalanceWeight { get; set; } = 2.0; // تناسب تعداد شیفت صبح و عصر
-        public double ExactNightQuotaWeight { get; set; } = 50.0; // جریمه انحراف از سهمیه دقیق شب
+        public double MorningEveningBalanceWeight { get; set; } = 2.0; // تناسب تعداد شیفت صبح و عصر درون هر کاربر
+        /// <summary>تعادل تعداد صبح/عصر بین کاربران گردشی (نه فقط درون یک نفر).</summary>
+        public double FairMorningEveningPeerWeight { get; set; } = 4.0;
+        /// <summary>جریمه تراکم روزهای کاری (چند روز متوالی یا پر کردن کل هفته).</summary>
+        public double WorkdaySpreadWeight { get; set; } = 3.5;
+        public double ExactNightQuotaWeight { get; set; } = 200.0; // جریمه کسری از حداقل سهمیه شب
         public double ExtraShiftRotationWeight { get; set; } = 1.0;     // جلوگیری از دادن شیفت اضافه به کسانی که اخیراً زیاد گرفته‌اند
         public double ShiftLabelBalanceWeight { get; set; } = 1.0;      // تعادل Morning/Evening/Night برای کاربران گردشی
         public int FairnessLookbackMonths { get; set; } = 1;            // بازه سابقه برای محاسبات عدالت
@@ -264,7 +268,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
     {
         public double InitialTemperature { get; set; } = 1000.0;
         public double FinalTemperature { get; set; } = 0.1;
-        public double CoolingRate { get; set; } = 0.95;
+        /// <summary>
+        /// نرخ سردسازی. مقدار ۰.۹۵ فقط حدود ۱۸۰ تکرار می‌دهد؛ ۰.۹۹۷ حدود ۳۰۰۰ تکرار مفید می‌سازد.
+        /// </summary>
+        public double CoolingRate { get; set; } = 0.997;
         public int MaxIterations { get; set; } = 10000;
         public int MaxIterationsWithoutImprovement { get; set; } = 1000;
         public int MaxNeighborsPerIteration { get; set; } = 10;
