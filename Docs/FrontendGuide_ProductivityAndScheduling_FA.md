@@ -4,41 +4,70 @@
 
 ## ۱. تغییرات مربوط به کاربر
 
-دو فیلد جدید به مدل کاربر اضافه شده و در DTOهای ایجاد/دریافت کاربر هم وجود دارند:
+### فیلدهای ثابت روی کاربر
 
 - `HardshipPercent`
 - `OvertimeConsent`
-- `ExactNightShiftCount` *(جدید)*
-- `ExactHolidayWeekendNightShiftCount` *(جدید)*
 
-### معنی فیلدها
+### سهمیه شب — مدل ماهانه (جدید)
 
-- `HardshipPercent`: درصد صعوبت کار کاربر. این مقدار در محاسبه کاهش ساعت موظفی هفتگی استفاده می‌شود.
-- `OvertimeConsent`: مشخص می‌کند کاربر رضایت به اضافه‌کاری دارد یا خیر. اگر `false` باشد، سیستم اجازه عبور از سقف ساعات موظفی را نمی‌دهد. اگر `true` باشد، تا سقف 80 ساعت در ماه اضافه‌کاری قابل قبول است.
-- `ExactNightShiftCount`: تعداد **دقیق** شیفت شب کاربر در بازه برنامه‌ریزی. اگر خالی (`null`) باشد، توزیع شب طبق تنظیمات قبلی دپارتمان انجام می‌شود.
-- `ExactHolidayWeekendNightShiftCount`: از میان شیفت‌های شب، چند مورد باید شبِ **تعطیل/آخر هفته** باشد. تعریف شب تعطیل/آخر هفته:
-  - شب همان روز تعطیل (`IsHoliday=true`، مثل جمعه)، **یا**
-  - شب روز غیرتعطیلِ بلافاصله قبل از تعطیل (مثلاً پنجشنبه قبل از جمعه؛ اگر پنجشنبه هم تعطیل باشد، چهارشنبه قبل از زنجیرهٔ تعطیل هم مشمول است).
-  باید ≤ `ExactNightShiftCount` باشد.
+سهمیه حداقل شیفت شب و شب تعطیل/آخرهفته از تنظیمات کاربر **خارج** شد و در موجودیت جداگانهٔ ماهانه ثبت می‌شود، چون تعداد تعطیلات هر ماه فرق دارد.
 
-### اقدام لازم در فرانت
+**قبل از Optimize هر ماه**، سوپروایزر باید سهمیه را برای همان ماه شمسی تنظیم کند.
 
-- در فرم ایجاد/ویرایش کاربر، این فیلدها اضافه شوند.
-- برای سهمیه شب، دو فیلد عددی اختیاری با validation:
-  - `ExactNightShiftCount` ≥ 0
-  - `ExactHolidayWeekendNightShiftCount` ≥ 0 و ≤ `ExactNightShiftCount`
-- اگر `ExactNightShiftCount` خالی است، فیلد تعطیل/آخرهفته را غیرفعال یا مخفی کنید.
-- توضیح کوتاه: «در صورت تعیین، شیفت‌بندی دقیقاً همین تعداد شب را (نه بیشتر و نه کمتر) اعمال می‌کند.»
-- در صفحه جزئیات کاربر این مقادیر را نمایش دهید.
+#### APIها (`UserMonthlyNightQuotaController`)
 
-### فیلدهای DTO
+| اکشن | روش | توضیح |
+|------|------|--------|
+| `GetDepartmentMonthlyNightQuotas` | GET | لیست سهمیه دپارتمان برای `departmentId` + `persianYear` + `persianMonth` |
+| `GetUserMonthlyNightQuotaByUserMonth` | GET | سهمیه یک کاربر در یک ماه |
+| `GetUserMonthlyNightQuotas` | GET | فیلتر/صفحه‌بندی |
+| `UpsertUserMonthlyNightQuota` | POST | ایجاد/به‌روزرسانی یک کاربر |
+| `UpsertDepartmentMonthlyNightQuotas` | POST | تنظیم یک‌جای همه کاربران دپارتمان |
+| `DeleteUserMonthlyNightQuota` | DELETE | حذف با `id` |
 
-در `UserDtoAdd`:
+#### بدنهٔ نمونه — یک کاربر
 
-- `HardshipPercent: decimal?`
-- `OvertimeConsent: bool?`
+```json
+{
+  "userId": 10,
+  "persianYear": 1405,
+  "persianMonth": 4,
+  "exactNightShiftCount": 2,
+  "exactHolidayWeekendNightShiftCount": 1
+}
+```
 
-در `UserDtoGet`:
+#### بدنهٔ نمونه — یک‌جا برای دپارتمان
+
+```json
+{
+  "departmentId": 1,
+  "persianYear": 1405,
+  "persianMonth": 4,
+  "items": [
+    { "userId": 3, "exactNightShiftCount": 5, "exactHolidayWeekendNightShiftCount": 2 },
+    { "userId": 10, "exactNightShiftCount": 2, "exactHolidayWeekendNightShiftCount": 1 }
+  ]
+}
+```
+
+#### معنی فیلدها
+
+- `exactNightShiftCount`: حداقل تعداد شیفت شب در آن ماه شمسی. `null` = بدون حداقل اجباری.
+- `exactHolidayWeekendNightShiftCount`: حداقل شبِ تعطیل/آخر هفته. باید ≤ تعداد کل شب باشد.
+- تعریف شب تعطیل/آخر هفته: شب همان روز تعطیل، یا شب روز قبل از تعطیل (مثلاً پنجشنبه قبل از جمعه).
+
+#### اقدام لازم در فرانت
+
+- فیلدهای `ExactNightShiftCount` / `ExactHolidayWeekendNightShiftCount` را از فرم کاربر حذف کنید.
+- صفحه/مدال جدا برای «سهمیه شب ماهانه» بسازید: انتخاب سال و ماه شمسی + جدول کاربران دپارتمان.
+- قبل از دکمه Optimize، اگر برای ماه شروع بازه سهمیه ثبت نشده، هشدار دهید.
+- Validation: شب تعطیل ≤ کل شب؛ مقادیر ≥ 0.
+
+### فیلدهای DTO کاربر (باقی‌مانده)
+
+در `UserDtoAdd` / `UserDtoGet`:
 
 - `HardshipPercent: decimal?`
 - `OvertimeConsent: bool?`
@@ -179,8 +208,8 @@
 
 - اضافه کردن `HardshipPercent` به فرم و مدل کاربر
 - اضافه کردن `OvertimeConsent` به فرم و مدل کاربر
-- اضافه کردن `ExactNightShiftCount` و `ExactHolidayWeekendNightShiftCount` به فرم کاربر
-- نمایش این فیلدها در جزئیات کاربر
+- **حذف** سهمیه شب از فرم کاربر؛ ساخت UI ماهانه با `UserMonthlyNightQuota` APIها
+- قبل از Optimize، تنظیم سهمیه شب برای ماه شمسی موردنظر
 - اضافه کردن فیلدهای `Holiday*` به فرم `ShiftRequiredSpecialty`
 - تفکیک UI روز عادی و روز تعطیل در نیازمندی تخصص
 - نمایش آمار بهره‌وری در خروجی شیفت‌بندی
@@ -192,6 +221,10 @@
 
 - `ShiftYar.Application/DTOs/UserModel/UserDtoAdd.cs`
 - `ShiftYar.Application/DTOs/UserModel/UserDtoGet.cs`
+- `ShiftYar.Application/DTOs/UserModel/UserMonthlyNightQuotaDtoAdd.cs`
+- `ShiftYar.Application/DTOs/UserModel/UserMonthlyNightQuotaBulkUpsertDto.cs`
+- `ShiftYar.Api/Controllers/UserModel/UserMonthlyNightQuotaController.cs`
+- `ShiftYar.Domain/Entities/UserModel/UserMonthlyNightQuota.cs`
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftRequiredSpecialtyModel/ShiftRequiredSpecialtyDtoAdd.cs`
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftRequiredSpecialtyModel/ShiftRequiredSpecialtyDtoGet.cs`
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftSchedulingModel/ShiftSchedulingResultDto.cs`

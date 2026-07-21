@@ -35,6 +35,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
     public class ShiftSchedulingService : IShiftSchedulingService
     {
         private readonly IEfRepository<User> _userRepository;
+        private readonly IEfRepository<UserMonthlyNightQuota> _monthlyNightQuotaRepository;
         private readonly IEfRepository<Shift> _shiftRepository;
         private readonly IEfRepository<Department> _departmentRepository;
         private readonly IEfRepository<DepartmentSchedulingSettings> _deptSettingsRepository;
@@ -52,6 +53,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
         public ShiftSchedulingService(
             IEfRepository<User> userRepository,
+            IEfRepository<UserMonthlyNightQuota> monthlyNightQuotaRepository,
             IEfRepository<Shift> shiftRepository,
             IEfRepository<Department> departmentRepository,
             IEfRepository<DepartmentSchedulingSettings> deptSettingsRepository,
@@ -68,6 +70,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             ILogger<ShiftSchedulingService> logger)
         {
             _userRepository = userRepository;
+            _monthlyNightQuotaRepository = monthlyNightQuotaRepository;
             _shiftRepository = shiftRepository;
             _departmentRepository = departmentRepository;
             _deptSettingsRepository = deptSettingsRepository;
@@ -1260,8 +1263,46 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     _logger.LogWarning("LoadConstraints: No active users found for DepartmentId={DepartmentId}", request.DepartmentId);
                 }
 
+                // سهمیه شب ماهانه بر اساس سال/ماه شمسی شروع بازه
+                var persianCalendar = new PersianCalendar();
+                var quotaPersianYear = persianCalendar.GetYear(constraints.StartDate);
+                var quotaPersianMonth = persianCalendar.GetMonth(constraints.StartDate);
+                var endPersianYear = persianCalendar.GetYear(constraints.EndDate);
+                var endPersianMonth = persianCalendar.GetMonth(constraints.EndDate);
+                if (endPersianYear != quotaPersianYear || endPersianMonth != quotaPersianMonth)
+                {
+                    _logger.LogWarning(
+                        "LoadConstraints: schedule spans multiple Persian months ({StartYear}/{StartMonth} .. {EndYear}/{EndMonth}); night quotas loaded for start month only",
+                        quotaPersianYear, quotaPersianMonth, endPersianYear, endPersianMonth);
+                }
+
+                var quotaUserIds = departmentUsers
+                    .Where(u => u.Id.HasValue)
+                    .Select(u => u.Id!.Value)
+                    .ToList();
+
+                var monthlyQuotasByUserId = new Dictionary<int, UserMonthlyNightQuota>();
+                if (quotaUserIds.Count > 0)
+                {
+                    var (monthlyQuotas, _) = await _monthlyNightQuotaRepository.GetByFilterAsync(
+                        new Application.Common.Filters.SimpleFilter<UserMonthlyNightQuota>(q =>
+                            q.PersianYear == quotaPersianYear &&
+                            q.PersianMonth == quotaPersianMonth &&
+                            quotaUserIds.Contains(q.UserId)));
+
+                    monthlyQuotasByUserId = monthlyQuotas
+                        .GroupBy(q => q.UserId)
+                        .ToDictionary(g => g.Key, g => g.First());
+
+                    _logger.LogInformation(
+                        "LoadConstraints: Loaded {QuotaCount} monthly night quota(s) for Persian {Year}/{Month}",
+                        monthlyQuotasByUserId.Count, quotaPersianYear, quotaPersianMonth);
+                }
+
                 foreach (var user in departmentUsers)
                 {
+                    monthlyQuotasByUserId.TryGetValue(user.Id ?? 0, out var monthQuota);
+
                     var userConstraint = new UserConstraint
                     {
                         UserId = user.Id ?? 0,
@@ -1276,8 +1317,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         TwoShiftRotationPattern = user.TwoShiftRotationPattern,
                         HardshipPercent = user.HardshipPercent ?? 0m,
                         OvertimeConsent = user.OvertimeConsent ?? false,
-                        ExactNightShiftCount = user.ExactNightShiftCount,
-                        ExactHolidayWeekendNightShiftCount = user.ExactHolidayWeekendNightShiftCount
+                        ExactNightShiftCount = monthQuota?.ExactNightShiftCount,
+                        ExactHolidayWeekendNightShiftCount = monthQuota?.ExactHolidayWeekendNightShiftCount
                     };
 
                     if (userConstraint.ExactNightShiftCount.HasValue &&

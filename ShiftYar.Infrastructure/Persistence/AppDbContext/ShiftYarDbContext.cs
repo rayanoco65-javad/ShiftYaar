@@ -36,6 +36,7 @@ namespace ShiftYar.Infrastructure.Persistence.AppDbContext
         public DbSet<DepartmentName> DepartmentNames { get; set; }
         public DbSet<DepartmentSchedulingSettings> DepartmentSchedulingSettings { get; set; }
         public DbSet<User> Users { get; set; }
+        public DbSet<UserMonthlyNightQuota> UserMonthlyNightQuotas { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
         public DbSet<LoginHistory> LoginHistories { get; set; }
         public DbSet<Role> Roles { get; set; }
@@ -81,6 +82,16 @@ namespace ShiftYar.Infrastructure.Persistence.AppDbContext
                 .HasMany(h => h.UserRoles)
                 .WithOne(p => p.User)
                 .HasForeignKey(p => p.UserId);
+
+            modelBuilder.Entity<User>()
+                .HasMany(u => u.MonthlyNightQuotas)
+                .WithOne(q => q.User)
+                .HasForeignKey(q => q.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<UserMonthlyNightQuota>()
+                .HasIndex(q => new { q.UserId, q.PersianYear, q.PersianMonth })
+                .IsUnique();
 
             modelBuilder.Entity<Department>()
                 .HasMany(d => d.DepartmentUsers)

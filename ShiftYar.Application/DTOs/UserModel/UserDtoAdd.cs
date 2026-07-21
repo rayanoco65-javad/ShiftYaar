@@ -40,10 +40,6 @@ namespace ShiftYar.Application.DTOs.UserModel
         public bool? IncludedProductivityPlan { get; set; }
         public decimal? HardshipPercent { get; set; }
         public bool? OvertimeConsent { get; set; }
-        /// <summary>حداقل تعداد شیفت شب؛ خالی = طبق تنظیمات قبلی</summary>
-        public int? ExactNightShiftCount { get; set; }
-        /// <summary>حداقل تعداد شیفت شب در تعطیل/آخرهفته</summary>
-        public int? ExactHolidayWeekendNightShiftCount { get; set; }
         public string? Image { get; set; }
         public int? DepartmentId { get; set; }
         public int? SpecialtyId { get; set; }

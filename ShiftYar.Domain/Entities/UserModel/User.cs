@@ -38,17 +38,10 @@ namespace ShiftYar.Domain.Entities.UserModel
         public decimal? HardshipPercent { get; set; }   //درصد صعوبت (سختی) کار (۰–۱۰۰) برای کاهش ساعت موظفی هفتگی
         public bool? OvertimeConsent { get; set; }  //رضایت پرسنل به اضافه‌کاری (حداکثر ۸۰ ساعت در ماه) ر
 
-        /// <summary>
-        /// حداقل تعداد شیفت شب در بازه برنامه‌ریزی. null = طبق تنظیمات قبلی دپارتمان.
-        /// </summary>
-        public int? ExactNightShiftCount { get; set; }
-
-        /// <summary>
-        /// حداقل تعداد شب‌های تعطیل/آخرهفته از میان شیفت‌های شب. null = بدون اجبار.
-        /// </summary>
-        public int? ExactHolidayWeekendNightShiftCount { get; set; }
-
         public string? Image { get; set; }
+
+        /// <summary>سهمیه‌های حداقل شب به‌تفکیک ماه شمسی</summary>
+        public ICollection<UserMonthlyNightQuota>? MonthlyNightQuotas { get; set; }
 
         [ForeignKey("Department")]
         public int? DepartmentId { get; set; } // Foreign key to Department table
