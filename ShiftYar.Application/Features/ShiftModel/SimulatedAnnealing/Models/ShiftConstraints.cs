@@ -57,9 +57,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public int MinRestDaysBetweenShifts { get; set; } = 1;  //حداقل استراحت بین شیفت‌ها
         public int MaxShiftsPerWeek { get; set; } = 5;   //حداکثر شیفت در هر هفته
         public int MaxNightShiftsPerMonth { get; set; } = 8;    //حداکثر شیفت شب در ماه (حالت بدون سهمیه دقیق)
-        /// <summary>تعداد دقیق شیفت شب؛ در صورت مقدار داشتن، دقیقاً همین تعداد باید باشد.</summary>
+        /// <summary>حداقل تعداد شیفت شب برای کاربر در بازه برنامه‌ریزی.</summary>
         public int? ExactNightShiftCount { get; set; }
-        /// <summary>تعداد دقیق شیفت شب روی روزهای تعطیل/آخرهفته (IsHoliday).</summary>
+        /// <summary>حداقل تعداد شیفت شب روی روزهای تعطیل/آخرهفته.</summary>
         public int? ExactHolidayWeekendNightShiftCount { get; set; }
         /// <summary>حداقل فاصله روزهای تقویمی بین دو شیفت شب (۱ = بدون شب متوالی).</summary>
         public int MinDaysBetweenNightShifts { get; set; } = 2;

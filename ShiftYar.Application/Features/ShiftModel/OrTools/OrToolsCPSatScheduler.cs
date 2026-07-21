@@ -563,7 +563,7 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools
 
                 if (user.ExactNightShiftCount.HasValue)
                 {
-                    model.Add(LinearExpr.Sum(nightShifts) == user.ExactNightShiftCount.Value);
+                    model.Add(LinearExpr.Sum(nightShifts) >= user.ExactNightShiftCount.Value);
                 }
                 else if (_constraints.HardRules.EnforceNightShiftMonthlyCap)
                 {
@@ -577,7 +577,7 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools
 
                 if (user.ExactHolidayWeekendNightShiftCount.HasValue && holidayNightShifts.Count > 0)
                 {
-                    model.Add(LinearExpr.Sum(holidayNightShifts) == user.ExactHolidayWeekendNightShiftCount.Value);
+                    model.Add(LinearExpr.Sum(holidayNightShifts) >= user.ExactHolidayWeekendNightShiftCount.Value);
                 }
 
                 // فاصله بین شب‌ها

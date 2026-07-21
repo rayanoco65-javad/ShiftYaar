@@ -434,13 +434,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                 if (user.ExactNightShiftCount.HasValue)
                 {
-                    penalty += Math.Abs(nights.Count - user.ExactNightShiftCount.Value) * 20;
+                    penalty += Math.Max(0, user.ExactNightShiftCount.Value - nights.Count) * 20;
                 }
 
                 if (user.ExactHolidayWeekendNightShiftCount.HasValue)
                 {
                     var holidayNights = nights.Count(a => _constraints.IsHolidayWeekendNight(a.Date));
-                    penalty += Math.Abs(holidayNights - user.ExactHolidayWeekendNightShiftCount.Value) * 25;
+                    penalty += Math.Max(0, user.ExactHolidayWeekendNightShiftCount.Value - holidayNights) * 25;
                 }
 
                 if (nights.Count >= 2 &&
@@ -915,14 +915,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 if (_constraints.HardRules.EnforceNightShiftMonthlyCap || userConstraint.HasExactNightQuota)
                 {
                     var nights = userAssignments.Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall).ToList();
-                    if (userConstraint.HasExactNightQuota)
-                    {
-                        if (nights.Count > userConstraint.ExactNightShiftCount!.Value)
-                        {
-                            return false;
-                        }
-                    }
-                    else
+                    if (_constraints.HardRules.EnforceNightShiftMonthlyCap)
                     {
                         foreach (var month in nights.GroupBy(a => new { a.Date.Year, a.Date.Month }))
                         {
@@ -1150,19 +1143,19 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 var nights = solution.GetUserAllAssignments(user.UserId)
                     .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall)
                     .ToList();
-                if (user.ExactNightShiftCount.HasValue && nights.Count != user.ExactNightShiftCount.Value)
+                if (user.ExactNightShiftCount.HasValue && nights.Count < user.ExactNightShiftCount.Value)
                 {
                     violations.Add(
-                        $"User {user.UserId} night quota mismatch ({nights.Count}/{user.ExactNightShiftCount.Value}).");
+                        $"User {user.UserId} minimum night quota not met ({nights.Count}/{user.ExactNightShiftCount.Value}).");
                 }
 
                 if (user.ExactHolidayWeekendNightShiftCount.HasValue)
                 {
                     var holidayNights = nights.Count(a => _constraints.IsHolidayWeekendNight(a.Date));
-                    if (holidayNights != user.ExactHolidayWeekendNightShiftCount.Value)
+                    if (holidayNights < user.ExactHolidayWeekendNightShiftCount.Value)
                     {
                         violations.Add(
-                            $"User {user.UserId} holiday/weekend night quota mismatch ({holidayNights}/{user.ExactHolidayWeekendNightShiftCount.Value}).");
+                            $"User {user.UserId} minimum holiday/weekend night quota not met ({holidayNights}/{user.ExactHolidayWeekendNightShiftCount.Value}).");
                     }
                 }
             }
@@ -1417,20 +1410,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall)
                     .ToList();
 
-                if (user.ExactNightShiftCount.HasValue && nights.Count >= user.ExactNightShiftCount.Value)
-                {
-                    return false;
-                }
-
-                if (!user.HasExactNightQuota && nights.Count >= user.MaxNightShiftsPerMonth)
-                {
-                    return false;
-                }
-
-                var holidayNights = nights.Count(a => _constraints.IsHolidayWeekendNight(a.Date));
-                if (user.ExactHolidayWeekendNightShiftCount.HasValue &&
-                    _constraints.IsHolidayWeekendNight(date) &&
-                    holidayNights >= user.ExactHolidayWeekendNightShiftCount.Value)
+                if (_constraints.HardRules.EnforceNightShiftMonthlyCap && nights.Count >= user.MaxNightShiftsPerMonth)
                 {
                     return false;
                 }
@@ -1440,6 +1420,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     user.ExactHolidayWeekendNightShiftCount.HasValue &&
                     !_constraints.IsHolidayWeekendNight(date))
                 {
+                    var holidayNights = nights.Count(a => _constraints.IsHolidayWeekendNight(a.Date));
                     var remainingTotal = user.ExactNightShiftCount.Value - nights.Count;
                     var remainingHoliday = user.ExactHolidayWeekendNightShiftCount.Value - holidayNights;
                     if (remainingHoliday > 0 && remainingTotal <= remainingHoliday)

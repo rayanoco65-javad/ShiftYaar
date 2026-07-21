@@ -1279,7 +1279,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                     if (userConstraint.ExactNightShiftCount.HasValue)
                     {
-                        userConstraint.MaxNightShiftsPerMonth = userConstraint.ExactNightShiftCount.Value;
+                        userConstraint.MaxNightShiftsPerMonth = Math.Max(
+                            userConstraint.MaxNightShiftsPerMonth,
+                            userConstraint.ExactNightShiftCount.Value);
                     }
 
                     userConstraint.AllowedShiftLabels = ShiftEligibilityResolver

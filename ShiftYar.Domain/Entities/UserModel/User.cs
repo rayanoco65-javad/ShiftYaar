@@ -39,12 +39,12 @@ namespace ShiftYar.Domain.Entities.UserModel
         public bool? OvertimeConsent { get; set; }  //رضایت پرسنل به اضافه‌کاری (حداکثر ۸۰ ساعت در ماه) ر
 
         /// <summary>
-        /// تعداد دقیق شیفت شب در بازه برنامه‌ریزی. null = طبق تنظیمات قبلی دپارتمان.
+        /// حداقل تعداد شیفت شب در بازه برنامه‌ریزی. null = طبق تنظیمات قبلی دپارتمان.
         /// </summary>
         public int? ExactNightShiftCount { get; set; }
 
         /// <summary>
-        /// از میان شیفت‌های شب، چند مورد باید در شب‌های تعطیل/آخرهفته باشد. null = بدون اجبار.
+        /// حداقل تعداد شب‌های تعطیل/آخرهفته از میان شیفت‌های شب. null = بدون اجبار.
         /// </summary>
         public int? ExactHolidayWeekendNightShiftCount { get; set; }
 

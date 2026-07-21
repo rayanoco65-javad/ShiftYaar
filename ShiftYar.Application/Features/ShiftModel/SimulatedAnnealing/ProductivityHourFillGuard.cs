@@ -231,10 +231,6 @@ public static class ProductivityHourFillGuard
             var nights = solution.GetUserAllAssignments(user.UserId)
                 .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall)
                 .ToList();
-            if (user.ExactNightShiftCount.HasValue && nights.Count >= user.ExactNightShiftCount.Value)
-            {
-                return false;
-            }
 
             if (user.MinDaysBetweenNightShifts > 0)
             {

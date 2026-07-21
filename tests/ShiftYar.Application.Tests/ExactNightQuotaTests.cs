@@ -10,7 +10,7 @@ namespace ShiftYar.Application.Tests;
 public class ExactNightQuotaTests
 {
     [Fact]
-    public void Optimize_RespectsExactNightAndHolidayNightQuotas()
+    public void Optimize_RespectsMinimumNightAndHolidayNightQuotas()
     {
         var start = new DateTime(2026, 8, 1);
         var holidays = new HashSet<DateTime>
@@ -71,8 +71,8 @@ public class ExactNightQuotaTests
             .ToList();
         var holidayNights = nights.Count(a =>
             HolidayWeekendNightRules.IsHolidayWeekendNight(a.Date, holidays));
-        Assert.Equal(4, nights.Count);
-        Assert.Equal(2, holidayNights);
+        Assert.True(nights.Count >= 4);
+        Assert.True(holidayNights >= 2);
 
         var ordered = nights.OrderBy(a => a.Date).ToList();
         for (var i = 1; i < ordered.Count; i++)
@@ -84,7 +84,7 @@ public class ExactNightQuotaTests
     }
 
     [Fact]
-    public void ExactNightQuotaGuard_FillsMissingNights()
+    public void ExactNightQuotaGuard_FillsMissingMinimumNights()
     {
         var start = new DateTime(2026, 8, 1);
         var holidays = new HashSet<DateTime> { new(2026, 8, 7), new(2026, 8, 14) };
@@ -109,8 +109,8 @@ public class ExactNightQuotaTests
         ExactNightQuotaGuard.Enforce(solution, constraints);
 
         var nights = solution.GetUserAllAssignments(1).Where(a => a.ShiftLabel == ShiftLabel.Night).ToList();
-        Assert.Equal(3, nights.Count);
-        Assert.Equal(1, nights.Count(a => HolidayWeekendNightRules.IsHolidayWeekendNight(a.Date, holidays)));
+        Assert.True(nights.Count >= 3);
+        Assert.True(nights.Count(a => HolidayWeekendNightRules.IsHolidayWeekendNight(a.Date, holidays)) >= 1);
     }
 
     [Fact]
@@ -183,11 +183,47 @@ public class ExactNightQuotaTests
             .OrderBy(a => a.Date)
             .ToList();
 
-        Assert.Equal(4, nights.Count);
-        Assert.Equal(2, nights.Count(a => HolidayWeekendNightRules.IsHolidayWeekendNight(a.Date, holidays)));
+        Assert.True(nights.Count >= 4);
+        Assert.True(nights.Count(a => HolidayWeekendNightRules.IsHolidayWeekendNight(a.Date, holidays)) >= 2);
         Assert.True(
             nights.Max(a => a.Date) >= new DateTime(2026, 8, 10),
             $"Expected nights spread into later August, got max={nights.Max(a => a.Date):yyyy-MM-dd}");
+    }
+
+    [Fact]
+    public void ExactNightQuotaGuard_CanTakeNightFromUserAboveMinimum()
+    {
+        var start = new DateTime(2026, 8, 1);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(6),
+            UserConstraints =
+            [
+                MakeUser(1, exactNights: 2, exactHolidayNights: 0),
+                MakeUser(2, exactNights: 1, exactHolidayNights: 0),
+                MakeUser(3, exactNights: null, exactHolidayNights: null)
+            ],
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning),
+                Shift(2, ShiftLabel.Evening),
+                Shift(3, ShiftLabel.Night)
+            ]
+        };
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(1, 3, start.AddDays(0), ShiftLabel.Night, false);
+        solution.AddAssignment(2, 3, start.AddDays(2), ShiftLabel.Night, false);
+        solution.AddAssignment(2, 3, start.AddDays(5), ShiftLabel.Night, false);
+
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+
+        var user1Nights = solution.GetUserAllAssignments(1).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+        var user2Nights = solution.GetUserAllAssignments(2).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+
+        Assert.True(user1Nights >= 2);
+        Assert.True(user2Nights >= 1);
     }
 
     [Fact]
