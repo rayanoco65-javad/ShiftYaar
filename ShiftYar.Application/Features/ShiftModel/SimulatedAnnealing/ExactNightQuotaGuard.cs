@@ -135,8 +135,147 @@ public static class ExactNightQuotaGuard
             return;
         }
 
-        // ۲) گرفتن شب از اهداکننده‌ای که بالای حداقل خودش است
+        // ۲) تبدیل شب عادی به شب تعطیل (بدون کم‌کردن تعداد کل اهداکننده)
+        if (holidayOnly)
+        {
+            filled = SwapWeekdayForHoliday(solution, constraints, user, nightShift, needed, minGap);
+            needed -= filled;
+            if (needed <= 0)
+            {
+                return;
+            }
+        }
+
+        // ۳) گرفتن شب از اهداکننده‌ای که بالای حداقل خودش است
         ClaimNightsFromDonors(solution, constraints, user, nightShift, needed, holidayOnly, minGap);
+    }
+
+    /// <summary>
+    /// وقتی کاربر شب عادی دارد ولی شب تعطیل کم دارد، شب عادی‌اش را با شب تعطیل اهداکننده‌ای که مازاد تعطیل دارد عوض می‌کند.
+    /// تعداد کل شب هر دو ثابت می‌ماند — حتی اگر اهداکننده روی ExactNight باشد.
+    /// </summary>
+    private static int SwapWeekdayForHoliday(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user,
+        ShiftRequirement nightShift,
+        int needed,
+        int minGap)
+    {
+        var swapped = 0;
+        while (swapped < needed)
+        {
+            var weekdayNight = GetNights(solution, user.UserId)
+                .Where(a => !constraints.IsHolidayWeekendNight(a.Date))
+                .Where(a => !IsProtected(constraints, user.UserId, a))
+                .OrderBy(a => a.Date)
+                .FirstOrDefault();
+            if (weekdayNight == null)
+            {
+                break;
+            }
+
+            var weekdayDate = weekdayNight.Date.Date;
+            var holidayDates = AllCandidateDates(constraints, holidayOnly: true)
+                .Where(d => d != weekdayDate)
+                .Where(d => IsPersonallyFeasibleNightDate(solution, constraints, user, nightShift, d, holidayOnly: true))
+                .Where(d =>
+                {
+                    var otherNights = GetNights(solution, user.UserId)
+                        .Where(a => a.Date.Date != weekdayDate)
+                        .Select(a => a.Date.Date);
+                    return !otherNights.Any(o => Math.Abs((o - d).Days) < minGap);
+                })
+                .ToList();
+
+            SaShiftAssignment? bestDonorAssignment = null;
+            UserConstraint? bestDonor = null;
+            DateTime? bestHolidayDate = null;
+            var bestScore = int.MaxValue;
+
+            foreach (var holidayDate in holidayDates)
+            {
+                var occupants = solution.GetShiftAssignments(nightShift.ShiftId, holidayDate)
+                    .Where(a => !a.IsOnCall && a.UserId != user.UserId)
+                    .ToList();
+
+                foreach (var occupant in occupants)
+                {
+                    var donor = constraints.UserConstraints.FirstOrDefault(u => u.UserId == occupant.UserId);
+                    if (donor == null || !CanDonateHolidayViaSwap(solution, constraints, donor, occupant))
+                    {
+                        continue;
+                    }
+
+                    if (!CanSwapNight(solution, constraints, user, donor, weekdayDate, holidayDate, nightShift, minGap))
+                    {
+                        continue;
+                    }
+
+                    var donorNights = GetNights(solution, donor.UserId);
+                    var holidaySurplus = donorNights.Count(a => constraints.IsHolidayWeekendNight(a.Date))
+                                         - (donor.ExactHolidayWeekendNightShiftCount ?? 0);
+                    var score = -(holidaySurplus * 100 + donorNights.Count);
+                    if (score < bestScore)
+                    {
+                        bestScore = score;
+                        bestDonorAssignment = occupant;
+                        bestDonor = donor;
+                        bestHolidayDate = holidayDate;
+                    }
+                }
+            }
+
+            if (bestDonorAssignment == null || bestDonor == null || bestHolidayDate == null)
+            {
+                break;
+            }
+
+            ClearConflictingDayShifts(solution, constraints, user, bestHolidayDate.Value);
+            ClearConflictingDayShifts(solution, constraints, bestDonor, weekdayDate);
+
+            solution.RemoveAssignment(user.UserId, nightShift.ShiftId, weekdayDate);
+            solution.RemoveAssignment(bestDonor.UserId, nightShift.ShiftId, bestHolidayDate.Value);
+            solution.AddAssignment(user.UserId, nightShift.ShiftId, bestHolidayDate.Value, ShiftLabel.Night, false);
+            solution.AddAssignment(bestDonor.UserId, nightShift.ShiftId, weekdayDate, ShiftLabel.Night, false);
+            swapped++;
+        }
+
+        return swapped;
+    }
+
+    /// <summary>
+    /// اهداکننده می‌تواند شب تعطیل را در قالب تعویض بدهد اگر بعد از آن زیر حداقل تعطیل نرود.
+    /// </summary>
+    private static bool CanDonateHolidayViaSwap(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint donor,
+        SaShiftAssignment assignment)
+    {
+        if (assignment.ShiftLabel != ShiftLabel.Night || assignment.IsOnCall)
+        {
+            return false;
+        }
+
+        if (!constraints.IsHolidayWeekendNight(assignment.Date))
+        {
+            return false;
+        }
+
+        if (IsProtected(constraints, donor.UserId, assignment))
+        {
+            return false;
+        }
+
+        if (!donor.ExactHolidayWeekendNightShiftCount.HasValue)
+        {
+            return true;
+        }
+
+        var holidayNights = GetNights(solution, donor.UserId)
+            .Count(a => constraints.IsHolidayWeekendNight(a.Date));
+        return holidayNights - 1 >= donor.ExactHolidayWeekendNightShiftCount.Value;
     }
 
     private static int FillIntoOpenCapacity(
@@ -263,7 +402,7 @@ public static class ExactNightQuotaGuard
                 var donor = constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId);
                 return (Assignment: a, Donor: donor);
             })
-            .Where(x => x.Donor != null && CanDonateNight(solution, constraints, x.Donor!, x.Assignment))
+            .Where(x => x.Donor != null && CanDonateNight(solution, constraints, x.Donor!, x.Assignment, forHolidayClaim: holidayClaim))
             .OrderBy(x => DonorPriority(solution, constraints, x.Donor!, x.Assignment, holidayClaim))
             .Select(x => x.Assignment)
             .FirstOrDefault();
@@ -297,12 +436,15 @@ public static class ExactNightQuotaGuard
 
     /// <summary>
     /// آیا اهداکننده می‌تواند این شب را از دست بدهد بدون افت زیر حداقل؟
+    /// برای ادعای شب تعطیل، اگر مازاد تعطیل دارد حتی روی کف ExactNight هم می‌تواند اهدا کند
+    /// (کسری ExactNight در پاس بعدی Enforce جبران می‌شود).
     /// </summary>
     public static bool CanDonateNight(
         ShiftSolution solution,
         ShiftConstraints constraints,
         UserConstraint user,
-        SaShiftAssignment assignment)
+        SaShiftAssignment assignment,
+        bool forHolidayClaim = false)
     {
         if (assignment.ShiftLabel != ShiftLabel.Night || assignment.IsOnCall)
         {
@@ -315,15 +457,24 @@ public static class ExactNightQuotaGuard
         }
 
         var nights = GetNights(solution, user.UserId);
+        var isHolidayNight = constraints.IsHolidayWeekendNight(assignment.Date);
+        var holidayNights = nights.Count(a => constraints.IsHolidayWeekendNight(a.Date));
+        var holidaySurplus = user.ExactHolidayWeekendNightShiftCount.HasValue
+            ? holidayNights - user.ExactHolidayWeekendNightShiftCount.Value
+            : holidayNights;
+
         var remainingTotal = nights.Count - 1;
         if (user.ExactNightShiftCount.HasValue && remainingTotal < user.ExactNightShiftCount.Value)
         {
-            return false;
+            // مازاد شب تعطیل را برای رفع کسری تعطیل دیگران قفل نکن
+            if (!(forHolidayClaim && isHolidayNight && holidaySurplus > 0))
+            {
+                return false;
+            }
         }
 
-        if (user.ExactHolidayWeekendNightShiftCount.HasValue && constraints.IsHolidayWeekendNight(assignment.Date))
+        if (user.ExactHolidayWeekendNightShiftCount.HasValue && isHolidayNight)
         {
-            var holidayNights = nights.Count(a => constraints.IsHolidayWeekendNight(a.Date));
             if (holidayNights - 1 < user.ExactHolidayWeekendNightShiftCount.Value)
             {
                 return false;
