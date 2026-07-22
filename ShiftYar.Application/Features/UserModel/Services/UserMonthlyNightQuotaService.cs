@@ -6,6 +6,7 @@ using ShiftYar.Application.DTOs.UserModel;
 using ShiftYar.Application.Features.UserModel.Filters;
 using ShiftYar.Application.Interfaces.Persistence;
 using ShiftYar.Application.Interfaces.UserModel;
+using ShiftYar.Domain.Entities.ShiftDateModel;
 using ShiftYar.Domain.Entities.UserModel;
 using System;
 using System.Collections.Generic;
@@ -19,17 +20,20 @@ namespace ShiftYar.Application.Features.UserModel.Services
     {
         private readonly IEfRepository<UserMonthlyNightQuota> _repository;
         private readonly IEfRepository<User> _userRepository;
+        private readonly IEfRepository<ShiftDate> _shiftDateRepository;
         private readonly ILogger<UserMonthlyNightQuotaService> _logger;
         private readonly IHttpContextAccessor _httpContextAccessor;
 
         public UserMonthlyNightQuotaService(
             IEfRepository<UserMonthlyNightQuota> repository,
             IEfRepository<User> userRepository,
+            IEfRepository<ShiftDate> shiftDateRepository,
             ILogger<UserMonthlyNightQuotaService> logger,
             IHttpContextAccessor httpContextAccessor)
         {
             _repository = repository;
             _userRepository = userRepository;
+            _shiftDateRepository = shiftDateRepository;
             _logger = logger;
             _httpContextAccessor = httpContextAccessor;
         }
@@ -120,6 +124,134 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 return ApiResponse<UserMonthlyNightQuotaDtoGet>.Fail("کاربر یافت نشد.");
             }
 
+            if (!user.DepartmentId.HasValue)
+            {
+                return ApiResponse<UserMonthlyNightQuotaDtoGet>.Fail("کاربر به دپارتمانی متصل نیست.");
+            }
+
+            // حذف سهمیه نیاز به بررسی ظرفیت ندارد
+            if (night.HasValue || holiday.HasValue)
+            {
+                var capacityError = await ValidateDepartmentMonthCapacityAsync(
+                    user.DepartmentId.Value,
+                    dto.PersianYear,
+                    dto.PersianMonth,
+                    overrides: new Dictionary<int, (int? Night, int? Holiday)>
+                    {
+                        [dto.UserId] = (night, holiday)
+                    });
+                if (capacityError != null)
+                {
+                    return ApiResponse<UserMonthlyNightQuotaDtoGet>.Fail(capacityError);
+                }
+            }
+
+            return await PersistUpsertAsync(dto, user, night, holiday);
+        }
+
+        public async Task<ApiResponse<List<UserMonthlyNightQuotaDtoGet>>> UpsertBulkAsync(UserMonthlyNightQuotaBulkUpsertDto dto)
+        {
+            if (!IsValidMonth(dto.PersianYear, dto.PersianMonth, out var monthError))
+            {
+                return ApiResponse<List<UserMonthlyNightQuotaDtoGet>>.Fail(monthError);
+            }
+
+            if (dto.Items == null || dto.Items.Count == 0)
+            {
+                return ApiResponse<List<UserMonthlyNightQuotaDtoGet>>.Fail("لیست سهمیه‌ها خالی است.");
+            }
+
+            var (deptUsers, _) = await _userRepository.GetByFilterAsync(
+                new SimpleFilter<User>(u => u.DepartmentId == dto.DepartmentId && u.IsActive == true));
+            var deptUserById = deptUsers
+                .Where(u => u.Id.HasValue)
+                .ToDictionary(u => u.Id!.Value);
+
+            var invalidUser = dto.Items.FirstOrDefault(i => !deptUserById.ContainsKey(i.UserId));
+            if (invalidUser != null)
+            {
+                return ApiResponse<List<UserMonthlyNightQuotaDtoGet>>.Fail(
+                    $"کاربر {invalidUser.UserId} در دپارتمان {dto.DepartmentId} یافت نشد.");
+            }
+
+            var overrides = new Dictionary<int, (int? Night, int? Holiday)>();
+            foreach (var item in dto.Items)
+            {
+                if (!TryNormalizeCounts(
+                        item.ExactNightShiftCount,
+                        item.ExactHolidayWeekendNightShiftCount,
+                        out var night,
+                        out var holiday,
+                        out var countError))
+                {
+                    return ApiResponse<List<UserMonthlyNightQuotaDtoGet>>.Fail(
+                        $"کاربر {item.UserId}: {countError}");
+                }
+
+                overrides[item.UserId] = (night, holiday);
+            }
+
+            var capacityError = await ValidateDepartmentMonthCapacityAsync(
+                dto.DepartmentId,
+                dto.PersianYear,
+                dto.PersianMonth,
+                overrides);
+            if (capacityError != null)
+            {
+                return ApiResponse<List<UserMonthlyNightQuotaDtoGet>>.Fail(capacityError);
+            }
+
+            var results = new List<UserMonthlyNightQuotaDtoGet>();
+            foreach (var item in dto.Items)
+            {
+                var (night, holiday) = overrides[item.UserId];
+                var upsert = await PersistUpsertAsync(
+                    new UserMonthlyNightQuotaDtoAdd
+                    {
+                        UserId = item.UserId,
+                        PersianYear = dto.PersianYear,
+                        PersianMonth = dto.PersianMonth,
+                        ExactNightShiftCount = night,
+                        ExactHolidayWeekendNightShiftCount = holiday
+                    },
+                    deptUserById[item.UserId],
+                    night,
+                    holiday);
+
+                if (!upsert.IsSuccess)
+                {
+                    return ApiResponse<List<UserMonthlyNightQuotaDtoGet>>.Fail(
+                        $"خطا برای کاربر {item.UserId}: {upsert.Message}");
+                }
+
+                if (upsert.Data != null && (night.HasValue || holiday.HasValue))
+                {
+                    results.Add(upsert.Data);
+                }
+            }
+
+            return ApiResponse<List<UserMonthlyNightQuotaDtoGet>>.Success(results, "سهمیه‌های شب ماهانه ذخیره شدند.");
+        }
+
+        public async Task<ApiResponse<string>> DeleteQuotaAsync(int id)
+        {
+            var entity = await _repository.GetByIdAsync(id);
+            if (entity == null)
+            {
+                return ApiResponse<string>.Fail("سهمیه شب ماهانه یافت نشد.");
+            }
+
+            _repository.Delete(entity);
+            await _repository.SaveAsync();
+            return ApiResponse<string>.Success("حذف شد.", "سهمیه شب ماهانه حذف شد.");
+        }
+
+        private async Task<ApiResponse<UserMonthlyNightQuotaDtoGet>> PersistUpsertAsync(
+            UserMonthlyNightQuotaDtoAdd dto,
+            User user,
+            int? night,
+            int? holiday)
+        {
             var (existing, _) = await _repository.GetByFilterAsync(
                 new SimpleFilter<UserMonthlyNightQuota>(q =>
                     q.UserId == dto.UserId &&
@@ -181,67 +313,141 @@ namespace ShiftYar.Application.Features.UserModel.Services
             return ApiResponse<UserMonthlyNightQuotaDtoGet>.Success(MapToDto(entity), "سهمیه شب ماهانه ذخیره شد.");
         }
 
-        public async Task<ApiResponse<List<UserMonthlyNightQuotaDtoGet>>> UpsertBulkAsync(UserMonthlyNightQuotaBulkUpsertDto dto)
+        /// <summary>
+        /// مجموع سهمیه‌های دپارتمان در ماه (با اعمال overrides) نباید از ظرفیت تقویم بیشتر باشد.
+        /// </summary>
+        private async Task<string?> ValidateDepartmentMonthCapacityAsync(
+            int departmentId,
+            int persianYear,
+            int persianMonth,
+            IReadOnlyDictionary<int, (int? Night, int? Holiday)> overrides)
         {
-            if (!IsValidMonth(dto.PersianYear, dto.PersianMonth, out var monthError))
+            var capacity = await TryGetMonthNightCapacityAsync(persianYear, persianMonth);
+            if (capacity.Error != null)
             {
-                return ApiResponse<List<UserMonthlyNightQuotaDtoGet>>.Fail(monthError);
-            }
-
-            if (dto.Items == null || dto.Items.Count == 0)
-            {
-                return ApiResponse<List<UserMonthlyNightQuotaDtoGet>>.Fail("لیست سهمیه‌ها خالی است.");
+                return capacity.Error;
             }
 
             var (deptUsers, _) = await _userRepository.GetByFilterAsync(
-                new SimpleFilter<User>(u => u.DepartmentId == dto.DepartmentId && u.IsActive == true));
+                new SimpleFilter<User>(u => u.DepartmentId == departmentId && u.IsActive == true));
             var deptUserIds = deptUsers.Where(u => u.Id.HasValue).Select(u => u.Id!.Value).ToHashSet();
-
-            var invalidUser = dto.Items.FirstOrDefault(i => !deptUserIds.Contains(i.UserId));
-            if (invalidUser != null)
+            if (deptUserIds.Count == 0)
             {
-                return ApiResponse<List<UserMonthlyNightQuotaDtoGet>>.Fail(
-                    $"کاربر {invalidUser.UserId} در دپارتمان {dto.DepartmentId} یافت نشد.");
+                return "کاربر فعالی در این دپارتمان یافت نشد.";
             }
 
-            var results = new List<UserMonthlyNightQuotaDtoGet>();
-            foreach (var item in dto.Items)
-            {
-                var upsert = await UpsertQuotaAsync(new UserMonthlyNightQuotaDtoAdd
-                {
-                    UserId = item.UserId,
-                    PersianYear = dto.PersianYear,
-                    PersianMonth = dto.PersianMonth,
-                    ExactNightShiftCount = item.ExactNightShiftCount,
-                    ExactHolidayWeekendNightShiftCount = item.ExactHolidayWeekendNightShiftCount
-                });
+            var (existingQuotas, _) = await _repository.GetByFilterAsync(
+                new SimpleFilter<UserMonthlyNightQuota>(q =>
+                    q.PersianYear == persianYear &&
+                    q.PersianMonth == persianMonth &&
+                    deptUserIds.Contains(q.UserId)));
 
-                if (!upsert.IsSuccess)
+            var projectedNight = new Dictionary<int, int>();
+            var projectedHoliday = new Dictionary<int, int>();
+
+            foreach (var q in existingQuotas)
+            {
+                if (q.ExactNightShiftCount.HasValue)
                 {
-                    return ApiResponse<List<UserMonthlyNightQuotaDtoGet>>.Fail(
-                        $"خطا برای کاربر {item.UserId}: {upsert.Message}");
+                    projectedNight[q.UserId] = q.ExactNightShiftCount.Value;
                 }
 
-                if (upsert.Data != null && (item.ExactNightShiftCount.HasValue || item.ExactHolidayWeekendNightShiftCount.HasValue))
+                if (q.ExactHolidayWeekendNightShiftCount.HasValue)
                 {
-                    results.Add(upsert.Data);
+                    projectedHoliday[q.UserId] = q.ExactHolidayWeekendNightShiftCount.Value;
                 }
             }
 
-            return ApiResponse<List<UserMonthlyNightQuotaDtoGet>>.Success(results, "سهمیه‌های شب ماهانه ذخیره شدند.");
+            foreach (var (userId, values) in overrides)
+            {
+                if (!deptUserIds.Contains(userId))
+                {
+                    continue;
+                }
+
+                if (values.Night.HasValue)
+                {
+                    projectedNight[userId] = values.Night.Value;
+                }
+                else
+                {
+                    projectedNight.Remove(userId);
+                }
+
+                if (values.Holiday.HasValue)
+                {
+                    projectedHoliday[userId] = values.Holiday.Value;
+                }
+                else
+                {
+                    projectedHoliday.Remove(userId);
+                }
+            }
+
+            var totalNightQuota = projectedNight.Values.Sum();
+            var totalHolidayQuota = projectedHoliday.Values.Sum();
+
+            if (totalNightQuota > capacity.NightDays)
+            {
+                return
+                    $"مجموع سهمیه شیفت شب کاربران ({totalNightQuota}) از تعداد شب‌های ماه {persianYear}/{persianMonth:00} " +
+                    $"({capacity.NightDays} شب بر اساس ShiftDates) بیشتر است. لطفاً مقادیر را کاهش دهید.";
+            }
+
+            if (totalHolidayQuota > capacity.HolidayWeekendNightDays)
+            {
+                return
+                    $"مجموع سهمیه شب تعطیل/آخرهفته کاربران ({totalHolidayQuota}) از تعداد شب‌های تعطیل و آخر هفته " +
+                    $"ماه {persianYear}/{persianMonth:00} ({capacity.HolidayWeekendNightDays} شب بر اساس ShiftDates) بیشتر است. " +
+                    "لطفاً مقادیر را کاهش دهید.";
+            }
+
+            return null;
         }
 
-        public async Task<ApiResponse<string>> DeleteQuotaAsync(int id)
+        private async Task<(int NightDays, int HolidayWeekendNightDays, string? Error)> TryGetMonthNightCapacityAsync(
+            int persianYear,
+            int persianMonth)
         {
-            var entity = await _repository.GetByIdAsync(id);
-            if (entity == null)
+            var (monthStart, monthEnd, daysInMonth) = PersianMonthNightCalendar.GetMonthBounds(persianYear, persianMonth);
+            // یک روز بعد برای تشخیص «شب قبل از تعطیل» در مرز ماه
+            var loadEnd = monthEnd.AddDays(1);
+
+            var (shiftDates, _) = await _shiftDateRepository.GetByFilterAsync(
+                new SimpleFilter<ShiftDate>(d =>
+                    d.Date != null &&
+                    d.Date >= monthStart &&
+                    d.Date <= loadEnd));
+
+            var monthDates = shiftDates
+                .Where(d => d.Date.HasValue && d.Date.Value.Date >= monthStart && d.Date.Value.Date <= monthEnd)
+                .Select(d => d.Date!.Value.Date)
+                .Distinct()
+                .ToList();
+
+            if (monthDates.Count == 0)
             {
-                return ApiResponse<string>.Fail("سهمیه شب ماهانه یافت نشد.");
+                return (0, 0,
+                    $"در ShiftDates برای ماه شمسی {persianYear}/{persianMonth:00} هیچ روزی ثبت نشده است. " +
+                    "ابتدا تقویم را تکمیل کنید.");
             }
 
-            _repository.Delete(entity);
-            await _repository.SaveAsync();
-            return ApiResponse<string>.Success("حذف شد.", "سهمیه شب ماهانه حذف شد.");
+            if (monthDates.Count < daysInMonth)
+            {
+                return (0, 0,
+                    $"تقویم ShiftDates برای ماه {persianYear}/{persianMonth:00} ناقص است " +
+                    $"({monthDates.Count} از {daysInMonth} روز). ابتدا تقویم را تکمیل کنید.");
+            }
+
+            var holidayDates = shiftDates
+                .Where(d => d.IsHoliday == true && d.Date.HasValue)
+                .Select(d => d.Date!.Value.Date)
+                .ToHashSet();
+
+            var (nightDays, holidayWeekendNights) =
+                PersianMonthNightCalendar.CountNightCapacities(monthDates, holidayDates);
+
+            return (nightDays, holidayWeekendNights, null);
         }
 
         private static UserMonthlyNightQuotaDtoGet MapToDto(UserMonthlyNightQuota entity) => new()
