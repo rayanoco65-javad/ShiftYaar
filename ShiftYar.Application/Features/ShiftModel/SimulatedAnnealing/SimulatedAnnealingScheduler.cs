@@ -228,6 +228,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ExactNightQuotaGuard.Enforce(solution, _constraints);
             ShiftCoverageGuard.Enforce(solution, _constraints);
             ProductivityHourFillGuard.Enforce(solution, _constraints);
+            HolidayMorningEveningFairnessGuard.Enforce(solution, _constraints);
             ShiftCoverageGuard.Enforce(solution, _constraints);
 
             // محاسبه امتیاز راه‌حل
@@ -304,6 +305,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             score += CalculateFairNightShiftBalancePenalty(solution) * _constraints.SoftWeights.FairNightShiftBalanceWeight;
             score += CalculateMorningEveningBalancePenalty(solution) * _constraints.SoftWeights.MorningEveningBalanceWeight;
             score += CalculateFairMorningEveningPeerPenalty(solution) * _constraints.SoftWeights.FairMorningEveningPeerWeight;
+            score += CalculateFairHolidayMorningEveningPeerPenalty(solution) * _constraints.SoftWeights.FairHolidayMorningEveningPeerWeight;
             score += CalculateWorkdaySpreadPenalty(solution) * _constraints.SoftWeights.WorkdaySpreadWeight;
             score += CalculateExactNightQuotaPenalty(solution) * _constraints.SoftWeights.ExactNightQuotaWeight;
             score += CalculateExtraShiftRotationPenalty(solution) * _constraints.SoftWeights.ExtraShiftRotationWeight;
@@ -507,6 +509,49 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     .ToList();
                 var avg = counts.Average();
                 penalty += counts.Sum(c => Math.Abs(c - avg)) * 3.0;
+            }
+
+            return penalty;
+        }
+
+        /// <summary>
+        /// تعادل صبح/عصر فقط روی روزهای تعطیل بین کاربران گردشی هم‌تخصص.
+        /// </summary>
+        private double CalculateFairHolidayMorningEveningPeerPenalty(ShiftSolution solution)
+        {
+            double penalty = 0;
+            foreach (var specialtyGroup in _constraints.UserConstraints
+                         .Where(u => u.IsActive && u.ShiftType != ShiftTypes.FixedShift)
+                         .GroupBy(u => u.SpecialtyId))
+            {
+                foreach (var label in new[] { ShiftLabel.Morning, ShiftLabel.Evening })
+                {
+                    var eligible = specialtyGroup
+                        .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, label))
+                        .ToList();
+                    if (eligible.Count < 2)
+                    {
+                        continue;
+                    }
+
+                    var counts = eligible
+                        .Select(u => HolidayMorningEveningFairnessGuard.CountHolidayLabel(
+                            solution, _constraints, u.UserId, label))
+                        .ToList();
+                    if (counts.All(c => c == 0))
+                    {
+                        continue;
+                    }
+
+                    var avg = counts.Average();
+                    // وزن بالاتر از peer عادی تا تمرکز تعطیلات جریمه شود
+                    penalty += counts.Sum(c => Math.Abs(c - avg)) * 6.0;
+                    var spread = counts.Max() - counts.Min();
+                    if (spread >= 2)
+                    {
+                        penalty += spread * spread * 4.0;
+                    }
+                }
             }
 
             return penalty;
@@ -1212,6 +1257,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftCoverageGuard.Enforce(solution, _constraints);
             ProductivityHourFillGuard.Enforce(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
+            HolidayMorningEveningFairnessGuard.Enforce(solution, _constraints);
             ShiftCoverageGuard.Enforce(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             solution.Score = CalculateSolutionScore(solution);
@@ -1636,7 +1682,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             return users
-                .OrderBy(u => CountUserLabelShifts(solution, u.UserId, shiftLabel))
+                .OrderBy(u => isHoliday
+                    ? HolidayMorningEveningFairnessGuard.CountHolidayLabel(solution, _constraints, u.UserId, shiftLabel)
+                    : CountUserLabelShifts(solution, u.UserId, shiftLabel))
+                .ThenBy(u => CountUserLabelShifts(solution, u.UserId, shiftLabel))
                 .ThenBy(u => CountConsecutiveWorkdaysEndingAt(solution, u.UserId, date.Date.AddDays(-1)))
                 .ThenBy(u => CountWorkdaysInWeek(solution, u.UserId, date))
                 .ThenBy(u => CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)))
@@ -2132,12 +2181,18 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             var ranked = eligible
-                .Select(u => (User: u, Count: CountUserLabelShifts(solution, u.UserId, label)))
-                .OrderByDescending(x => x.Count)
+                .Select(u => (
+                    User: u,
+                    Count: CountUserLabelShifts(solution, u.UserId, label),
+                    HolidayCount: HolidayMorningEveningFairnessGuard.CountHolidayLabel(
+                        solution, _constraints, u.UserId, label)))
+                .OrderByDescending(x => x.HolidayCount)
+                .ThenByDescending(x => x.Count)
                 .ToList();
             var donor = ranked.First().User;
             var receiver = ranked.Last().User;
-            if (ranked.First().Count - ranked.Last().Count < 2)
+            if (ranked.First().HolidayCount - ranked.Last().HolidayCount < 2 &&
+                ranked.First().Count - ranked.Last().Count < 2)
             {
                 // اگر تعداد برچسب نزدیک است، کاربری با هفتهٔ پرتراکم را سبک کن
                 donor = eligible
@@ -2151,10 +2206,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     .FirstOrDefault() ?? receiver;
             }
 
+            var preferHolidayMove = ranked.First().HolidayCount - ranked.Last().HolidayCount >= 2;
             var donorMe = solution.GetUserAllAssignments(donor.UserId)
                 .Where(a => !a.IsOnCall && (a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening))
                 .Where(a => !IsProtectedAssignment(solution, a))
-                .OrderByDescending(a => a.ShiftLabel == label ? 1 : 0)
+                .OrderByDescending(a => preferHolidayMove && _constraints.IsHoliday(a.Date) ? 2 : 0)
+                .ThenByDescending(a => a.ShiftLabel == label ? 1 : 0)
                 .ThenByDescending(a => CountConsecutiveWorkdaysEndingAt(solution, donor.UserId, a.Date.Date))
                 .ToList();
 

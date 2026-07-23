@@ -105,6 +105,51 @@ public class MorningEveningFairnessTests
         }
     }
 
+    [Fact]
+    public void HolidayMorningEveningFairnessGuard_SpreadsHolidayMeAcrossPeers()
+    {
+        var start = new DateTime(2026, 7, 1); // Wed
+        // جمعه‌ها: 3, 10, 17, 24
+        var holidays = new HashSet<DateTime>
+        {
+            new(2026, 7, 3),
+            new(2026, 7, 10),
+            new(2026, 7, 17),
+            new(2026, 7, 24)
+        };
+
+        var users = Enumerable.Range(1, 4).Select(MakeUser).ToList();
+        var constraints = BuildConstraints(start, days: 28, users);
+        constraints.HolidayDates = holidays;
+        constraints.SoftWeights.FairHolidayMorningEveningPeerWeight = 10;
+
+        // همه تعطیل‌ها روی کاربر ۱ صبح پر شده
+        var solution = new ShiftSolution();
+        foreach (var day in holidays)
+        {
+            solution.AddAssignment(1, 1, day, ShiftLabel.Morning, false);
+            solution.AddAssignment(2, 2, day, ShiftLabel.Evening, false);
+            // شب را به دیگران بده تا ME جابه‌جا شود
+            solution.AddAssignment(3, 3, day, ShiftLabel.Night, false);
+        }
+
+        HolidayMorningEveningFairnessGuard.Enforce(solution, constraints);
+
+        var holidayMornings = users
+            .Select(u => HolidayMorningEveningFairnessGuard.CountHolidayLabel(
+                solution, constraints, u.UserId, ShiftLabel.Morning))
+            .ToList();
+        var holidayEvenings = users
+            .Select(u => HolidayMorningEveningFairnessGuard.CountHolidayLabel(
+                solution, constraints, u.UserId, ShiftLabel.Evening))
+            .ToList();
+
+        Assert.True(holidayMornings.Max() - holidayMornings.Min() <= 2,
+            $"Holiday morning spread too large: [{string.Join(",", holidayMornings)}]");
+        Assert.True(holidayEvenings.Max() - holidayEvenings.Min() <= 2,
+            $"Holiday evening spread too large: [{string.Join(",", holidayEvenings)}]");
+    }
+
     private static UserConstraint MakeUser(int id) => new()
     {
         UserId = id,

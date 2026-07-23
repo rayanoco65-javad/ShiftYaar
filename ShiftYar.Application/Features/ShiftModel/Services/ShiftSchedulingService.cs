@@ -23,6 +23,7 @@ using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.Features.ShiftModel.Filters;
 using ShiftYar.Application.Features.ShiftModel.Jobs;
 using ShiftYar.Application.Features.UserModel.Filters;
+using ShiftYar.Application.Features.UserModel.Services;
 using AutoMapper;
 using Microsoft.AspNetCore.Http;
 using System.Security.Claims;
@@ -218,6 +219,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     Algorithm = request.Algorithm,
                     AllowExtendedSolverTime = isBackgroundExecution
                 };
+
+                var scheduleGuardError = await GetMonthlyScheduleCreationBlockerAsync(
+                    request.DepartmentId,
+                    internalRequest.StartDate,
+                    internalRequest.EndDate);
+                if (scheduleGuardError != null)
+                {
+                    return ApiResponse<object>.Fail(scheduleGuardError);
+                }
 
                 // اعتبارسنجی اولیه
                 var validationResult = await ValidateConstraintsAsync(request);
@@ -566,6 +576,167 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 _logger.LogError(ex, "Error occurred while saving optimized schedule");
                 return ApiResponse<string>.Fail($"Error: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// حذف تمام انتساب‌های شیفت دپارتمان در یک ماه شمسی — فقط قبل از شروع آن ماه.
+        /// </summary>
+        public async Task<ApiResponse<object>> DeleteMonthlyScheduleAsync(DeleteMonthlyScheduleRequestDto request)
+        {
+            try
+            {
+                if (request.PersianYear < 1300 || request.PersianYear > 1500 ||
+                    request.PersianMonth < 1 || request.PersianMonth > 12)
+                {
+                    return ApiResponse<object>.Fail("سال یا ماه شمسی نامعتبر است.");
+                }
+
+                var monthNotStartedError = GetPersianMonthNotStartedError(
+                    request.PersianYear,
+                    request.PersianMonth,
+                    actionDescription: "حذف شیفت‌بندی");
+                if (monthNotStartedError != null)
+                {
+                    return ApiResponse<object>.Fail(monthNotStartedError);
+                }
+
+                var (monthStart, monthEnd, _) = PersianMonthNightCalendar.GetMonthBounds(
+                    request.PersianYear, request.PersianMonth);
+
+                var department = await _departmentRepository.GetByIdAsync(request.DepartmentId);
+                if (department == null)
+                {
+                    return ApiResponse<object>.Fail("دپارتمان یافت نشد.");
+                }
+
+                var (assignments, total) = await _shiftAssignmentRepository.GetByFilterAsync(
+                    filter: new Application.Common.Filters.SimpleFilter<ShiftAssignment>(a =>
+                        a.ShiftDateId.HasValue &&
+                        a.ShiftDate != null &&
+                        a.ShiftDate.Date.HasValue &&
+                        a.ShiftDate.Date.Value.Date >= monthStart &&
+                        a.ShiftDate.Date.Value.Date <= monthEnd &&
+                        a.Shift != null &&
+                        a.Shift.DepartmentId == request.DepartmentId),
+                    includes: new[] { "ShiftDate", "Shift" });
+
+                if (assignments.Count == 0)
+                {
+                    return ApiResponse<object>.Success(new
+                    {
+                        deletedCount = 0,
+                        persianYear = request.PersianYear,
+                        persianMonth = request.PersianMonth,
+                        departmentId = request.DepartmentId
+                    }, $"برای ماه {request.PersianYear}/{request.PersianMonth:00} شیفت‌بندی ذخیره‌شده‌ای یافت نشد.");
+                }
+
+                foreach (var assignment in assignments)
+                {
+                    _shiftAssignmentRepository.Delete(assignment);
+                }
+
+                await _shiftAssignmentRepository.SaveAsync();
+
+                _logger.LogInformation(
+                    "Deleted {Count} assignment(s) for DepartmentId={DepartmentId} Persian {Year}/{Month}",
+                    assignments.Count, request.DepartmentId, request.PersianYear, request.PersianMonth);
+
+                return ApiResponse<object>.Success(new
+                {
+                    deletedCount = assignments.Count,
+                    totalMatched = total,
+                    persianYear = request.PersianYear,
+                    persianMonth = request.PersianMonth,
+                    departmentId = request.DepartmentId,
+                    monthStart = ToPersianDateString(monthStart),
+                    monthEnd = ToPersianDateString(monthEnd)
+                }, $"شیفت‌بندی ماه {request.PersianYear}/{request.PersianMonth:00} با موفقیت حذف شد ({assignments.Count} انتساب).");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Error deleting monthly schedule for DepartmentId={DepartmentId} {Year}/{Month}",
+                    request.DepartmentId, request.PersianYear, request.PersianMonth);
+                return ApiResponse<object>.Fail($"خطا در حذف شیفت‌بندی: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// قبل از Optimize-and-save: ماه نباید شروع شده باشد و نباید برنامه قبلی برای همان ماه وجود داشته باشد.
+        /// </summary>
+        public async Task<string?> GetMonthlyScheduleCreationBlockerAsync(
+            int departmentId,
+            DateTime rangeStart,
+            DateTime rangeEnd)
+        {
+            var pc = new PersianCalendar();
+            var startYear = pc.GetYear(rangeStart.Date);
+            var startMonth = pc.GetMonth(rangeStart.Date);
+            var endYear = pc.GetYear(rangeEnd.Date);
+            var endMonth = pc.GetMonth(rangeEnd.Date);
+
+            if (startYear != endYear || startMonth != endMonth)
+            {
+                return
+                    $"بازه شیفت‌بندی باید داخل یک ماه شمسی باشد. شروع: {startYear}/{startMonth:00}، پایان: {endYear}/{endMonth:00}.";
+            }
+
+            var monthNotStartedError = GetPersianMonthNotStartedError(
+                startYear,
+                startMonth,
+                actionDescription: "شیفت‌بندی کلی");
+            if (monthNotStartedError != null)
+            {
+                return monthNotStartedError;
+            }
+
+            var (monthStart, monthEnd, _) = PersianMonthNightCalendar.GetMonthBounds(startYear, startMonth);
+            var hasExisting = await DepartmentHasAssignmentsInRangeAsync(departmentId, monthStart, monthEnd);
+            if (hasExisting)
+            {
+                return
+                    $"برای ماه شمسی {startYear}/{startMonth:00} قبلاً شیفت‌بندی ذخیره شده است. " +
+                    "ابتدا با اکشن حذف شیفت‌بندی ماهانه، برنامه قبلی را حذف کنید و سپس دوباره اقدام کنید.";
+            }
+
+            return null;
+        }
+
+        private static string? GetPersianMonthNotStartedError(
+            int persianYear,
+            int persianMonth,
+            string actionDescription)
+        {
+            var (monthStart, _, _) = PersianMonthNightCalendar.GetMonthBounds(persianYear, persianMonth);
+            var today = DateTime.Today;
+            if (today >= monthStart.Date)
+            {
+                return
+                    $"ماه شمسی {persianYear}/{persianMonth:00} از تاریخ {DateConverter.ConvertToPersianDate(monthStart)} آغاز شده است " +
+                    $"و امکان {actionDescription} برای این ماه وجود ندارد.";
+            }
+
+            return null;
+        }
+
+        private async Task<bool> DepartmentHasAssignmentsInRangeAsync(
+            int departmentId,
+            DateTime monthStart,
+            DateTime monthEnd)
+        {
+            var (assignments, _) = await _shiftAssignmentRepository.GetByFilterAsync(
+                filter: new Application.Common.Filters.SimpleFilter<ShiftAssignment>(a =>
+                    a.ShiftDateId.HasValue &&
+                    a.ShiftDate != null &&
+                    a.ShiftDate.Date.HasValue &&
+                    a.ShiftDate.Date.Value.Date >= monthStart.Date &&
+                    a.ShiftDate.Date.Value.Date <= monthEnd.Date &&
+                    a.Shift != null &&
+                    a.Shift.DepartmentId == departmentId),
+                includes: new[] { "ShiftDate", "Shift" });
+
+            return assignments.Count > 0;
         }
 
 
@@ -1214,6 +1385,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     constraints.SoftWeights.FairNightShiftBalanceWeight = 2.5;
                     constraints.SoftWeights.MorningEveningBalanceWeight = 2.5;
                     constraints.SoftWeights.FairMorningEveningPeerWeight = 2.5;
+                    constraints.SoftWeights.FairHolidayMorningEveningPeerWeight = 8.0;
                     constraints.SoftWeights.WorkdaySpreadWeight = 1.5;
                     constraints.SoftWeights.ProductivityShortfallWeight = 5.0;
                     constraints.SoftWeights.NightShiftDistributionBySeniorityWeight =
@@ -1906,6 +2078,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     // تعادل ساعت مؤثر و شیفت شب (پیش‌فرض قوی؛ قابل‌جایگزینی با وزن شب از تنظیمات)
                     constraints.SoftWeights.FairWorkedHoursBalanceWeight = Math.Max(4.0, constraints.SoftWeights.FairWorkedHoursBalanceWeight);
                     constraints.SoftWeights.FairMorningEveningPeerWeight = Math.Max(2.5, constraints.SoftWeights.FairMorningEveningPeerWeight);
+                    constraints.SoftWeights.FairHolidayMorningEveningPeerWeight = Math.Max(8.0, constraints.SoftWeights.FairHolidayMorningEveningPeerWeight);
                     constraints.SoftWeights.WorkdaySpreadWeight = Math.Max(1.5, constraints.SoftWeights.WorkdaySpreadWeight);
                     constraints.SoftWeights.FairNightShiftBalanceWeight = Math.Max(2.0, constraints.SoftWeights.FairNightShiftBalanceWeight);
                     constraints.SoftWeights.ProductivityShortfallWeight = Math.Max(5.0, constraints.SoftWeights.ProductivityShortfallWeight);

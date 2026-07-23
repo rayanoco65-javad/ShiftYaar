@@ -123,8 +123,15 @@ public static class ShiftCoverageGuard
         else
         {
             // تعادل peer برای صبح/عصر — فقط به‌عنوان اولویت نرم داخل پوشش اجباری
-            score += solution.GetUserAllAssignments(user.UserId)
-                .Count(a => a.ShiftLabel == label && !a.IsOnCall) * 10;
+            var totalLabel = solution.GetUserAllAssignments(user.UserId)
+                .Count(a => a.ShiftLabel == label && !a.IsOnCall);
+            score += totalLabel * 10;
+
+            if (constraints.IsHoliday(date))
+            {
+                score += HolidayMorningEveningFairnessGuard.CountHolidayLabel(
+                    solution, constraints, user.UserId, label) * 40;
+            }
 
             var workDates = solution.GetUserAllAssignments(user.UserId)
                 .Where(a => !a.IsOnCall)

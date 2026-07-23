@@ -76,6 +76,46 @@
 - `HardshipPercent: decimal?`
 - `OvertimeConsent: bool?`
 
+## ۱.۵ حذف و ایجاد شیفت‌بندی ماهانه (`ShiftScheduling`)
+
+### قواعد کسب‌وکار
+
+1. **شیفت‌بندی کلی ماه** (`optimize-and-save` / `optimize-and-save-async`) فقط وقتی مجاز است که:
+   - بازه `startDate`/`endDate` داخل **یک** ماه شمسی باشد
+   - آن ماه شمسی **هنوز شروع نشده** باشد (`امروز < اولین روز ماه`)
+   - برای آن دپارتمان در آن ماه **هیچ انتساب ذخیره‌شده‌ای** وجود نداشته باشد
+2. اگر برنامه قبلی وجود داشته باشد → خطا با پیام: ابتدا با اکشن حذف، شیفت‌بندی قبلی را پاک کنید.
+3. اگر ماه شروع شده باشد → خطا: امکان شیفت‌بندی کلی / حذف برای این ماه وجود ندارد.
+4. **حذف ماهانه** فقط تا قبل از شروع همان ماه شمسی مجاز است.
+
+### اکشن حذف
+
+| اکشن | روش | توضیح |
+|------|------|--------|
+| `DeleteMonthlySchedule` | POST `delete-monthly-schedule` | حذف همه انتساب‌های شیفت دپارتمان در ماه شمسی |
+
+بدنه:
+
+```json
+{
+  "departmentId": 1,
+  "persianYear": 1405,
+  "persianMonth": 5
+}
+```
+
+پاسخ موفق نمونه: `deletedCount` تعداد انتساب‌های حذف‌شده.
+
+### اقدام لازم در فرانت
+
+- دکمه «حذف شیفت‌بندی ماه» با تأیید کاربر؛ در صورت شروع شدن ماه، دکمه را غیرفعال کنید.
+- قبل از `optimize-and-save` اگر برنامه قبلی هست، دکمه Optimize را قفل کنید و کاربر را به حذف هدایت کنید.
+- پیام `message` خطای API را عیناً به سوپروایزر نشان دهید.
+
+### توزیع صبح/عصر در روزهای تعطیل
+
+الگوریتم علاوه بر تعادل ماهانهٔ صبح/عصر، **تعداد شیفت صبح و عصر روی روزهای تعطیل** را هم بین پرسنل گردشی هم‌تخصص پخش می‌کند (`HolidayMorningEveningFairnessGuard` + وزن نرم `FairHolidayMorningEveningPeerWeight`). بعد از Optimize مجدد، انتظار این است که تعطیلات روی چند نفر خاص متمرکز نشوند.
+
 ## 2. تغییرات مربوط به نیازمندی تخصص شیفت
 
 برای اینکه تعداد نیروی مورد نیاز در روزهای تعطیل با روزهای عادی متفاوت باشد، فیلدهای جدیدی به `ShiftRequiredSpecialty` اضافه شده‌اند.
@@ -307,6 +347,8 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - اضافه کردن `OvertimeConsent` به فرم و مدل کاربر
 - **حذف** سهمیه شب از فرم کاربر؛ ساخت UI ماهانه با `UserMonthlyNightQuota` APIها
 - قبل از Optimize، تنظیم سهمیه شب برای ماه شمسی موردنظر
+- دکمه حذف شیفت‌بندی ماه (`DeleteMonthlySchedule`) + قفل Optimize وقتی برنامه قبلی هست یا ماه شروع شده
+- توزیع عادلانه صبح/عصر **روزهای تعطیل** (نه فقط تعادل ماهانه M/E)
 - اضافه کردن فیلدهای `Holiday*` به فرم `ShiftRequiredSpecialty`
 - تفکیک UI روز عادی و روز تعطیل در نیازمندی تخصص
 - نمایش آمار بهره‌وری در خروجی شیفت‌بندی
@@ -322,6 +364,8 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - `ShiftYar.Application/DTOs/UserModel/UserMonthlyNightQuotaBulkUpsertDto.cs`
 - `ShiftYar.Api/Controllers/UserModel/UserMonthlyNightQuotaController.cs`
 - `ShiftYar.Domain/Entities/UserModel/UserMonthlyNightQuota.cs`
+- `ShiftYar.Api/Controllers/ShiftModel/ShiftSchedulingController.cs`
+- `ShiftYar.Application/DTOs/ShiftModel/ShiftSchedulingModel/DeleteMonthlyScheduleRequestDto.cs`
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftRequiredSpecialtyModel/ShiftRequiredSpecialtyDtoAdd.cs`
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftRequiredSpecialtyModel/ShiftRequiredSpecialtyDtoGet.cs`
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftSchedulingModel/ShiftSchedulingResultDto.cs`

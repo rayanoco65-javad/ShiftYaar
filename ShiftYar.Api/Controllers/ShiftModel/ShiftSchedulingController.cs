@@ -215,6 +215,29 @@ namespace ShiftYar.Api.Controllers.ShiftModel
             }
         }
 
+        /// <summary>
+        /// حذف شیفت‌بندی ذخیره‌شده یک دپارتمان برای ماه شمسی مشخص.
+        /// فقط تا قبل از شروع آن ماه مجاز است.
+        /// </summary>
+        [HttpPost("delete-monthly-schedule")]
+        public async Task<IActionResult> DeleteMonthlySchedule([FromBody] DeleteMonthlyScheduleRequestDto request)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(ApiResponse<object>.Fail("Invalid request data"));
+                }
+
+                var result = await _shiftSchedulingService.DeleteMonthlyScheduleAsync(request);
+                return result.IsSuccess ? Ok(result) : BadRequest(result);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, ApiResponse<object>.Fail($"Internal server error: {ex.Message}"));
+            }
+        }
+
         /// شروع فرآیند بهینه‌سازی و ذخیره به‌صورت پس‌زمینه.
         /// بلافاصله یک jobId برمی‌گرداند و حل سنگین خارج از درخواست HTTP اجرا می‌شود (بدون 502).
         [HttpPost("optimize-and-save-async")]
@@ -223,6 +246,22 @@ namespace ShiftYar.Api.Controllers.ShiftModel
             if (!ModelState.IsValid)
             {
                 return BadRequest(ApiResponse<object>.Fail("Invalid request data"));
+            }
+
+            try
+            {
+                var start = DateConverter.ConvertToGregorianDate(request.StartDate).Date;
+                var end = DateConverter.ConvertToGregorianDate(request.EndDate).Date;
+                var blocker = await _shiftSchedulingService.GetMonthlyScheduleCreationBlockerAsync(
+                    request.DepartmentId, start, end);
+                if (blocker != null)
+                {
+                    return BadRequest(ApiResponse<object>.Fail(blocker));
+                }
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ApiResponse<object>.Fail($"تاریخ نامعتبر است: {ex.Message}"));
             }
 
             var job = await _schedulingJobStore.CreateAsync(request);

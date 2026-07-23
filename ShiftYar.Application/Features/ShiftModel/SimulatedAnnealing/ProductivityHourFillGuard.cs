@@ -243,7 +243,7 @@ public static class ProductivityHourFillGuard
     private static int CountLabelOnDate(ShiftSolution solution, DateTime date, ShiftLabel label) =>
         solution.Assignments.Values.Count(a => a.Date.Date == date.Date && a.ShiftLabel == label && !a.IsOnCall);
 
-    private static void BalanceMorningEveningPeers(
+        private static void BalanceMorningEveningPeers(
         ShiftSolution solution,
         ShiftConstraints constraints,
         IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
@@ -257,8 +257,11 @@ public static class ProductivityHourFillGuard
                     .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, label))
                     .Select(u => (
                         User: u,
-                        Count: solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == label && !a.IsOnCall)))
-                    .OrderByDescending(x => x.Count)
+                        Count: solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == label && !a.IsOnCall),
+                        HolidayCount: HolidayMorningEveningFairnessGuard.CountHolidayLabel(
+                            solution, constraints, u.UserId, label)))
+                    .OrderByDescending(x => x.HolidayCount)
+                    .ThenByDescending(x => x.Count)
                     .ToList();
                 if (ranked.Count < 2)
                 {
@@ -267,15 +270,18 @@ public static class ProductivityHourFillGuard
 
                 var donor = ranked.First();
                 var receiver = ranked.Last();
-                if (donor.Count - receiver.Count < 2)
+                var holidayGap = donor.HolidayCount - receiver.HolidayCount;
+                if (holidayGap < 2 && donor.Count - receiver.Count < 2)
                 {
                     break;
                 }
 
+                var preferHoliday = holidayGap >= 2;
                 var moved = false;
                 foreach (var assignment in solution.GetUserAllAssignments(donor.User.UserId)
                              .Where(a => a.ShiftLabel == label && !a.IsOnCall)
                              .Where(a => !IsProtectedAssignment(constraints, a))
+                             .Where(a => !preferHoliday || constraints.IsHoliday(a.Date))
                              .OrderByDescending(a => CountConsecutiveEnding(solution, donor.User.UserId, a.Date.Date)))
                 {
                     if (!CanUserTakeShift(solution, constraints, lookup, receiver.User, assignment, ignoreShiftId: null))
