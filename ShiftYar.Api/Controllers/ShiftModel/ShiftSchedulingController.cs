@@ -218,24 +218,24 @@ namespace ShiftYar.Api.Controllers.ShiftModel
         /// <summary>
         /// حذف شیفت‌بندی ذخیره‌شده یک دپارتمان برای ماه شمسی مشخص.
         /// فقط تا قبل از شروع آن ماه مجاز است.
+        /// مسیر: POST /DeleteMonthlySchedule
         /// </summary>
-        [HttpPost("delete-monthly-schedule")]
-        public async Task<IActionResult> DeleteMonthlySchedule([FromBody] DeleteMonthlyScheduleRequestDto request)
+        [HttpPost]
+        public async Task<ActionResult<ApiResponse<object>>> DeleteMonthlySchedule(
+            [FromBody] DeleteMonthlyScheduleRequestDto request)
         {
-            try
+            if (!ModelState.IsValid)
             {
-                if (!ModelState.IsValid)
-                {
-                    return BadRequest(ApiResponse<object>.Fail("Invalid request data"));
-                }
+                return BadRequest(ApiResponse<object>.Fail("داده‌های درخواست نامعتبر است."));
+            }
 
-                var result = await _shiftSchedulingService.DeleteMonthlyScheduleAsync(request);
-                return result.IsSuccess ? Ok(result) : BadRequest(result);
-            }
-            catch (Exception ex)
+            var result = await _shiftSchedulingService.DeleteMonthlyScheduleAsync(request);
+            if (!result.IsSuccess)
             {
-                return StatusCode(500, ApiResponse<object>.Fail($"Internal server error: {ex.Message}"));
+                return BadRequest(result);
             }
+
+            return Ok(result);
         }
 
         /// شروع فرآیند بهینه‌سازی و ذخیره به‌صورت پس‌زمینه.

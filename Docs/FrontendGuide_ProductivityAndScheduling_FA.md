@@ -92,7 +92,7 @@
 
 | اکشن | روش | توضیح |
 |------|------|--------|
-| `DeleteMonthlySchedule` | POST `delete-monthly-schedule` | حذف همه انتساب‌های شیفت دپارتمان در ماه شمسی |
+| `DeleteMonthlySchedule` | `POST /DeleteMonthlySchedule` | حذف همه انتساب‌های شیفت دپارتمان در ماه شمسی |
 
 بدنه:
 
