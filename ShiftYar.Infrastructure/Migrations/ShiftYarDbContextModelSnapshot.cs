@@ -142,6 +142,12 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<bool?>("AllowCurrentMonthScheduling")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("AllowMonthlyRescheduleWithAutoDelete")
+                        .HasColumnType("bit");
+
                     b.Property<DateTime?>("CreateDate")
                         .HasColumnType("datetime2");
 

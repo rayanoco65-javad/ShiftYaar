@@ -66,6 +66,12 @@ namespace ShiftYar.Application.DTOs.DepartmentModel
         public int? NightShiftDistributionType { get; set; } // 0=شب‌دوست (سابقه بیشتر اولویت), 1=شب‌گریز (سابقه کمتر اولویت), 2=خنثی
         public double? NightShiftDistributionWeight { get; set; }
         public double? SeniorityDistributionSlope { get; set; }
+
+        /// <summary>امکان شیفت‌بندی ماه جاری (توسعه/تست)</summary>
+        public bool? AllowCurrentMonthScheduling { get; set; }
+
+        /// <summary>شیفت‌بندی مجدد ماهانه با حذف خودکار برنامه قبلی</summary>
+        public bool? AllowMonthlyRescheduleWithAutoDelete { get; set; }
     }
     public class DepartmentSchedulingSettingsDtoGet : DepartmentSchedulingSettingsDtoAdd
     {

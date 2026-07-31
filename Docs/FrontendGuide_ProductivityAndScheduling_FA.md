@@ -78,7 +78,7 @@
 
 ## ۱.۵ حذف و ایجاد شیفت‌بندی ماهانه (`ShiftScheduling`)
 
-### قواعد کسب‌وکار
+### قواعد کسب‌وکار (پیش‌فرض)
 
 1. **شیفت‌بندی کلی ماه** (`optimize-and-save` / `optimize-and-save-async`) فقط وقتی مجاز است که:
    - بازه `startDate`/`endDate` داخل **یک** ماه شمسی باشد
@@ -87,6 +87,17 @@
 2. اگر برنامه قبلی وجود داشته باشد → خطا با پیام: ابتدا با اکشن حذف، شیفت‌بندی قبلی را پاک کنید.
 3. اگر ماه شروع شده باشد → خطا: امکان شیفت‌بندی کلی / حذف برای این ماه وجود ندارد.
 4. **حذف ماهانه** فقط تا قبل از شروع همان ماه شمسی مجاز است.
+
+### فلگ‌های تنظیمات دپارتمان (`DepartmentSchedulingSettings`)
+
+این دو آیتم در تنظیمات زمان‌بندی دپارتمان قابل روشن/خاموش‌اند (پیش‌فرض: خاموش / `null` = غیرفعال):
+
+| فیلد API | عنوان UI پیشنهادی | رفتار |
+|----------|-------------------|--------|
+| `allowCurrentMonthScheduling` | امکان شیفت‌بندی ماه جاری | اگر فعال باشد، برای **ماه شمسی جاری** حتی پس از شروع ماه، Optimize و `DeleteMonthlySchedule` مجاز است. **فقط برای توسعه و تست** استفاده شود. ماه‌های گذشته همچنان مسدود می‌مانند. |
+| `allowMonthlyRescheduleWithAutoDelete` | امکان شیفت‌بندی مجدد ماهانه و حذف خودکار شیفت‌بندی قبلی | اگر فعال باشد و برنامهٔ قبلی برای همان ماه وجود داشته باشد، قبل از ذخیرهٔ برنامهٔ جدید، همه انتساب‌های آن ماه دپارتمان **خودکار حذف** و با برنامه جدید جایگزین می‌شوند (نیازی به فراخوانی دستی حذف نیست). |
+
+ترکیب پیشنهادی برای تست ماه جاری: هر دو فلگ را روشن کنید تا بتوانید ماه جاری را دوباره Optimize کنید و برنامه قبلی جایگزین شود.
 
 ### اکشن حذف
 
@@ -108,8 +119,9 @@
 
 ### اقدام لازم در فرانت
 
-- دکمه «حذف شیفت‌بندی ماه» با تأیید کاربر؛ در صورت شروع شدن ماه، دکمه را غیرفعال کنید.
-- قبل از `optimize-and-save` اگر برنامه قبلی هست، دکمه Optimize را قفل کنید و کاربر را به حذف هدایت کنید.
+- در فرم `DepartmentSchedulingSettings` دو سوئیچ بالا را اضافه کنید (برچسب فارسی مطابق جدول).
+- دکمه «حذف شیفت‌بندی ماه» با تأیید کاربر؛ اگر ماه شروع شده و `allowCurrentMonthScheduling` خاموش است، دکمه را غیرفعال کنید.
+- قبل از `optimize-and-save` اگر برنامه قبلی هست و `allowMonthlyRescheduleWithAutoDelete` خاموش است، دکمه Optimize را قفل کنید و کاربر را به حذف هدایت کنید؛ اگر فلگ روشن است، نیازی به قفل به‌خاطر برنامه قبلی نیست.
 - پیام `message` خطای API را عیناً به سوپروایزر نشان دهید.
 
 ### توزیع صبح/عصر در روزهای تعطیل
@@ -347,7 +359,8 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - اضافه کردن `OvertimeConsent` به فرم و مدل کاربر
 - **حذف** سهمیه شب از فرم کاربر؛ ساخت UI ماهانه با `UserMonthlyNightQuota` APIها
 - قبل از Optimize، تنظیم سهمیه شب برای ماه شمسی موردنظر
-- دکمه حذف شیفت‌بندی ماه (`DeleteMonthlySchedule`) + قفل Optimize وقتی برنامه قبلی هست یا ماه شروع شده
+- دکمه حذف شیفت‌بندی ماه (`DeleteMonthlySchedule`) + قفل Optimize وقتی برنامه قبلی هست یا ماه شروع شده (با درنظرگرفتن فلگ‌های `allowCurrentMonthScheduling` و `allowMonthlyRescheduleWithAutoDelete`)
+- دو سوئیچ در فرم تنظیمات دپارتمان: `allowCurrentMonthScheduling` و `allowMonthlyRescheduleWithAutoDelete`
 - توزیع عادلانه صبح/عصر **روزهای تعطیل** (نه فقط تعادل ماهانه M/E)
 - اضافه کردن فیلدهای `Holiday*` به فرم `ShiftRequiredSpecialty`
 - تفکیک UI روز عادی و روز تعطیل در نیازمندی تخصص
@@ -366,6 +379,8 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - `ShiftYar.Domain/Entities/UserModel/UserMonthlyNightQuota.cs`
 - `ShiftYar.Api/Controllers/ShiftModel/ShiftSchedulingController.cs`
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftSchedulingModel/DeleteMonthlyScheduleRequestDto.cs`
+- `ShiftYar.Domain/Entities/DepartmentModel/DepartmentSchedulingSettings.cs`
+- `ShiftYar.Application/DTOs/DepartmentModel/DepartmentSchedulingSettingsDtoAdd.cs`
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftRequiredSpecialtyModel/ShiftRequiredSpecialtyDtoAdd.cs`
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftRequiredSpecialtyModel/ShiftRequiredSpecialtyDtoGet.cs`
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftSchedulingModel/ShiftSchedulingResultDto.cs`

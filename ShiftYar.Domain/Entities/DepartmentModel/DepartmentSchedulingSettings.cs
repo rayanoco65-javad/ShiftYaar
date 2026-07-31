@@ -72,5 +72,17 @@ namespace ShiftYar.Domain.Entities.DepartmentModel
         public int? NightShiftDistributionType { get; set; } // نوع توزیع: 0=شب‌دوست (سابقه بیشتر اولویت), 1=شب‌گریز (سابقه کمتر اولویت), 2=خنثی
         public double? NightShiftDistributionWeight { get; set; } // وزن توزیع شیفت‌های شب بر اساس سابقه
         public double? SeniorityDistributionSlope { get; set; } // شیب توزیع بر اساس سابقه (مقدار پیش‌فرض: 1.0)
+
+        /// <summary>
+        /// امکان شیفت‌بندی ماه جاری — فقط برای توسعه/تست.
+        /// اگر true باشد، برای ماه شمسی جاری (حتی پس از شروع ماه) Optimize و حذف ماهانه مجاز است.
+        /// </summary>
+        public bool? AllowCurrentMonthScheduling { get; set; }
+
+        /// <summary>
+        /// امکان شیفت‌بندی مجدد ماهانه با حذف خودکار برنامه قبلی.
+        /// اگر true باشد، قبل از ذخیرهٔ برنامهٔ جدید، انتساب‌های همان ماه دپارتمان حذف و جایگزین می‌شوند.
+        /// </summary>
+        public bool? AllowMonthlyRescheduleWithAutoDelete { get; set; }
     }
 }

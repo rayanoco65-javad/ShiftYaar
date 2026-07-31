@@ -229,6 +229,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     return ApiResponse<object>.Fail(scheduleGuardError);
                 }
 
+                await AutoDeleteExistingMonthlyScheduleIfEnabledAsync(
+                    request.DepartmentId,
+                    internalRequest.StartDate,
+                    internalRequest.EndDate);
+
                 // اعتبارسنجی اولیه
                 var validationResult = await ValidateConstraintsAsync(request);
                 if (!validationResult.IsSuccess || (validationResult.Data?.Count ?? 0) > 0)
@@ -591,10 +596,14 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     return ApiResponse<object>.Fail("سال یا ماه شمسی نامعتبر است.");
                 }
 
+                var deptSettings = await GetDepartmentSchedulingSettingsAsync(request.DepartmentId);
+                var allowCurrentMonth = deptSettings?.AllowCurrentMonthScheduling == true;
+
                 var monthNotStartedError = GetPersianMonthNotStartedError(
                     request.PersianYear,
                     request.PersianMonth,
-                    actionDescription: "حذف شیفت‌بندی");
+                    actionDescription: "حذف شیفت‌بندی",
+                    allowCurrentMonthScheduling: allowCurrentMonth);
                 if (monthNotStartedError != null)
                 {
                     return ApiResponse<object>.Fail(monthNotStartedError);
@@ -609,18 +618,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     return ApiResponse<object>.Fail("دپارتمان یافت نشد.");
                 }
 
-                var (assignments, total) = await _shiftAssignmentRepository.GetByFilterAsync(
-                    filter: new Application.Common.Filters.SimpleFilter<ShiftAssignment>(a =>
-                        a.ShiftDateId.HasValue &&
-                        a.ShiftDate != null &&
-                        a.ShiftDate.Date.HasValue &&
-                        a.ShiftDate.Date.Value.Date >= monthStart &&
-                        a.ShiftDate.Date.Value.Date <= monthEnd &&
-                        a.Shift != null &&
-                        a.Shift.DepartmentId == request.DepartmentId),
-                    includes: new[] { "ShiftDate", "Shift" });
+                var (deletedCount, totalMatched) = await DeleteDepartmentAssignmentsInRangeAsync(
+                    request.DepartmentId, monthStart, monthEnd);
 
-                if (assignments.Count == 0)
+                if (deletedCount == 0)
                 {
                     return ApiResponse<object>.Success(new
                     {
@@ -631,27 +632,16 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     }, $"برای ماه {request.PersianYear}/{request.PersianMonth:00} شیفت‌بندی ذخیره‌شده‌ای یافت نشد.");
                 }
 
-                foreach (var assignment in assignments)
-                {
-                    _shiftAssignmentRepository.Delete(assignment);
-                }
-
-                await _shiftAssignmentRepository.SaveAsync();
-
-                _logger.LogInformation(
-                    "Deleted {Count} assignment(s) for DepartmentId={DepartmentId} Persian {Year}/{Month}",
-                    assignments.Count, request.DepartmentId, request.PersianYear, request.PersianMonth);
-
                 return ApiResponse<object>.Success(new
                 {
-                    deletedCount = assignments.Count,
-                    totalMatched = total,
+                    deletedCount,
+                    totalMatched,
                     persianYear = request.PersianYear,
                     persianMonth = request.PersianMonth,
                     departmentId = request.DepartmentId,
                     monthStart = ToPersianDateString(monthStart),
                     monthEnd = ToPersianDateString(monthEnd)
-                }, $"شیفت‌بندی ماه {request.PersianYear}/{request.PersianMonth:00} با موفقیت حذف شد ({assignments.Count} انتساب).");
+                }, $"شیفت‌بندی ماه {request.PersianYear}/{request.PersianMonth:00} با موفقیت حذف شد ({deletedCount} انتساب).");
             }
             catch (Exception ex)
             {
@@ -663,7 +653,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         }
 
         /// <summary>
-        /// قبل از Optimize-and-save: ماه نباید شروع شده باشد و نباید برنامه قبلی برای همان ماه وجود داشته باشد.
+        /// قبل از Optimize-and-save: مگر با فلگ‌های تنظیمات دپارتمان، ماه نباید شروع شده باشد
+        /// و نباید برنامه قبلی برای همان ماه وجود داشته باشد.
         /// </summary>
         public async Task<string?> GetMonthlyScheduleCreationBlockerAsync(
             int departmentId,
@@ -682,10 +673,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     $"بازه شیفت‌بندی باید داخل یک ماه شمسی باشد. شروع: {startYear}/{startMonth:00}، پایان: {endYear}/{endMonth:00}.";
             }
 
+            var deptSettings = await GetDepartmentSchedulingSettingsAsync(departmentId);
+            var allowCurrentMonth = deptSettings?.AllowCurrentMonthScheduling == true;
+            var allowAutoReplace = deptSettings?.AllowMonthlyRescheduleWithAutoDelete == true;
+
             var monthNotStartedError = GetPersianMonthNotStartedError(
                 startYear,
                 startMonth,
-                actionDescription: "شیفت‌بندی کلی");
+                actionDescription: "شیفت‌بندی کلی",
+                allowCurrentMonthScheduling: allowCurrentMonth);
             if (monthNotStartedError != null)
             {
                 return monthNotStartedError;
@@ -693,7 +689,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
             var (monthStart, monthEnd, _) = PersianMonthNightCalendar.GetMonthBounds(startYear, startMonth);
             var hasExisting = await DepartmentHasAssignmentsInRangeAsync(departmentId, monthStart, monthEnd);
-            if (hasExisting)
+            if (hasExisting && !allowAutoReplace)
             {
                 return
                     $"برای ماه شمسی {startYear}/{startMonth:00} قبلاً شیفت‌بندی ذخیره شده است. " +
@@ -703,21 +699,76 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             return null;
         }
 
+        /// <summary>
+        /// اگر AllowMonthlyRescheduleWithAutoDelete فعال باشد، برنامه قبلی همان ماه حذف می‌شود.
+        /// </summary>
+        private async Task AutoDeleteExistingMonthlyScheduleIfEnabledAsync(
+            int departmentId,
+            DateTime rangeStart,
+            DateTime rangeEnd)
+        {
+            var deptSettings = await GetDepartmentSchedulingSettingsAsync(departmentId);
+            if (deptSettings?.AllowMonthlyRescheduleWithAutoDelete != true)
+            {
+                return;
+            }
+
+            var pc = new PersianCalendar();
+            var year = pc.GetYear(rangeStart.Date);
+            var month = pc.GetMonth(rangeStart.Date);
+            var (monthStart, monthEnd, _) = PersianMonthNightCalendar.GetMonthBounds(year, month);
+
+            var (deletedCount, _) = await DeleteDepartmentAssignmentsInRangeAsync(departmentId, monthStart, monthEnd);
+            if (deletedCount > 0)
+            {
+                _logger.LogInformation(
+                    "Auto-deleted {Count} prior assignment(s) before reschedule for DepartmentId={DepartmentId} Persian {Year}/{Month}",
+                    deletedCount, departmentId, year, month);
+            }
+        }
+
+        private async Task<DepartmentSchedulingSettings?> GetDepartmentSchedulingSettingsAsync(int departmentId)
+        {
+            var result = await _deptSettingsRepository.GetByFilterAsync(
+                filter: new Features.DepartmentModel.Filters.DepartmentSchedulingSettingsFilter
+                {
+                    DepartmentId = departmentId,
+                    PageNumber = 1,
+                    PageSize = 1
+                },
+                includes: Array.Empty<string>());
+
+            return result.Items.FirstOrDefault();
+        }
+
         private static string? GetPersianMonthNotStartedError(
             int persianYear,
             int persianMonth,
-            string actionDescription)
+            string actionDescription,
+            bool allowCurrentMonthScheduling = false)
         {
             var (monthStart, _, _) = PersianMonthNightCalendar.GetMonthBounds(persianYear, persianMonth);
             var today = DateTime.Today;
-            if (today >= monthStart.Date)
+            if (today < monthStart.Date)
             {
-                return
-                    $"ماه شمسی {persianYear}/{persianMonth:00} از تاریخ {DateConverter.ConvertToPersianDate(monthStart)} آغاز شده است " +
-                    $"و امکان {actionDescription} برای این ماه وجود ندارد.";
+                return null;
             }
 
-            return null;
+            if (allowCurrentMonthScheduling && IsCurrentPersianMonth(persianYear, persianMonth))
+            {
+                return null;
+            }
+
+            return
+                $"ماه شمسی {persianYear}/{persianMonth:00} از تاریخ {DateConverter.ConvertToPersianDate(monthStart)} آغاز شده است " +
+                $"و امکان {actionDescription} برای این ماه وجود ندارد.";
+        }
+
+        private static bool IsCurrentPersianMonth(int persianYear, int persianMonth)
+        {
+            var pc = new PersianCalendar();
+            var today = DateTime.Today;
+            return pc.GetYear(today) == persianYear && pc.GetMonth(today) == persianMonth;
         }
 
         private async Task<bool> DepartmentHasAssignmentsInRangeAsync(
@@ -737,6 +788,41 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 includes: new[] { "ShiftDate", "Shift" });
 
             return assignments.Count > 0;
+        }
+
+        private async Task<(int deletedCount, int totalMatched)> DeleteDepartmentAssignmentsInRangeAsync(
+            int departmentId,
+            DateTime monthStart,
+            DateTime monthEnd)
+        {
+            var (assignments, total) = await _shiftAssignmentRepository.GetByFilterAsync(
+                filter: new Application.Common.Filters.SimpleFilter<ShiftAssignment>(a =>
+                    a.ShiftDateId.HasValue &&
+                    a.ShiftDate != null &&
+                    a.ShiftDate.Date.HasValue &&
+                    a.ShiftDate.Date.Value.Date >= monthStart.Date &&
+                    a.ShiftDate.Date.Value.Date <= monthEnd.Date &&
+                    a.Shift != null &&
+                    a.Shift.DepartmentId == departmentId),
+                includes: new[] { "ShiftDate", "Shift" });
+
+            if (assignments.Count == 0)
+            {
+                return (0, total);
+            }
+
+            foreach (var assignment in assignments)
+            {
+                _shiftAssignmentRepository.Delete(assignment);
+            }
+
+            await _shiftAssignmentRepository.SaveAsync();
+
+            _logger.LogInformation(
+                "Deleted {Count} assignment(s) for DepartmentId={DepartmentId} range {Start:yyyy-MM-dd}..{End:yyyy-MM-dd}",
+                assignments.Count, departmentId, monthStart.Date, monthEnd.Date);
+
+            return (assignments.Count, total);
         }
 
 
