@@ -169,7 +169,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     }
 
                     ClearUnprotectedAdjacentConflicts(solution, user, required.Date, required.ShiftLabel);
-                    ClearUnprotectedSameDayConflicts(solution, user, required.Date, required.ShiftLabel);
+                    ClearUnprotectedSameDayConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
 
                     if (!IsUserAvailable(user, required.Date, required.ShiftLabel, solution))
                     {
@@ -243,7 +243,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     foreach (var candidate in candidates)
                     {
                         ClearUnprotectedAdjacentConflicts(solution, user, presenceDate, candidate.ShiftLabel);
-                        ClearUnprotectedSameDayConflicts(solution, user, presenceDate, candidate.ShiftLabel);
+                        ClearUnprotectedSameDayConflicts(solution, constraints, user, presenceDate, candidate.ShiftLabel);
                         if (IsUserAvailable(user, presenceDate, candidate.ShiftLabel, solution))
                         {
                             target = candidate;
@@ -319,14 +319,20 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         }
 
         /// <summary>
-        /// ترکیب غیرمجاز همان‌روز (عصر+شب) را برای جای‌گذاری اجباری پاک می‌کند.
+        /// ترکیب غیرمجاز همان‌روز را برای جای‌گذاری اجباری پاک می‌کند.
+        /// اگر MaxShiftsPerDay=1 باشد هر شیفت دیگر همان روز حذف می‌شود.
         /// </summary>
         private static void ClearUnprotectedSameDayConflicts(
             ShiftSolution solution,
+            ShiftConstraints constraints,
             UserConstraint user,
             DateTime date,
             ShiftLabel label)
         {
+            var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
+                ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
+                : 2;
+
             foreach (var assignment in solution.GetUserAssignments(user.UserId, date).ToList())
             {
                 if (assignment.ShiftLabel == label)
@@ -334,10 +340,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     continue;
                 }
 
-                // فقط عصر↔شب متوالی و ممنوع است؛ صبح+شب مجاز است
-                var conflicts =
-                    (label == ShiftLabel.Night && assignment.ShiftLabel == ShiftLabel.Evening) ||
-                    (label == ShiftLabel.Evening && assignment.ShiftLabel == ShiftLabel.Night);
+                var conflicts = maxPerDay <= 1
+                    || (label == ShiftLabel.Night && assignment.ShiftLabel == ShiftLabel.Evening)
+                    || (label == ShiftLabel.Evening && assignment.ShiftLabel == ShiftLabel.Night);
 
                 if (!conflicts)
                 {

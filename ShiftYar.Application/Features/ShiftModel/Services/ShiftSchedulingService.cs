@@ -851,6 +851,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             scheduler.ApplyMandatoryConstraints(solution);
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
+            EnsureHardDailyRulesOrThrow(solution, constraints);
 
             var result = await ConvertSolutionToResultAsync(solution, constraints);
             result.AlgorithmUsed = SchedulingAlgorithm.SimulatedAnnealing;
@@ -1219,6 +1220,22 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         }
 
         /// <summary>
+        /// سقف روزانه و توالی ممنوع شب→صبح / عصر→شب نباید در خروجی نهایی باقی بمانند.
+        /// </summary>
+        private static void EnsureHardDailyRulesOrThrow(ShiftSolution solution, ShiftConstraints constraints)
+        {
+            var daily = DailyDuplicateAssignmentGuard.GetViolations(solution, constraints);
+            var adjacency = AdjacentShiftRestGuard.GetViolations(solution, constraints);
+            if (daily.Count == 0 && adjacency.Count == 0)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                "قیود سخت روزانه رعایت نشدند:\n" + string.Join("\n", daily.Concat(adjacency)));
+        }
+
+        /// <summary>
         /// اگر درخواست‌های شب تأییدشدهٔ غیرتعطیل جا برای سهمیه تعطیل نگذارند، Optimize از ابتدا fail می‌شود.
         /// </summary>
         private static void EnsureNightQuotaRequestsFeasibleOrThrow(ShiftConstraints constraints)
@@ -1536,17 +1553,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     constraints.GlobalConstraints.RequireManagerForEveningShift = deptSettingEarly.RequireManagerForEveningShift ?? false;
                     constraints.GlobalConstraints.RequireManagerForNightShift = deptSettingEarly.RequireManagerForNightShift ?? false;
 
-                    // صبح+عصر و صبح+شب در یک روز مجازند ⇒ سقف روزانه حداقل ۲
+                    // سقف روزانه از تنظیمات دپارتمان (۱ یا ۲)؛ دیگر override به ۲ نمی‌شود
                     constraints.HardRules.ForbidDuplicateDailyAssignments = true;
                     constraints.HardRules.EnforceMaxShiftsPerDay = true;
                     var maxPerDay = deptSettingEarly.MaxShiftsPerDay ?? 2;
-                    if (maxPerDay < 2)
+                    if (maxPerDay <= 0)
                     {
-                        _logger.LogWarning(
-                            "LoadConstraints: MaxShiftsPerDay={Configured} overridden to 2 so Morning+Evening/Morning+Night same day remain allowed",
-                            maxPerDay);
                         maxPerDay = 2;
                     }
+
                     constraints.GlobalConstraints.MaxShiftsPerDay = Math.Clamp(maxPerDay, 1, 2);
 
                     if (constraints.HardRules.EnforceMaxConsecutiveShifts == false)
@@ -2193,11 +2208,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     if (deptSetting.EnforceNightShiftMonthlyCap.HasValue) constraints.HardRules.EnforceNightShiftMonthlyCap = deptSetting.EnforceNightShiftMonthlyCap.Value;
                     if (deptSetting.EnforceSpecialtyCapacity.HasValue) constraints.HardRules.EnforceSpecialtyCapacity = deptSetting.EnforceSpecialtyCapacity.Value;
 
-                    // صبح+عصر و صبح+شب مجاز؛ سقف حداقل ۲
+                    // سقف روزانه از تنظیمات دپارتمان (۱ یا ۲)
                     constraints.HardRules.ForbidDuplicateDailyAssignments = true;
                     constraints.HardRules.EnforceMaxShiftsPerDay = true;
                     var maxPerDay = deptSetting.MaxShiftsPerDay ?? constraints.GlobalConstraints.MaxShiftsPerDay;
-                    if (maxPerDay < 2) maxPerDay = 2;
+                    if (maxPerDay <= 0)
+                    {
+                        maxPerDay = 2;
+                    }
+
                     constraints.GlobalConstraints.MaxShiftsPerDay = Math.Clamp(maxPerDay, 1, 2);
                     if (constraints.HardRules.EnforceMaxConsecutiveShifts != true)
                     {
@@ -2555,6 +2574,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             scheduler.ApplyMandatoryConstraints(solution);
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
+            EnsureHardDailyRulesOrThrow(solution, constraints);
         }
 
 
@@ -2606,6 +2626,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             scheduler.ApplyMandatoryConstraints(solution);
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
+            EnsureHardDailyRulesOrThrow(solution, constraints);
 
             var result = await ConvertSolutionToResultAsync(solution, constraints);
             result.AlgorithmUsed = SchedulingAlgorithm.SimulatedAnnealing;

@@ -1261,12 +1261,15 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftCoverageGuard.Enforce(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
 
-            // آخرین حرف درخواست‌های تأییدشده، سپس تکمیل قطعی سهمیه شب
+            // آخرین حرف: درخواست‌ها → سهمیه شب → سقف روزانه → توالی ممنوع
+            // Strip باید بعد از ForceApply/ExactNight باشد تا صبحِ روزبعد دوباره اضافه نشود
             ApprovedRequestGuard.ForceApply(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
+            DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
-            ApprovedRequestGuard.ForceApply(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
+            DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
 
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(managerWarnings);
