@@ -747,6 +747,87 @@ public class SimulatedAnnealingSchedulerTests
             Assert.Empty(ApprovedRequestGuard.GetUnmetViolations(solution, constraints));
         }
 
+        /// <summary>
+        /// رگرسیون مرداد/مهدی رضایی: عصرهای اجباری نباید بعد از سهمیه شب / عدالت تعطیل / توالی حذف شوند.
+        /// </summary>
+        [Fact]
+        public void ApplyMandatoryConstraints_PreservesRequiredEvenings_AgainstNightQuotaAndHolidayFairness()
+        {
+            var start = new DateTime(2026, 7, 23); // 1405/05/01
+            var eveningA = new DateTime(2026, 7, 25); // 1405/05/03
+            var eveningB = new DateTime(2026, 8, 22); // 1405/05/31
+            var holidays = new HashSet<DateTime> { eveningA, eveningB };
+
+            var mehdi = User(3, UserGender.Male);
+            mehdi.UserName = "مهدی رضایی";
+            mehdi.ExactNightShiftCount = 5;
+            mehdi.ExactHolidayWeekendNightShiftCount = 1;
+            mehdi.MinDaysBetweenNightShifts = 1;
+            mehdi.RequiredShiftSlots.Add(new ShiftSlotConstraint { Date = eveningA, ShiftLabel = ShiftLabel.Evening });
+            mehdi.RequiredShiftSlots.Add(new ShiftSlotConstraint { Date = eveningB, ShiftLabel = ShiftLabel.Evening });
+
+            var peers = new[]
+            {
+                mehdi,
+                User(1, UserGender.Female),
+                User(2, UserGender.Male),
+                User(4, UserGender.Female),
+                User(5, UserGender.Male),
+                User(6, UserGender.Female),
+            };
+            foreach (var p in peers.Skip(1))
+            {
+                p.ExactNightShiftCount = 4;
+                p.ExactHolidayWeekendNightShiftCount = 1;
+                p.MinDaysBetweenNightShifts = 1;
+            }
+
+            var specialty = new SpecialtyRequirement { SpecialtyId = 10, RequiredTotalCount = 2 };
+            var constraints = BuildConstraints(start, days: 31, users: peers, specialty: specialty);
+            constraints.HolidayDates = holidays;
+            constraints.ShiftRequirements.Add(new ShiftRequirement
+            {
+                ShiftId = 2,
+                ShiftLabel = ShiftLabel.Evening,
+                DepartmentId = 1,
+                DurationHours = 8,
+                SpecialtyRequirements = new List<SpecialtyRequirement> { CloneSpecialty(specialty) }
+            });
+            constraints.ShiftRequirements.Add(new ShiftRequirement
+            {
+                ShiftId = 3,
+                ShiftLabel = ShiftLabel.Night,
+                DepartmentId = 1,
+                DurationHours = 12,
+                SpecialtyRequirements = new List<SpecialtyRequirement> { CloneSpecialty(specialty) }
+            });
+
+            // راه‌حل اولیه: عصرهای مهدی هست، ولی عدالت تعطیل / سهمیه شب سعی می‌کنند بدزدند
+            var solution = new ShiftSolution();
+            solution.AddAssignment(3, 2, eveningA, ShiftLabel.Evening, isOnCall: false);
+            solution.AddAssignment(3, 2, eveningB, ShiftLabel.Evening, isOnCall: false);
+            // شب سهمیه‌ای روی همان روز عصر (تداخل E+N) — باید به نفع عصر اجباری حذف شود
+            solution.AddAssignment(3, 3, eveningA, ShiftLabel.Night, isOnCall: false);
+            // عصر تعطیل دیگران برای تحریک HolidayFairness
+            solution.AddAssignment(1, 2, eveningA, ShiftLabel.Evening, isOnCall: false);
+            solution.AddAssignment(1, 2, eveningB, ShiftLabel.Evening, isOnCall: false);
+            solution.AddAssignment(2, 2, eveningA, ShiftLabel.Evening, isOnCall: false);
+
+            var scheduler = new SimulatedAnnealingScheduler(constraints, FastParameters);
+            scheduler.ApplyMandatoryConstraints(solution);
+
+            Assert.True(
+                solution.GetShiftAssignments(2, eveningA).Any(a => a.UserId == 3 && !a.IsOnCall),
+                "required Evening on 1405/05/03 must survive ApplyMandatoryConstraints");
+            Assert.True(
+                solution.GetShiftAssignments(2, eveningB).Any(a => a.UserId == 3 && !a.IsOnCall),
+                "required Evening on 1405/05/31 must survive ApplyMandatoryConstraints");
+            Assert.False(
+                solution.GetShiftAssignments(3, eveningA).Any(a => a.UserId == 3 && !a.IsOnCall),
+                "quota Night must yield to required Evening on the same day");
+            Assert.Empty(ApprovedRequestGuard.GetUnmetViolations(solution, constraints));
+        }
+
         private static SpecialtyRequirement CloneSpecialty(SpecialtyRequirement s) => new()
         {
             SpecialtyId = s.SpecialtyId,

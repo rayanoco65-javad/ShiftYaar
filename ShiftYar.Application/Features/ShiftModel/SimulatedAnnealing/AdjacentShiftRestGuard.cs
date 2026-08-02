@@ -63,15 +63,34 @@ public static class AdjacentShiftRestGuard
         SaShiftAssignment later,
         ShiftSolution solution)
     {
-        var earlierProtected = IsProtectedAssignment(user, earlier, solution);
-        var laterProtected = IsProtectedAssignment(user, later, solution);
+        // اولویت ۱: درخواست تأییدشده از سهمیهٔ شب Soft قوی‌تر است
+        var earlierRequest = IsRequestProtected(user, earlier);
+        var laterRequest = IsRequestProtected(user, later);
 
-        if (!laterProtected)
+        if (earlierRequest && !laterRequest)
         {
             return later;
         }
 
-        if (!earlierProtected)
+        if (laterRequest && !earlierRequest)
+        {
+            return earlier;
+        }
+
+        if (earlierRequest && laterRequest)
+        {
+            return null;
+        }
+
+        var earlierQuota = IsQuotaNightProtected(user, earlier, solution);
+        var laterQuota = IsQuotaNightProtected(user, later, solution);
+
+        if (!laterQuota)
+        {
+            return later;
+        }
+
+        if (!earlierQuota)
         {
             return earlier;
         }
@@ -79,10 +98,7 @@ public static class AdjacentShiftRestGuard
         return null;
     }
 
-    private static bool IsProtectedAssignment(
-        UserConstraint user,
-        SaShiftAssignment assignment,
-        ShiftSolution solution)
+    private static bool IsRequestProtected(UserConstraint user, SaShiftAssignment assignment)
     {
         if (user.RequiredShiftSlots.Any(s =>
                 s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel))
@@ -90,25 +106,25 @@ public static class AdjacentShiftRestGuard
             return true;
         }
 
-        if (!assignment.IsOnCall &&
-            user.RequiredPresenceDates.Any(d => d.Date == assignment.Date.Date))
+        return !assignment.IsOnCall &&
+               user.RequiredPresenceDates.Any(d => d.Date == assignment.Date.Date);
+    }
+
+    private static bool IsQuotaNightProtected(
+        UserConstraint user,
+        SaShiftAssignment assignment,
+        ShiftSolution solution)
+    {
+        // شب‌های داخل سهمیه حداقل را در برابر انتساب‌های غیر درخواستی قربانی نکن
+        if (assignment.ShiftLabel != ShiftLabel.Night ||
+            assignment.IsOnCall ||
+            !user.ExactNightShiftCount.HasValue)
         {
-            return true;
+            return false;
         }
 
-        // شب‌های داخل سهمیه حداقل را برای توالی ممنوع قربانی نکن
-        if (assignment.ShiftLabel == ShiftLabel.Night &&
-            !assignment.IsOnCall &&
-            user.ExactNightShiftCount.HasValue)
-        {
-            var nightCount = solution.GetUserAllAssignments(user.UserId)
-                .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
-            if (nightCount <= user.ExactNightShiftCount.Value)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        var nightCount = solution.GetUserAllAssignments(user.UserId)
+            .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+        return nightCount <= user.ExactNightShiftCount.Value;
     }
 }

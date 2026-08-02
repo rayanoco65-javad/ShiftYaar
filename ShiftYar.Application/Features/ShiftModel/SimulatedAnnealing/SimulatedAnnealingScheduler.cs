@@ -1243,7 +1243,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         /// <summary>
         /// اعمال قطعی قیود درخواست‌های تأییدشده و الزام مدیر شیفت روی راه‌حل نهایی.
-        /// درخواست‌های تأییدشده آخرین حرف را می‌زنند (پس از بقیهٔ گاردها دوباره ForceApply).
+        /// ForceApply آخرین مرحله است تا گاردهای پوشش/عدالت/سهمیه شب حضور اجباری را نربایند.
         /// </summary>
         public void ApplyMandatoryConstraints(ShiftSolution solution)
         {
@@ -1261,15 +1261,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftCoverageGuard.Enforce(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
 
-            // آخرین حرف: درخواست‌ها → سهمیه شب → سقف روزانه → توالی ممنوع
-            // Strip باید بعد از ForceApply/ExactNight باشد تا صبحِ روزبعد دوباره اضافه نشود
+            // پس از Coverage/Fairness: سهمیه شب و سقف/توالی، سپس ForceApply به‌عنوان آخرین حرف مطلق.
+            // هیچ گاردی بعد از ForceApply نهایی اجرا نمی‌شود تا حضور اجباری دوباره حذف نشود.
+            ExactNightQuotaGuard.Enforce(solution, _constraints);
+            DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             ApprovedRequestGuard.ForceApply(solution, _constraints);
-            ExactNightQuotaGuard.Enforce(solution, _constraints);
-            DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
-            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
-            ExactNightQuotaGuard.Enforce(solution, _constraints);
-            DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
-            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
 
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(managerWarnings);

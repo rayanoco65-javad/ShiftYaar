@@ -76,6 +76,7 @@ public static class HolidayMorningEveningFairnessGuard
 
             var donorHolidayAssignments = solution.GetUserAllAssignments(donorEntry.User.UserId)
                 .Where(a => !a.IsOnCall && a.ShiftLabel == label && constraints.IsHoliday(a.Date))
+                .Where(a => !IsRequestProtected(donorEntry.User, a))
                 .OrderByDescending(a => a.Date)
                 .ToList();
 
@@ -185,5 +186,17 @@ public static class HolidayMorningEveningFairnessGuard
         }
 
         return true;
+    }
+
+    private static bool IsRequestProtected(UserConstraint user, SaShiftAssignment assignment)
+    {
+        if (user.RequiredShiftSlots.Any(s =>
+                s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel))
+        {
+            return true;
+        }
+
+        return !assignment.IsOnCall &&
+               user.RequiredPresenceDates.Any(d => d.Date == assignment.Date.Date);
     }
 }

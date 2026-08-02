@@ -168,16 +168,35 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
-                    ClearUnprotectedAdjacentConflicts(solution, user, required.Date, required.ShiftLabel);
-                    ClearUnprotectedSameDayConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
-
-                    if (!IsUserAvailable(user, required.Date, required.ShiftLabel, solution))
+                    // چند پاس پاک‌سازی تا تداخل‌های غیرمحافظت‌شده جلوی حضور اجباری را نگیرند
+                    for (var pass = 0; pass < 4; pass++)
                     {
+                        ClearUnprotectedAdjacentConflicts(solution, user, required.Date, required.ShiftLabel);
+                        ClearUnprotectedSameDayConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
+
+                        if (IsUserAvailable(user, required.Date, required.ShiftLabel, solution, constraints))
+                        {
+                            break;
+                        }
+                    }
+
+                    if (!IsUserAvailable(user, required.Date, required.ShiftLabel, solution, constraints))
+                    {
+                        // همچنان بن‌بست با انتساب محافظت‌شده — GetUnmetViolations گزارش می‌کند
                         continue;
                     }
 
-                    RemoveOtherDailyAssignments(solution, user.UserId, required.Date, shiftReq.ShiftId);
+                    RemoveOtherDailyAssignments(solution, constraints, user, required.Date, shiftReq.ShiftId);
                     MakeRoomForIncoming(solution, constraints, shiftReq, required.Date, user);
+
+                    // اگر MakeRoom باعث تداخل تازه شد، دوباره پاک کن
+                    ClearUnprotectedAdjacentConflicts(solution, user, required.Date, required.ShiftLabel);
+                    ClearUnprotectedSameDayConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
+
+                    if (!IsUserAvailable(user, required.Date, required.ShiftLabel, solution, constraints))
+                    {
+                        continue;
+                    }
 
                     solution.AddAssignment(
                         user.UserId,
@@ -244,7 +263,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     {
                         ClearUnprotectedAdjacentConflicts(solution, user, presenceDate, candidate.ShiftLabel);
                         ClearUnprotectedSameDayConflicts(solution, constraints, user, presenceDate, candidate.ShiftLabel);
-                        if (IsUserAvailable(user, presenceDate, candidate.ShiftLabel, solution))
+                        if (IsUserAvailable(user, presenceDate, candidate.ShiftLabel, solution, constraints))
                         {
                             target = candidate;
                             break;
@@ -258,7 +277,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                     if (onCallOnly == null || onCallOnly.ShiftId != target.ShiftId)
                     {
-                        RemoveOtherDailyAssignments(solution, user.UserId, presenceDate, target.ShiftId);
+                        RemoveOtherDailyAssignments(solution, constraints, user, presenceDate, target.ShiftId);
                     }
 
                     MakeRoomForIncoming(solution, constraints, target, presenceDate, user);
@@ -429,14 +448,26 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
         }
 
-        private static void RemoveOtherDailyAssignments(ShiftSolution solution, int userId, DateTime date, int keepShiftId)
+        private static void RemoveOtherDailyAssignments(
+            ShiftSolution solution,
+            ShiftConstraints constraints,
+            UserConstraint user,
+            DateTime date,
+            int keepShiftId)
         {
-            foreach (var assignment in solution.GetUserAssignments(userId, date).ToList())
+            foreach (var assignment in solution.GetUserAssignments(user.UserId, date).ToList())
             {
-                if (assignment.ShiftId != keepShiftId)
+                if (assignment.ShiftId == keepShiftId)
                 {
-                    solution.RemoveAssignment(userId, assignment.ShiftId, date);
+                    continue;
                 }
+
+                if (IsHardProtectedAssignment(user, assignment))
+                {
+                    continue;
+                }
+
+                solution.RemoveAssignment(user.UserId, assignment.ShiftId, date);
             }
         }
 
@@ -451,7 +482,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 s.Date.Date == date.Date && s.ShiftLabel == shiftLabel);
         }
 
-        private static bool IsUserAvailable(UserConstraint user, DateTime date, ShiftLabel shiftLabel, ShiftSolution? solution = null)
+        private static bool IsUserAvailable(
+            UserConstraint user,
+            DateTime date,
+            ShiftLabel shiftLabel,
+            ShiftSolution? solution = null,
+            ShiftConstraints? constraints = null)
         {
             if (!IsOffConflictFree(user, date, shiftLabel))
             {
@@ -468,6 +504,24 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     solution.GetUserAllAssignments(user.UserId), date, shiftLabel))
             {
                 return false;
+            }
+
+            if (solution != null && constraints != null)
+            {
+                var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
+                    ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
+                    : 2;
+                var existing = solution.GetUserAssignments(user.UserId, date)
+                    .Where(a => a.ShiftLabel != shiftLabel)
+                    .Select(a => a.ShiftLabel);
+                if (!Common.Utilities.DailyAssignmentRules.CanAddShift(
+                        existing,
+                        shiftLabel,
+                        maxPerDay,
+                        constraints.HardRules.ForbidDuplicateDailyAssignments))
+                {
+                    return false;
+                }
             }
 
             return true;
