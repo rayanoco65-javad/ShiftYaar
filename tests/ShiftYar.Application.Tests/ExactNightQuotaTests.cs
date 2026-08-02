@@ -326,9 +326,16 @@ public class ExactNightQuotaTests
         var u11 = solution.GetUserAllAssignments(11).Where(a => a.ShiftLabel == ShiftLabel.Night).ToList();
         Assert.True(u11.Count >= 1, $"Expected >=1 night for user 11, got {u11.Count}");
         Assert.Contains(u11, a => HolidayWeekendNightRules.IsHolidayWeekendNight(a.Date, holidays));
-        Assert.Contains(
-            solution.GetUserAllAssignments(11),
-            a => a.Date.Date == friday && a.ShiftLabel == ShiftLabel.Morning);
+
+        // صبح+شب همان روز جمعه مجاز است؛ اگر شب پنجشنبه گرفته شود صبح جمعه باید پاک شود (توالی ممنوع)
+        var fridayMorning = solution.GetUserAllAssignments(11)
+            .Any(a => a.Date.Date == friday && a.ShiftLabel == ShiftLabel.Morning);
+        var nightOnFriday = u11.Any(a => a.Date.Date == friday);
+        if (nightOnFriday)
+        {
+            Assert.True(fridayMorning, "Friday morning+night same day must remain");
+        }
+
         Assert.True(
             solution.GetUserAllAssignments(4).Count(a => a.ShiftLabel == ShiftLabel.Night) >= 2,
             "Donor must remain at/above minimum");
@@ -397,6 +404,124 @@ public class ExactNightQuotaTests
                 a.ShiftLabel == ShiftLabel.Night &&
                 HolidayWeekendNightRules.IsHolidayWeekendNight(a.Date, holidays)) >= 1,
             "Donor must keep holiday minimum");
+    }
+
+    [Fact]
+    public void ExactNightQuotaGuard_ClearsNextMorningToClaimSurplusNight()
+    {
+        // سناریوی واقعی: گیرنده ۴/۵، اهداکننده ۱+۱ مازاد؛ صبح فردای شب مازاد مانع ادعاست.
+        // filler روی کف سهمیه است تا فقط اهدا از user 11 ممکن باشد.
+        var start = new DateTime(2026, 7, 23);
+        var end = new DateTime(2026, 8, 22);
+        var needy = MakeUser(6, exactNights: 5, exactHolidayNights: null);
+        var donor = MakeUser(11, exactNights: 1, exactHolidayNights: null);
+        var filler = MakeUser(4, exactNights: 25, exactHolidayNights: null);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = end,
+            HolidayDates = [new(2026, 7, 24), new(2026, 7, 31), new(2026, 8, 7), new(2026, 8, 14), new(2026, 8, 21)],
+            UserConstraints = [needy, donor, filler],
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning),
+                Shift(2, ShiftLabel.Evening),
+                Shift(3, ShiftLabel.Night)
+            ]
+        };
+
+        var solution = new ShiftSolution();
+        foreach (var d in new[]
+                 {
+                     new DateTime(2026, 7, 26),
+                     new DateTime(2026, 8, 2),
+                     new DateTime(2026, 8, 15),
+                     new DateTime(2026, 8, 20)
+                 })
+        {
+            solution.AddAssignment(6, 3, d, ShiftLabel.Night, false);
+        }
+
+        solution.AddAssignment(11, 3, new DateTime(2026, 8, 8), ShiftLabel.Night, false);
+        solution.AddAssignment(11, 3, new DateTime(2026, 7, 28), ShiftLabel.Night, false);
+        solution.AddAssignment(6, 1, new DateTime(2026, 8, 9), ShiftLabel.Morning, false);
+
+        foreach (var day in Enumerable.Range(0, 31).Select(i => start.AddDays(i)))
+        {
+            if (solution.GetShiftAssignments(3, day).Any())
+            {
+                continue;
+            }
+
+            solution.AddAssignment(4, 3, day, ShiftLabel.Night, false);
+        }
+
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+
+        var nights6 = solution.GetUserAllAssignments(6).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+        var nights11 = solution.GetUserAllAssignments(11).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+        Assert.True(nights6 >= 5, $"User 6 expected ≥5 nights, got {nights6}");
+        Assert.True(nights11 >= 1, $"Donor must keep minimum, got {nights11}");
+        var claimedAug8 = solution.GetUserAllAssignments(6).Any(a =>
+            a.ShiftLabel == ShiftLabel.Night && a.Date.Date == new DateTime(2026, 8, 8));
+        if (claimedAug8)
+        {
+            Assert.False(
+                solution.GetUserAllAssignments(6).Any(a =>
+                    a.ShiftLabel == ShiftLabel.Morning && a.Date.Date == new DateTime(2026, 8, 9)),
+                "Next-day morning conflicting with claimed night should be cleared");
+        }
+    }
+
+    [Fact]
+    public void ExactNightQuotaGuard_TwoHopChainWhenSurplusNotOnReceiverDate()
+    {
+        // R کم دارد، O روی تاریخ مناسب R ولی روی کف سهمیه است، S روی تاریخ دیگر مازاد دارد.
+        var start = new DateTime(2026, 8, 1);
+        var r = MakeUser(1, exactNights: 2, exactHolidayNights: 0);
+        var bridge = MakeUser(2, exactNights: 1, exactHolidayNights: 0);
+        var surplus = MakeUser(3, exactNights: 1, exactHolidayNights: 0);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(10),
+            UserConstraints = [r, bridge, surplus],
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning),
+                Shift(2, ShiftLabel.Evening),
+                Shift(3, ShiftLabel.Night)
+            ]
+        };
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(1, 3, start, ShiftLabel.Night, false);          // R: 1/2
+        solution.AddAssignment(2, 3, start.AddDays(3), ShiftLabel.Night, false); // bridge روی کف
+        solution.AddAssignment(3, 3, start.AddDays(6), ShiftLabel.Night, false); // S حداقل
+        solution.AddAssignment(3, 3, start.AddDays(9), ShiftLabel.Night, false); // S مازاد
+
+        // همهٔ روزهای خالی را با کاربر بدون‌سهمیه پر کن تا فقط زنجیره ممکن باشد
+        var filler = MakeUser(9, exactNights: null, exactHolidayNights: null);
+        constraints.UserConstraints.Add(filler);
+        foreach (var day in Enumerable.Range(0, 11).Select(i => start.AddDays(i)))
+        {
+            if (solution.GetShiftAssignments(3, day).Any())
+            {
+                continue;
+            }
+
+            solution.AddAssignment(9, 3, day, ShiftLabel.Night, false);
+        }
+
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+
+        var rNights = solution.GetUserAllAssignments(1).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+        var bridgeNights = solution.GetUserAllAssignments(2).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+        var surplusNights = solution.GetUserAllAssignments(3).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+
+        Assert.True(rNights >= 2, $"Receiver expected ≥2, got {rNights}");
+        Assert.True(bridgeNights >= 1, $"Bridge expected ≥1, got {bridgeNights}");
+        Assert.True(surplusNights >= 1, $"Surplus donor expected ≥1, got {surplusNights}");
     }
 
     [Fact]
