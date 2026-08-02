@@ -2,12 +2,13 @@ using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
 using System.Collections.Generic;
 using System.Linq;
+using static ShiftYar.Domain.Enums.ShiftModel.ShiftEnums;
 
 namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 
 /// <summary>
 /// حذف / گزارش توالی ممنوع عصر→شب و شب→صبح.
-/// انتساب‌های ناشی از درخواست تأییدشده در اولویت حفظ می‌مانند.
+/// انتساب‌های ناشی از درخواست تأییدشده و شب‌های سهمیه حداقل در اولویت حفظ می‌مانند.
 /// </summary>
 public static class AdjacentShiftRestGuard
 {
@@ -26,7 +27,7 @@ public static class AdjacentShiftRestGuard
                 }
 
                 var (earlier, later) = pairs[0];
-                var remove = ChooseRemovable(user, earlier, later);
+                var remove = ChooseRemovable(user, earlier, later, solution);
                 if (remove == null)
                 {
                     // هر دو محافظت‌شده‌اند — بن‌بست؛ حلقه را قطع کن
@@ -59,10 +60,11 @@ public static class AdjacentShiftRestGuard
     private static SaShiftAssignment? ChooseRemovable(
         UserConstraint user,
         SaShiftAssignment earlier,
-        SaShiftAssignment later)
+        SaShiftAssignment later,
+        ShiftSolution solution)
     {
-        var earlierProtected = IsApprovedProtected(user, earlier);
-        var laterProtected = IsApprovedProtected(user, later);
+        var earlierProtected = IsProtectedAssignment(user, earlier, solution);
+        var laterProtected = IsProtectedAssignment(user, later, solution);
 
         if (!laterProtected)
         {
@@ -77,7 +79,10 @@ public static class AdjacentShiftRestGuard
         return null;
     }
 
-    private static bool IsApprovedProtected(UserConstraint user, SaShiftAssignment assignment)
+    private static bool IsProtectedAssignment(
+        UserConstraint user,
+        SaShiftAssignment assignment,
+        ShiftSolution solution)
     {
         if (user.RequiredShiftSlots.Any(s =>
                 s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel))
@@ -85,7 +90,25 @@ public static class AdjacentShiftRestGuard
             return true;
         }
 
-        return !assignment.IsOnCall &&
-               user.RequiredPresenceDates.Any(d => d.Date == assignment.Date.Date);
+        if (!assignment.IsOnCall &&
+            user.RequiredPresenceDates.Any(d => d.Date == assignment.Date.Date))
+        {
+            return true;
+        }
+
+        // شب‌های داخل سهمیه حداقل را برای توالی ممنوع قربانی نکن
+        if (assignment.ShiftLabel == ShiftLabel.Night &&
+            !assignment.IsOnCall &&
+            user.ExactNightShiftCount.HasValue)
+        {
+            var nightCount = solution.GetUserAllAssignments(user.UserId)
+                .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+            if (nightCount <= user.ExactNightShiftCount.Value)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

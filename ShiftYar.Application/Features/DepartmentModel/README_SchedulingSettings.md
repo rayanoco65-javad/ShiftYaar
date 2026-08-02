@@ -4,6 +4,17 @@
 
 این راهنما توضیح می‌دهد که چگونه سوپروایزرها می‌توانند تنظیمات پیشرفته شیفت‌بندی را برای دپارتمان خود پیکربندی کنند تا الگوریتم شیفت‌بندی بتواند نیازهای خاص هر دپارتمان را در نظر بگیرد.
 
+## تنظیمات ایجاد/حذف شیفت‌بندی ماهانه
+
+این دو فلگ برای کنترل گیت‌های ماهانه در `optimize-and-save` و `DeleteMonthlySchedule` هستند:
+
+| فیلد | پیش‌فرض | توضیح |
+|------|---------|--------|
+| `AllowCurrentMonthScheduling` | خاموش | اجازه شیفت‌بندی/حذف برای **ماه شمسی جاری** حتی پس از شروع ماه — فقط توسعه و تست |
+| `AllowMonthlyRescheduleWithAutoDelete` | خاموش | هنگام Optimize جدید، برنامه قبلی همان ماه خودکار حذف و با برنامه جدید جایگزین می‌شود |
+
+**ترکیب تست ماه جاری:** هر دو را روشن کنید.
+
 ## تنظیمات حداقل شیفت برای پرسنل گردشی
 
 ### فعال‌سازی
@@ -100,7 +111,9 @@
   "NightShiftPreferenceWeight": 2.5,
   "RequireExperiencedManagerForNightShift": true,
   "MinExperienceYearsForNightShiftManager": 3,
-  "NightShiftManagerRequirementWeight": 3.0
+  "NightShiftManagerRequirementWeight": 3.0,
+  "AllowCurrentMonthScheduling": false,
+  "AllowMonthlyRescheduleWithAutoDelete": false
 }
 ```
 

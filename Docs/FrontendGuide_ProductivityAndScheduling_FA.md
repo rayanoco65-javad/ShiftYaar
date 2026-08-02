@@ -68,6 +68,31 @@
   - مجموع `exactNightShiftCount` همه کاربران ≤ تعداد روزهای همان ماه شمسی در `ShiftDates`
   - مجموع `exactHolidayWeekendNightShiftCount` ≤ تعداد شب‌های تعطیل/آخرهفته همان ماه (طبق `IsHoliday` در `ShiftDates` و قاعده شبِ قبل از تعطیل)
   - اگر تقویم ناقص باشد یا مجموع از ظرفیت بیشتر شود، API با `isSuccess: false` و پیام فارسی مناسب برمی‌گردد — همان `message` را به سوپروایزر نشان دهید.
+- **ارتباط با درخواست شیفت شب:**
+  - هر درخواست تأییدشدهٔ حضور در شیفت شب، یک واحد از سهمیه شب همان ماه کاربر مصرف می‌کند.
+  - ثبت/تأیید درخواست شب بدون سهمیه ماهانه، یا بیش از سهمیه، رد می‌شود.
+  - نمی‌توان سهمیه را کمتر از تعداد درخواست‌های شب تأییدشدهٔ همان ماه تنظیم کرد.
+  - در Optimize، رسیدن به سهمیه حداقل شب **اجباری** است؛ در غیر این صورت شیفت‌بندی با خطا متوقف می‌شود.
+
+#### ترتیب پیشنهادی کار سوپروایزر
+
+1. تکمیل `ShiftDates` ماه موردنظر  
+2. تنظیم سهمیه شب ماهانه (`UserMonthlyNightQuota`) طوری که مجموع ≤ تعداد شب‌های ماه باشد  
+3. ثبت/تأیید درخواست‌ها (درخواست شب فقط داخل سهمیه)  
+4. در صورت نیاز حذف برنامه قبلی (`DeleteMonthlySchedule`) یا فعال بودن `allowMonthlyRescheduleWithAutoDelete`  
+5. `optimize-and-save` / `optimize-and-save-async`
+
+## ۱.۶ قوانین ترکیب شیفت در یک روز
+
+| ترکیب | وضعیت | دلیل |
+|--------|--------|------|
+| صبح + عصر | مجاز | حداکثر ترکیب متوالی مجاز |
+| صبح + شب | مجاز | عصر بین آن‌ها فاصله زمانی است |
+| عصر + شب | ممنوع | متوالی و بیش از ۱۲ ساعت |
+| شب → صبحِ روز بعد | ممنوع | متوالی بدون فاصله |
+| صبح + عصر + شب | ممنوع | شامل عصر+شب |
+
+فرانت نباید ترکیب‌های ممنوع را به‌عنوان گزینهٔ همزمان پیشنهاد دهد؛ بک‌اند هم در الگوریتم و گاردها آن‌ها را رد می‌کند.
 
 ### فیلدهای DTO کاربر (باقی‌مانده)
 
@@ -368,6 +393,8 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - دکمه حذف شیفت‌بندی ماه (`DeleteMonthlySchedule`) + قفل Optimize وقتی برنامه قبلی هست یا ماه شروع شده (با درنظرگرفتن فلگ‌های `allowCurrentMonthScheduling` و `allowMonthlyRescheduleWithAutoDelete`)
 - دو سوئیچ در فرم تنظیمات دپارتمان: `allowCurrentMonthScheduling` و `allowMonthlyRescheduleWithAutoDelete`
 - در فرم درخواست شیفت: برای حضور فقط `SpecificShift`؛ گزینهٔ حضور کل‌روز را نشان ندهید / غیرفعال کنید
+- قبل از ثبت درخواست شب: نمایش باقی‌ماندهٔ سهمیه شب ماهانه کاربر؛ در صورت پر بودن سهمیه، دکمه را قفل کنید
+- نمایش خطای Optimize وقتی سهمیه شب برآورده نشود (`message` را عیناً نشان دهید)
 - توزیع عادلانه صبح/عصر **روزهای تعطیل** (نه فقط تعادل ماهانه M/E)
 - اضافه کردن فیلدهای `Holiday*` به فرم `ShiftRequiredSpecialty`
 - تفکیک UI روز عادی و روز تعطیل در نیازمندی تخصص
@@ -388,6 +415,9 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftSchedulingModel/DeleteMonthlyScheduleRequestDto.cs`
 - `ShiftYar.Domain/Entities/DepartmentModel/DepartmentSchedulingSettings.cs`
 - `ShiftYar.Application/DTOs/DepartmentModel/DepartmentSchedulingSettingsDtoAdd.cs`
+- `ShiftYar.Application/Common/Utilities/NightQuotaRequestLinker.cs`
+- `ShiftYar.Application/Common/Utilities/DailyAssignmentRules.cs`
+- `ShiftYar.Application/Common/Utilities/AdjacentShiftRestRules.cs`
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftRequiredSpecialtyModel/ShiftRequiredSpecialtyDtoAdd.cs`
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftRequiredSpecialtyModel/ShiftRequiredSpecialtyDtoGet.cs`
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftSchedulingModel/ShiftSchedulingResultDto.cs`

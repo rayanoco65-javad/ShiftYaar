@@ -1261,8 +1261,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftCoverageGuard.Enforce(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
 
-            // آخرین حرف: درخواست‌های تأییدشده (ممکن است گاردهای قبلی آن‌ها را برداشته باشند)
+            // آخرین حرف درخواست‌های تأییدشده، سپس تکمیل قطعی سهمیه شب
             ApprovedRequestGuard.ForceApply(solution, _constraints);
+            ExactNightQuotaGuard.Enforce(solution, _constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+            ApprovedRequestGuard.ForceApply(solution, _constraints);
+            ExactNightQuotaGuard.Enforce(solution, _constraints);
 
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(managerWarnings);
@@ -1271,6 +1275,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             solution.Violations.AddRange(AdjacentShiftRestGuard.GetViolations(solution, _constraints));
             solution.Violations.AddRange(DailyDuplicateAssignmentGuard.GetViolations(solution, _constraints));
             solution.Violations.AddRange(GetExactNightQuotaViolations(solution));
+        }
+
+        public bool AreExactNightQuotasSatisfied(ShiftSolution solution, out List<string> unmet)
+        {
+            unmet = GetExactNightQuotaViolations(solution);
+            return unmet.Count == 0;
         }
 
         private List<string> GetExactNightQuotaViolations(ShiftSolution solution)

@@ -849,6 +849,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
             scheduler.ApplyMandatoryConstraints(solution);
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
+            EnsureExactNightQuotasOrThrow(scheduler, solution);
 
             var result = await ConvertSolutionToResultAsync(solution, constraints);
             result.AlgorithmUsed = SchedulingAlgorithm.SimulatedAnnealing;
@@ -1201,6 +1202,17 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             {
                 throw new InvalidOperationException(
                     "درخواست‌های تأییدشده به‌طور کامل در شیفت‌بندی اعمال نشدند:\n" + string.Join("\n", unmet));
+            }
+        }
+
+        private static void EnsureExactNightQuotasOrThrow(
+            SimulatedAnnealingScheduler scheduler,
+            ShiftSolution solution)
+        {
+            if (!scheduler.AreExactNightQuotasSatisfied(solution, out var unmet))
+            {
+                throw new InvalidOperationException(
+                    "سهمیه حداقل شیفت شب برای همه کاربران اعمال نشد:\n" + string.Join("\n", unmet));
             }
         }
 
@@ -2490,6 +2502,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters());
             scheduler.ApplyMandatoryConstraints(solution);
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
+            EnsureExactNightQuotasOrThrow(scheduler, solution);
         }
 
 
@@ -2539,6 +2552,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
             scheduler.ApplyMandatoryConstraints(solution);
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
+            EnsureExactNightQuotasOrThrow(scheduler, solution);
 
             var result = await ConvertSolutionToResultAsync(solution, constraints);
             result.AlgorithmUsed = SchedulingAlgorithm.SimulatedAnnealing;

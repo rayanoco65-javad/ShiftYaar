@@ -22,7 +22,7 @@ public static class ExactNightQuotaGuard
         }
 
         // اول کسری‌های شدیدتر (شب تعطیل، سپس کل)، بعد سهمیه‌های کوچک‌تر تا روی صندلی‌های کمیاب گیر نکنند
-        for (var pass = 0; pass < 2; pass++)
+        for (var pass = 0; pass < 5; pass++)
         {
             foreach (var user in OrderUsersByDeficit(solution, constraints))
             {

@@ -7,7 +7,11 @@ using ShiftYar.Application.Features.UserModel.Filters;
 using ShiftYar.Application.Interfaces.Persistence;
 using ShiftYar.Application.Interfaces.UserModel;
 using ShiftYar.Domain.Entities.ShiftDateModel;
+using ShiftYar.Domain.Entities.ShiftRequestModel;
 using ShiftYar.Domain.Entities.UserModel;
+using ShiftYar.Domain.Enums.ShiftRequestModel;
+using ShiftYar.Domain.Enums.ShiftModel;
+using ShiftYar.Application.Common.Utilities;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -21,6 +25,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
         private readonly IEfRepository<UserMonthlyNightQuota> _repository;
         private readonly IEfRepository<User> _userRepository;
         private readonly IEfRepository<ShiftDate> _shiftDateRepository;
+        private readonly IEfRepository<ShiftRequest> _shiftRequestRepository;
         private readonly ILogger<UserMonthlyNightQuotaService> _logger;
         private readonly IHttpContextAccessor _httpContextAccessor;
 
@@ -28,12 +33,14 @@ namespace ShiftYar.Application.Features.UserModel.Services
             IEfRepository<UserMonthlyNightQuota> repository,
             IEfRepository<User> userRepository,
             IEfRepository<ShiftDate> shiftDateRepository,
+            IEfRepository<ShiftRequest> shiftRequestRepository,
             ILogger<UserMonthlyNightQuotaService> logger,
             IHttpContextAccessor httpContextAccessor)
         {
             _repository = repository;
             _userRepository = userRepository;
             _shiftDateRepository = shiftDateRepository;
+            _shiftRequestRepository = shiftRequestRepository;
             _logger = logger;
             _httpContextAccessor = httpContextAccessor;
         }
@@ -252,6 +259,13 @@ namespace ShiftYar.Application.Features.UserModel.Services
             int? night,
             int? holiday)
         {
+            var approvedFloorError = await ValidateQuotaAgainstApprovedNightRequestsAsync(
+                dto.UserId, dto.PersianYear, dto.PersianMonth, night, holiday);
+            if (approvedFloorError != null)
+            {
+                return ApiResponse<UserMonthlyNightQuotaDtoGet>.Fail(approvedFloorError);
+            }
+
             var (existing, _) = await _repository.GetByFilterAsync(
                 new SimpleFilter<UserMonthlyNightQuota>(q =>
                     q.UserId == dto.UserId &&
@@ -403,6 +417,54 @@ namespace ShiftYar.Application.Features.UserModel.Services
             }
 
             return null;
+        }
+
+        private async Task<string?> ValidateQuotaAgainstApprovedNightRequestsAsync(
+            int userId,
+            int persianYear,
+            int persianMonth,
+            int? nightQuota,
+            int? holidayQuota)
+        {
+            if (!nightQuota.HasValue && !holidayQuota.HasValue)
+            {
+                return null;
+            }
+
+            var (monthStart, monthEnd, _) = PersianMonthNightCalendar.GetMonthBounds(persianYear, persianMonth);
+            var (approvedRequests, _) = await _shiftRequestRepository.GetByFilterAsync(
+                new SimpleFilter<ShiftRequest>(r =>
+                    r.UserId == userId &&
+                    r.Status == RequestStatus.Approved &&
+                    r.RequestAction == RequestAction.RequestToBeOnShift &&
+                    r.RequestType == RequestType.SpecificShift &&
+                    r.ShiftLabel == ShiftEnums.ShiftLabel.Night &&
+                    r.RequestDate != null &&
+                    r.RequestDate >= monthStart &&
+                    r.RequestDate <= monthEnd));
+
+            var approvedNightCount = NightQuotaRequestLinker.CountApprovedNightOnRequestsInMonth(
+                approvedRequests, userId, persianYear, persianMonth);
+
+            var (shiftDates, _) = await _shiftDateRepository.GetByFilterAsync(
+                new SimpleFilter<ShiftDate>(d =>
+                    d.Date != null &&
+                    d.Date >= monthStart &&
+                    d.Date <= monthEnd.AddDays(1)));
+            var holidays = shiftDates
+                .Where(d => d.IsHoliday == true && d.Date.HasValue)
+                .Select(d => d.Date!.Value.Date)
+                .ToHashSet();
+
+            var approvedHolidayCount = NightQuotaRequestLinker.CountApprovedHolidayNightOnRequestsInMonth(
+                approvedRequests,
+                userId,
+                persianYear,
+                persianMonth,
+                date => HolidayWeekendNightRules.IsHolidayWeekendNight(date, holidays));
+
+            return NightQuotaRequestLinker.ValidateQuotaNotBelowApprovedRequests(
+                nightQuota, approvedNightCount, holidayQuota, approvedHolidayCount, persianYear, persianMonth);
         }
 
         private async Task<(int NightDays, int HolidayWeekendNightDays, string? Error)> TryGetMonthNightCapacityAsync(

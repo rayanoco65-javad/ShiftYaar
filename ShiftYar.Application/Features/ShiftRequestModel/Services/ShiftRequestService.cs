@@ -1,5 +1,6 @@
 ﻿using AutoMapper;
 using Microsoft.Extensions.Logging;
+using ShiftYar.Application.Common.Filters;
 using ShiftYar.Application.Common.Models.ResponseModel;
 using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.DTOs.ShiftModel;
@@ -7,11 +8,13 @@ using ShiftYar.Application.DTOs.ShiftModel.ShiftRequestModel;
 using ShiftYar.Application.Features.DepartmentModel.Filters;
 using ShiftYar.Application.Features.ShiftModel.Filters;
 using ShiftYar.Application.Features.ShiftRequestModel.Filters;
+using ShiftYar.Application.Features.UserModel.Services;
 using ShiftYar.Application.Interfaces.Persistence;
 using ShiftYar.Application.Interfaces.ShiftRequestModel;
 using ShiftYar.Domain.Entities.DepartmentModel;
 using ShiftYar.Domain.Entities.ShiftModel;
 using ShiftYar.Domain.Entities.ShiftRequestModel;
+using ShiftYar.Domain.Entities.ShiftDateModel;
 using ShiftYar.Domain.Entities.UserModel;
 using ShiftYar.Domain.Enums.ShiftRequestModel;
 using ShiftYar.Domain.Enums.ShiftModel;
@@ -31,6 +34,8 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
         private readonly IEfRepository<Department> _repositorDepartment;
         private readonly IEfRepository<DepartmentSchedulingSettings> _deptSettingsRepository;
         private readonly IEfRepository<Shift> _shiftRepository;
+        private readonly IEfRepository<UserMonthlyNightQuota> _monthlyNightQuotaRepository;
+        private readonly IEfRepository<ShiftDate> _shiftDateRepository;
         private readonly IMapper _mapper;
         private readonly ILogger<ShiftRequestService> _logger;
 
@@ -40,6 +45,8 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
             IEfRepository<Department> repositorDepartment,
             IEfRepository<DepartmentSchedulingSettings> deptSettingsRepository,
             IEfRepository<Shift> shiftRepository,
+            IEfRepository<UserMonthlyNightQuota> monthlyNightQuotaRepository,
+            IEfRepository<ShiftDate> shiftDateRepository,
             IMapper mapper,
             ILogger<ShiftRequestService> logger)
         {
@@ -48,6 +55,8 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
             _repositorDepartment = repositorDepartment;
             _deptSettingsRepository = deptSettingsRepository;
             _shiftRepository = shiftRepository;
+            _monthlyNightQuotaRepository = monthlyNightQuotaRepository;
+            _shiftDateRepository = shiftDateRepository;
             _mapper = mapper;
             _logger = logger;
         }
@@ -106,6 +115,12 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                             raw, resolved, dto.UserId);
                         entity.ShiftLabel = resolved;
                     }
+                }
+
+                var nightQuotaError = await ValidateNightOnRequestAgainstMonthlyQuotaAsync(entity);
+                if (nightQuotaError != null)
+                {
+                    return ApiResponse<ShiftRequestDtoGet>.Fail(nightQuotaError);
                 }
 
                 await _repository.AddAsync(entity);
@@ -205,6 +220,12 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 if (typeError != null)
                 {
                     return ApiResponse<ShiftRequestDtoGet>.Fail(typeError);
+                }
+
+                var nightQuotaError = await ValidateNightOnRequestAgainstMonthlyQuotaAsync(entity);
+                if (nightQuotaError != null)
+                {
+                    return ApiResponse<ShiftRequestDtoGet>.Fail(nightQuotaError);
                 }
 
                 await _repository.SaveAsync();
@@ -379,6 +400,12 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 return typeError;
             }
 
+            var nightQuotaError = await ValidateNightOnRequestAgainstMonthlyQuotaAsync(entity);
+            if (nightQuotaError != null)
+            {
+                return nightQuotaError;
+            }
+
             if (entity.RequestAction != RequestAction.RequestToBeOnShift ||
                 entity.RequestType != RequestType.SpecificShift ||
                 !entity.ShiftLabel.HasValue ||
@@ -439,6 +466,80 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// درخواست حضور در شیفت شب باید داخل سهمیه ماهانه کاربر بماند.
+        /// </summary>
+        private async Task<string?> ValidateNightOnRequestAgainstMonthlyQuotaAsync(ShiftRequest entity)
+        {
+            if (!NightQuotaRequestLinker.IsNightOnRequest(entity) ||
+                !entity.UserId.HasValue ||
+                !entity.RequestDate.HasValue)
+            {
+                return null;
+            }
+
+            var (year, month) = NightQuotaRequestLinker.GetPersianYearMonth(entity.RequestDate.Value);
+            var (monthStart, monthEnd, _) = PersianMonthNightCalendar.GetMonthBounds(year, month);
+
+            var (quotas, _) = await _monthlyNightQuotaRepository.GetByFilterAsync(
+                new SimpleFilter<UserMonthlyNightQuota>(q =>
+                    q.UserId == entity.UserId.Value &&
+                    q.PersianYear == year &&
+                    q.PersianMonth == month));
+            var quota = quotas.FirstOrDefault();
+
+            var (approvedRequests, _) = await _repository.GetByFilterAsync(
+                new SimpleFilter<ShiftRequest>(r =>
+                    r.UserId == entity.UserId.Value &&
+                    r.Status == RequestStatus.Approved &&
+                    r.RequestAction == RequestAction.RequestToBeOnShift &&
+                    r.RequestType == RequestType.SpecificShift &&
+                    r.ShiftLabel == ShiftEnums.ShiftLabel.Night &&
+                    r.RequestDate != null &&
+                    r.RequestDate >= monthStart &&
+                    r.RequestDate <= monthEnd));
+
+            // هنگام تأیید، خود این درخواست هنوز Approved نیست؛ هنگام ویرایش Pending هم شمرده نمی‌شود
+            var approvedNightCount = NightQuotaRequestLinker.CountApprovedNightOnRequestsInMonth(
+                approvedRequests, entity.UserId.Value, year, month, excludeRequestId: entity.Id);
+
+            var nightError = NightQuotaRequestLinker.ValidateNightOnAgainstQuota(
+                approvedNightCount, quota?.ExactNightShiftCount, year, month);
+            if (nightError != null)
+            {
+                return nightError;
+            }
+
+            var (shiftDates, _) = await _shiftDateRepository.GetByFilterAsync(
+                new SimpleFilter<ShiftDate>(d =>
+                    d.Date != null &&
+                    d.Date >= monthStart &&
+                    d.Date <= monthEnd.AddDays(1)));
+            var holidays = shiftDates
+                .Where(d => d.IsHoliday == true && d.Date.HasValue)
+                .Select(d => d.Date!.Value.Date)
+                .ToHashSet();
+
+            bool IsHolidayNight(DateTime date) =>
+                HolidayWeekendNightRules.IsHolidayWeekendNight(date, holidays);
+
+            if (!IsHolidayNight(entity.RequestDate.Value.Date))
+            {
+                return null;
+            }
+
+            var approvedHolidayCount = NightQuotaRequestLinker.CountApprovedHolidayNightOnRequestsInMonth(
+                approvedRequests,
+                entity.UserId.Value,
+                year,
+                month,
+                IsHolidayNight,
+                excludeRequestId: entity.Id);
+
+            return NightQuotaRequestLinker.ValidateHolidayNightOnAgainstQuota(
+                approvedHolidayCount, quota?.ExactHolidayWeekendNightShiftCount, year, month);
         }
 
     }

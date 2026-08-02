@@ -118,57 +118,51 @@
 - تاریخ استخدام در ورودی شمسی است و در سیستم به میلادی تبدیل می‌شود.
 - تعیین `ShiftType` کاربر (ثابت/گردشی) و قابلیت مدیر شیفت بودن در صورت نیاز.
 
-## 4) ثبت درخواست‌های شیفت توسط کارکنان
+## 4) سهمیه شب ماهانه و درخواست‌های شیفت
+
+### 4.1) سهمیه شب ماهانه (`UserMonthlyNightQuota`)
+قبل از Optimize هر ماه، سوپروایزر سهمیه حداقل شب را برای همان ماه شمسی تنظیم می‌کند.
+- مجموع سهمیه‌های دپارتمان ≤ تعداد شب‌های ماه (`ShiftDates`)
+- هر درخواست شب تأییدشده یک واحد از سهمیه کاربر مصرف می‌کند
+- رسیدن به سهمیه در Optimize **اجباری** است
+
+نمونه: `POST /UpsertDepartmentMonthlyNightQuotas`
+
+### 4.2) ثبت درخواست‌های شیفت توسط کارکنان
 کارکنان تا قبل از شروع ماه جدید، درخواست‌های خود را ثبت می‌کنند؛ سپس سوپروایزر بررسی و تأیید/رد می‌کند.
-- Create Request: `POST /api/ShiftRequest` با بدنه (مثال شیفت/عدم‌حضور یک‌روزه):
+- Create Request: `POST /api/ShiftRequest` با بدنه (مثال حضور در شیفت مشخص):
 ```
 {
   "userId": 10,
-  "requestPersianDate": "1404/01/05",
+  "requestPersianDate": "1405/05/13",
   "requestType": 1,
-  "shiftLabel": 0,
+  "shiftLabel": 2,
   "requestAction": 0,
-  "reason": "..."
+  "reason": "درخواست شیفت شب"
 }
 ```
-- Create Leave Range: `POST /api/ShiftRequest/CreateShiftRequestForLeave` با بدنه:
-```
-{
-  "userId": 10,
-  "startPersianDate": "1404/01/10",
-  "endPersianDate": "1404/01/15",
-  "reason": "مرخصی"
-}
-```
-- Update/Delete/Approve: از اکشن‌های مربوط به ویرایش توسط کاربر/سوپروایزر استفاده کنید؛ حتماً وضعیت `Approved` شود تا در زمان‌بندی لحاظ گردد.
+- `requestType`: `0` = کل‌روز (فقط مرخصی/عدم‌حضور)، `1` = شیفت مشخص (برای حضور الزامی)
+- حضور کل‌روز مجاز نیست
+- برای درخواست شب: سهمیه ماهانه باید از قبل تنظیم شده باشد و از سهمیه تجاوز نشود
+- Create Leave Range: `POST /api/ShiftRequest/CreateShiftRequestForLeave`
+- Update/Delete/Approve: وضعیت باید `Approved` شود تا در زمان‌بندی لحاظ گردد
+
+### 4.3) ترکیب مجاز در یک روز
+- مجاز: صبح+عصر ، صبح+شب
+- ممنوع: عصر+شب ، شب→صبح روز بعد
 
 ## 5) اجرای شیفت‌بندی
-پس از تعیین تکلیف تمام درخواست‌ها (نباید درخواست در وضعیت Pending باقی مانده باشد):
-1) اعتبارسنجی ورودی (اختیاری ولی توصیه‌شده)
+پس از تعیین سهمیه شب و تکلیف تمام درخواست‌ها (نباید درخواست Pending باقی بماند):
+1) در صورت وجود برنامه قبلی: `POST /DeleteMonthlySchedule` یا فعال بودن `allowMonthlyRescheduleWithAutoDelete`
+2) اعتبارسنجی ورودی (اختیاری ولی توصیه‌شده)
    - Endpoint: `POST /api/ShiftScheduling/validate`
-   - Body نمونه:
-```
-{
-  "departmentId": 1,
-  "startDate": "1404/02/01",
-  "endDate": "1404/02/31",
-  "algorithm": 2
-}
-```
-- پارامترهای الگوریتم به‌صورت خودکار از تنظیمات ادمین (AlgorithmSettings) خوانده می‌شوند و نیازی نیست سوپروایزر چیزی بداند یا پر کند.
-2) اجرای بهینه‌سازی
-   - Endpoint: `POST /api/ShiftScheduling/optimize`
-   - ورودی مشابه بالا؛ تاریخ‌ها شمسی هستند و در کنترلر به میلادی تبدیل می‌شوند.
-   - سیستم به‌صورت خودکار:
-     - کاربران فعال دپارتمان را بارگذاری می‌کند.
-     - درخواست‌های تاییدشده در بازه را اعمال می‌کند (ترجیحات/عدم‌حضور).
-     - قوانین سخت/نرم و مقادیر عددی را از پایگاه داده می‌خواند.
-     - پارامترهای الگوریتم را از تنظیمات ادمین (یا پیش‌فرض داخلی) می‌خواند.
-3) مشاهده آمار الگوریتم
-   - Endpoint: `POST /api/ShiftScheduling/statistics`
-4) ذخیره خروجی
-   - Endpoint: `POST /api/ShiftScheduling/save`
-   - خروجی `optimize` را ارسال کنید. سیستم انتساب‌های قبلی بازه را حذف و نتایج جدید را با `ShiftDateId` ذخیره می‌کند.
+3) اجرای بهینه‌سازی و ذخیره
+   - `POST /api/ShiftScheduling/optimize-and-save` یا نسخه async
+   - سیستم سهمیه شب ماهانه و درخواست‌های تأییدشده را اعمال می‌کند
+   - اگر سهمیه شب برآورده نشود، عملیات با خطا متوقف می‌شود
+4) فلگ‌های تست در `DepartmentSchedulingSettings`:
+   - `allowCurrentMonthScheduling`
+   - `allowMonthlyRescheduleWithAutoDelete`
 
 ## 6) نکات عدالت و چرخش
 - با وزن‌های `FairShiftCountBalanceWeight`, `ExtraShiftRotationWeight`, `ShiftLabelBalanceWeight` می‌توانید شدت عدالت را تنظیم کنید.
