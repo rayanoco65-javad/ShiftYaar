@@ -221,6 +221,7 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools
                 {
                     var dailyAssignments = new List<IntVar>();
                     var nightAssignments = new List<IntVar>();
+                    var eveningAssignments = new List<IntVar>();
 
                     for (int shiftIndex = 0; shiftIndex < _constraints.NumShifts; shiftIndex++)
                     {
@@ -231,10 +232,14 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools
                         }
 
                         dailyAssignments.Add(variables[key]);
-                        if (_constraints.ShiftRequirements[shiftIndex].ShiftLabel ==
-                            Domain.Enums.ShiftModel.ShiftEnums.ShiftLabel.Night)
+                        var label = _constraints.ShiftRequirements[shiftIndex].ShiftLabel;
+                        if (label == Domain.Enums.ShiftModel.ShiftEnums.ShiftLabel.Night)
                         {
                             nightAssignments.Add(variables[key]);
+                        }
+                        else if (label == Domain.Enums.ShiftModel.ShiftEnums.ShiftLabel.Evening)
+                        {
+                            eveningAssignments.Add(variables[key]);
                         }
                     }
 
@@ -243,18 +248,12 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools
                         model.Add(LinearExpr.Sum(dailyAssignments) <= _constraints.GlobalConstraints.MaxShiftsPerDay);
                     }
 
-                    // اگر شب باشد، هیچ شیفت دیگری در همان روز مجاز نیست
-                    if (nightAssignments.Count > 0 && dailyAssignments.Count > nightAssignments.Count)
+                    // عصر+شب همان روز ممنوع؛ صبح+شب مجاز است
+                    foreach (var nightVar in nightAssignments)
                     {
-                        var nonNight = dailyAssignments.Except(nightAssignments).ToList();
-                        // night => no other: sum(nonNight) + sum(night)*M style: sum(all) <= 1 + (1-night)*1
-                        // simpler: for each night var n and each other o: n + o <= 1
-                        foreach (var nightVar in nightAssignments)
+                        foreach (var eveningVar in eveningAssignments)
                         {
-                            foreach (var other in nonNight)
-                            {
-                                model.Add(nightVar + other <= 1);
-                            }
+                            model.Add(nightVar + eveningVar <= 1);
                         }
                     }
                 }

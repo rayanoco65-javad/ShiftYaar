@@ -318,7 +318,7 @@ public class ExactNightQuotaTests
 
         Assert.True(solution.GetUserAllAssignments(4).Count(a => a.ShiftLabel == ShiftLabel.Night) >= 3);
 
-        // کاربر ۱۱ صبح همان روز تعطیل را دارد تا ClearConflictingDayShifts هم تست شود
+        // کاربر ۱۱ صبح همان روز تعطیل را دارد؛ صبح+شب مجاز است و صبح نباید پاک شود
         solution.AddAssignment(11, 1, friday, ShiftLabel.Morning, false);
 
         ExactNightQuotaGuard.Enforce(solution, constraints);
@@ -326,7 +326,7 @@ public class ExactNightQuotaTests
         var u11 = solution.GetUserAllAssignments(11).Where(a => a.ShiftLabel == ShiftLabel.Night).ToList();
         Assert.True(u11.Count >= 1, $"Expected >=1 night for user 11, got {u11.Count}");
         Assert.Contains(u11, a => HolidayWeekendNightRules.IsHolidayWeekendNight(a.Date, holidays));
-        Assert.DoesNotContain(
+        Assert.Contains(
             solution.GetUserAllAssignments(11),
             a => a.Date.Date == friday && a.ShiftLabel == ShiftLabel.Morning);
         Assert.True(

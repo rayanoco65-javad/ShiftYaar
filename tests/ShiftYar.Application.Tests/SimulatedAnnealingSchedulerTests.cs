@@ -617,6 +617,63 @@ public class SimulatedAnnealingSchedulerTests
         }
 
         [Fact]
+        public void ApplyMandatoryConstraints_KeepsFullDayPresence_WhenPreviousNightWouldBlockMorning()
+        {
+            var day0 = new DateTime(2026, 8, 3);
+            var day1 = new DateTime(2026, 8, 4);
+            var specialty = new SpecialtyRequirement
+            {
+                SpecialtyId = 10,
+                RequiredTotalCount = 1
+            };
+
+            var constraints = BuildConstraints(
+                start: day0,
+                days: 2,
+                users: new[]
+                {
+                    User(1, UserGender.Female),
+                    User(2, UserGender.Male),
+                    User(3, UserGender.Male),
+                },
+                specialty: specialty);
+
+            constraints.ShiftRequirements.Add(new ShiftRequirement
+            {
+                ShiftId = 2,
+                ShiftLabel = ShiftLabel.Evening,
+                DepartmentId = 1,
+                DurationHours = 8,
+                SpecialtyRequirements = new List<SpecialtyRequirement> { CloneSpecialty(specialty) }
+            });
+            constraints.ShiftRequirements.Add(new ShiftRequirement
+            {
+                ShiftId = 3,
+                ShiftLabel = ShiftLabel.Night,
+                DepartmentId = 1,
+                DurationHours = 8,
+                SpecialtyRequirements = new List<SpecialtyRequirement> { CloneSpecialty(specialty) }
+            });
+            constraints.GlobalConstraints.MaxShiftsPerDay = 2;
+            constraints.UserConstraints[0].UserName = "پریسا جعفری سگوند";
+            constraints.UserConstraints[0].RequiredPresenceDates.Add(day1);
+
+            var solution = new ShiftSolution();
+            // شب روز قبل → صبح روز حضور را مسدود می‌کند مگر گارد درست عمل کند
+            solution.AddAssignment(1, 3, day0, ShiftLabel.Night, isOnCall: false);
+            solution.AddAssignment(2, 1, day0, ShiftLabel.Morning, isOnCall: false);
+            solution.AddAssignment(2, 1, day1, ShiftLabel.Morning, isOnCall: false);
+
+            var scheduler = new SimulatedAnnealingScheduler(constraints, FastParameters);
+            scheduler.ApplyMandatoryConstraints(solution);
+
+            Assert.True(
+                solution.GetUserAssignments(1, day1).Any(a => !a.IsOnCall),
+                "حضور اجباری کل‌روز باید بعد از گارد توالی همچنان برقرار بماند");
+            Assert.Empty(ApprovedRequestGuard.GetUnmetViolations(solution, constraints));
+        }
+
+        [Fact]
         public void ApprovedRequestGuard_ForceApply_UsesShiftId_WhenFrontendSentShiftIdAsLabel()
         {
             // شبیه‌سازی باگ واقعی: فرانت Shift.Id=1/2/3 را به‌جای Label=0/1/2 می‌فرستد

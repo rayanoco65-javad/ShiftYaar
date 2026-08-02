@@ -147,7 +147,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
-                    if (!IsUserAvailable(user, required.Date, required.ShiftLabel, solution))
+                    if (!IsOffConflictFree(user, required.Date, required.ShiftLabel) ||
+                        !Common.Utilities.ShiftEligibilityResolver.IsLabelAllowed(
+                            user.AllowedShiftLabels, required.ShiftLabel))
                     {
                         continue;
                     }
@@ -162,6 +164,14 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         .FirstOrDefault(a => a.UserId == user.UserId);
 
                     if (existing != null && !existing.IsOnCall)
+                    {
+                        continue;
+                    }
+
+                    ClearUnprotectedAdjacentConflicts(solution, user, required.Date, required.ShiftLabel);
+                    ClearUnprotectedSameDayConflicts(solution, user, required.Date, required.ShiftLabel);
+
+                    if (!IsUserAvailable(user, required.Date, required.ShiftLabel, solution))
                     {
                         continue;
                     }
@@ -205,7 +215,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         .FirstOrDefault(a => a.IsOnCall);
 
                     var candidates = constraints.ShiftRequirements
-                        .Where(s => IsUserAvailable(user, presenceDate, s.ShiftLabel, solution))
+                        .Where(s => IsOffConflictFree(user, presenceDate, s.ShiftLabel))
+                        .Where(s => Common.Utilities.ShiftEligibilityResolver.IsLabelAllowed(
+                            user.AllowedShiftLabels, s.ShiftLabel))
                         .OrderByDescending(s => onCallOnly != null && s.ShiftId == onCallOnly.ShiftId ? 1_000_000 : 0)
                         .ThenByDescending(s =>
                         {
@@ -219,10 +231,26 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                                 .Count(a => !a.IsOnCall && GetSpecialty(constraints, a.UserId) == user.SpecialtyId);
                             return req.RequiredTotalCount - current;
                         })
+                        .ThenBy(s =>
+                            Common.Utilities.AdjacentShiftRestRules.WouldConflict(
+                                solution.GetUserAllAssignments(user.UserId), presenceDate, s.ShiftLabel)
+                                ? 1
+                                : 0)
                         .ThenBy(s => s.ShiftId)
                         .ToList();
 
-                    var target = candidates.FirstOrDefault();
+                    ShiftRequirement? target = null;
+                    foreach (var candidate in candidates)
+                    {
+                        ClearUnprotectedAdjacentConflicts(solution, user, presenceDate, candidate.ShiftLabel);
+                        ClearUnprotectedSameDayConflicts(solution, user, presenceDate, candidate.ShiftLabel);
+                        if (IsUserAvailable(user, presenceDate, candidate.ShiftLabel, solution))
+                        {
+                            target = candidate;
+                            break;
+                        }
+                    }
+
                     if (target == null)
                     {
                         continue;
@@ -242,6 +270,100 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         isOnCall: false);
                 }
             }
+        }
+
+        /// <summary>
+        /// برای حضور اجباری، انتساب‌های غیرمحافظت‌شده‌ای که توالی ممنوع می‌سازند حذف می‌شوند.
+        /// </summary>
+        private static void ClearUnprotectedAdjacentConflicts(
+            ShiftSolution solution,
+            UserConstraint user,
+            DateTime date,
+            ShiftLabel label)
+        {
+            foreach (var assignment in solution.GetUserAllAssignments(user.UserId).ToList())
+            {
+                if (assignment.Date.Date == date.Date && assignment.ShiftLabel == label)
+                {
+                    continue;
+                }
+
+                var earlierLabel = assignment.ShiftLabel;
+                var earlierDate = assignment.Date.Date;
+                var laterLabel = label;
+                var laterDate = date.Date;
+                if (date.Date < assignment.Date.Date ||
+                    (date.Date == assignment.Date.Date &&
+                     Common.Utilities.AdjacentShiftRestRules.LabelOrder(label) <
+                     Common.Utilities.AdjacentShiftRestRules.LabelOrder(assignment.ShiftLabel)))
+                {
+                    earlierLabel = label;
+                    earlierDate = date.Date;
+                    laterLabel = assignment.ShiftLabel;
+                    laterDate = assignment.Date.Date;
+                }
+
+                if (!Common.Utilities.AdjacentShiftRestRules.IsForbiddenBackToBack(
+                        earlierLabel, earlierDate, laterLabel, laterDate))
+                {
+                    continue;
+                }
+
+                if (IsHardProtectedAssignment(user, assignment))
+                {
+                    continue;
+                }
+
+                solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+            }
+        }
+
+        /// <summary>
+        /// ترکیب غیرمجاز همان‌روز (عصر+شب) را برای جای‌گذاری اجباری پاک می‌کند.
+        /// </summary>
+        private static void ClearUnprotectedSameDayConflicts(
+            ShiftSolution solution,
+            UserConstraint user,
+            DateTime date,
+            ShiftLabel label)
+        {
+            foreach (var assignment in solution.GetUserAssignments(user.UserId, date).ToList())
+            {
+                if (assignment.ShiftLabel == label)
+                {
+                    continue;
+                }
+
+                // فقط عصر↔شب متوالی و ممنوع است؛ صبح+شب مجاز است
+                var conflicts =
+                    (label == ShiftLabel.Night && assignment.ShiftLabel == ShiftLabel.Evening) ||
+                    (label == ShiftLabel.Evening && assignment.ShiftLabel == ShiftLabel.Night);
+
+                if (!conflicts)
+                {
+                    continue;
+                }
+
+                if (IsHardProtectedAssignment(user, assignment))
+                {
+                    continue;
+                }
+
+                solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+            }
+        }
+
+        private static bool IsHardProtectedAssignment(UserConstraint user, SaShiftAssignment assignment)
+        {
+            if (user.RequiredShiftSlots.Any(s =>
+                    s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel))
+            {
+                return true;
+            }
+
+            // حضور کل‌روز روی روز دیگر را حفظ کن تا لیبل دیگری برای امروز انتخاب شود
+            return !assignment.IsOnCall &&
+                   user.RequiredPresenceDates.Any(d => d.Date == assignment.Date.Date);
         }
 
         private static void MakeRoomForIncoming(

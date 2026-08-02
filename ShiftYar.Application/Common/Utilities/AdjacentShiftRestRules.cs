@@ -8,7 +8,7 @@ namespace ShiftYar.Application.Common.Utilities;
 
 /// <summary>
 /// ممنوعیت توالی بدون فاصله: عصر→شب (همان روز) و شب→صبح (روز بعد).
-/// بین این جفت‌ها باید حداقل یک نوبت شیفت فاصله باشد.
+/// صبح+شب همان روز مجاز است چون شیفت عصر بین آن‌ها فاصله زمانی ایجاد می‌کند.
 /// </summary>
 public static class AdjacentShiftRestRules
 {
@@ -40,14 +40,6 @@ public static class AdjacentShiftRestRules
             return true;
         }
 
-        // صبح و شب در همان روز (ترکیب غیرمجاز؛ فقط صبح+عصر مجاز است)
-        if (earlierLabel == ShiftLabel.Morning &&
-            laterLabel == ShiftLabel.Night &&
-            d0 == d1)
-        {
-            return true;
-        }
-
         // شب روز D بلافاصله صبح روز D+1
         if (earlierLabel == ShiftLabel.Night &&
             laterLabel == ShiftLabel.Morning &&
@@ -55,6 +47,8 @@ public static class AdjacentShiftRestRules
         {
             return true;
         }
+
+        // صبح+شب همان روز مجاز است (عصر بین آن‌ها فاصله زمانی است)
 
         return false;
     }

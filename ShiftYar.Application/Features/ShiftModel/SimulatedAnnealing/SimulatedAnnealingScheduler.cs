@@ -953,7 +953,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
             }
 
-            // ترکیب روزانه: صبح+عصر مجاز؛ شب تنها؛ سقف MaxShiftsPerDay
+            // ترکیب روزانه: صبح+عصر و صبح+شب مجاز؛ عصر+شب ممنوع؛ سقف MaxShiftsPerDay
             {
                 var maxPerDay = _constraints.HardRules.EnforceMaxShiftsPerDay
                     ? Math.Max(1, _constraints.GlobalConstraints.MaxShiftsPerDay)
@@ -1243,7 +1243,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         /// <summary>
         /// اعمال قطعی قیود درخواست‌های تأییدشده و الزام مدیر شیفت روی راه‌حل نهایی.
-        /// ترتیب: تعمیر مدیر → اجبار درخواست‌ها (آخرین حرف) → گزارش نقض.
+        /// درخواست‌های تأییدشده آخرین حرف را می‌زنند (پس از بقیهٔ گاردها دوباره ForceApply).
         /// </summary>
         public void ApplyMandatoryConstraints(ShiftSolution solution)
         {
@@ -1260,6 +1260,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             HolidayMorningEveningFairnessGuard.Enforce(solution, _constraints);
             ShiftCoverageGuard.Enforce(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
+
+            // آخرین حرف: درخواست‌های تأییدشده (ممکن است گاردهای قبلی آن‌ها را برداشته باشند)
+            ApprovedRequestGuard.ForceApply(solution, _constraints);
+
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(managerWarnings);
             solution.Violations.AddRange(ApprovedRequestGuard.GetUnmetViolations(solution, _constraints));
@@ -1905,7 +1909,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         /// <summary>
         /// آیا انتساب جدید با قوانین ترکیب روزانه ناسازگار است؟
-        /// صبح+عصر مجاز؛ شب تنها؛ تکرار لیبل ممنوع.
+        /// صبح+عصر و صبح+شب مجاز؛ عصر+شب ممنوع؛ تکرار لیبل ممنوع.
         /// </summary>
         private bool HasDailyConflict(ShiftSolution solution, int userId, DateTime date, ShiftLabel newLabel)
         {

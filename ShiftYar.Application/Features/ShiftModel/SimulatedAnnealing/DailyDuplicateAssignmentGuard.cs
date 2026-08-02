@@ -9,7 +9,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 
 /// <summary>
 /// حذف ترکیب‌های غیرمجاز روزانه.
-/// صبح+عصر مجاز است؛ شب تنها؛ تکرار همان لیبل ممنوع.
+/// صبح+عصر و صبح+شب مجاز؛ عصر+شب و تکرار همان لیبل ممنوع.
 /// </summary>
 public static class DailyDuplicateAssignmentGuard
 {
@@ -111,7 +111,13 @@ public static class DailyDuplicateAssignmentGuard
             return false;
         }
 
-        return user.RequiredShiftSlots.Any(s =>
-            s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel);
+        if (user.RequiredShiftSlots.Any(s =>
+                s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel))
+        {
+            return true;
+        }
+
+        return !assignment.IsOnCall &&
+               user.RequiredPresenceDates.Any(d => d.Date == assignment.Date.Date);
     }
 }

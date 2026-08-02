@@ -8,8 +8,10 @@ namespace ShiftYar.Domain.Enums.ShiftRequestModel
 {
     public enum RequestType
     {
-        FullDay = 0,        //تمام روز
-        SpecificShift = 1   //یک شیفت مشخص
+        /// <summary>تمام روز — فقط برای عدم‌حضور/مرخصی معتبر است؛ حضور کل‌روز مجاز نیست.</summary>
+        FullDay = 0,
+        /// <summary>یک شیفت مشخص (صبح یا عصر یا شب)</summary>
+        SpecificShift = 1
     }
 
     public enum RequestAction

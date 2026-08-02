@@ -1865,14 +1865,13 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     {
                         if (req.RequestType == Domain.Enums.ShiftRequestModel.RequestType.FullDay)
                         {
-                            if (!uc.RequiredPresenceDates.Any(d => d.Date == date))
-                            {
-                                uc.RequiredPresenceDates.Add(date);
-                                appliedOnFull++;
-                                _logger.LogInformation(
-                                    "LoadConstraints: ON-FullDay UserId={UserId} Date={Date:yyyy-MM-dd} RequestId={RequestId}",
-                                    uc.UserId, date, req.Id);
-                            }
+                            // حضور کل‌روز در مدل کسب‌وکار مجاز نیست (سقف ۱۲ ساعت / فقط صبح+عصر).
+                            // داده‌های قدیمی اشتباه را نادیده می‌گیریم تا Optimize شکست نخورد.
+                            skippedIncomplete++;
+                            _logger.LogWarning(
+                                "LoadConstraints: Skipping invalid ON-FullDay request {RequestId} UserId={UserId} Date={Date:yyyy-MM-dd} — full-day presence is not allowed; use SpecificShift",
+                                req.Id, uc.UserId, date);
+                            continue;
                         }
                         else
                         {

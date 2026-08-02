@@ -73,6 +73,12 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 entity.SupervisorId = supervisorId;
                 entity.Status = RequestStatus.Pending;
 
+                var typeError = ValidateOnShiftRequestType(entity.RequestAction, entity.RequestType, entity.ShiftLabel);
+                if (typeError != null)
+                {
+                    return ApiResponse<ShiftRequestDtoGet>.Fail(typeError);
+                }
+
                 // فقط مقادیر خارج از enum (مثل Shift.Id=3) را به‌عنوان ShiftId remap کن.
                 // Id=1/2 با Evening/Night هم‌عددند؛ تفسیر آن‌ها به‌عنوان Id درخواست صحیح را خراب می‌کند.
                 if (entity.ShiftLabel.HasValue && entity.RequestType == RequestType.SpecificShift)
@@ -194,6 +200,13 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 entity.RequestDate = DateConverter.ConvertToGregorianDate(dto.RequestPersianDate);
 
                 _mapper.Map(dto, entity);
+
+                var typeError = ValidateOnShiftRequestType(entity.RequestAction, entity.RequestType, entity.ShiftLabel);
+                if (typeError != null)
+                {
+                    return ApiResponse<ShiftRequestDtoGet>.Fail(typeError);
+                }
+
                 await _repository.SaveAsync();
                 var result = _mapper.Map<ShiftRequestDtoGet>(entity);
                 return ApiResponse<ShiftRequestDtoGet>.Success(result, "درخواست با موفقیت ویرایش شد.");
@@ -331,8 +344,41 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
             }
         }
 
+        private static string? ValidateOnShiftRequestType(
+            RequestAction? action,
+            RequestType? type,
+            ShiftEnums.ShiftLabel? shiftLabel)
+        {
+            if (action != RequestAction.RequestToBeOnShift)
+            {
+                return null;
+            }
+
+            // حضور کل‌روز مجاز نیست: فقط صبح+عصر یا صبح+شب در یک روز ترکیب می‌شوند؛
+            // عصر+شب و شب→صبح روز بعد بیش از ۱۲ ساعت متوالی‌اند.
+            if (type == RequestType.FullDay)
+            {
+                return
+                    "درخواست حضور کل‌روز مجاز نیست. ترکیب‌های مجاز در یک روز: صبح+عصر یا صبح+شب؛ " +
+                    "برای حضور باید نوع درخواست «شیفت مشخص» باشد و یکی از شیفت‌های صبح، عصر یا شب انتخاب شود.";
+            }
+
+            if (type == RequestType.SpecificShift && !shiftLabel.HasValue)
+            {
+                return "برای درخواست حضور در شیفت مشخص، انتخاب شیفت (صبح/عصر/شب) الزامی است.";
+            }
+
+            return null;
+        }
+
         private async Task<string?> ValidateApprovalAsync(ShiftRequest entity)
         {
+            var typeError = ValidateOnShiftRequestType(entity.RequestAction, entity.RequestType, entity.ShiftLabel);
+            if (typeError != null)
+            {
+                return typeError;
+            }
+
             if (entity.RequestAction != RequestAction.RequestToBeOnShift ||
                 entity.RequestType != RequestType.SpecificShift ||
                 !entity.ShiftLabel.HasValue ||

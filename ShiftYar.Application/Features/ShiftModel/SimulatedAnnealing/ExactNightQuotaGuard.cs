@@ -490,9 +490,10 @@ public static class ExactNightQuotaGuard
         UserConstraint user,
         DateTime date)
     {
+        // فقط عصر با شب متوالی است؛ صبح+شب مجاز است و نباید پاک شود
         var dayAssignments = solution.GetUserAssignments(user.UserId, date)
             .Where(a => !a.IsOnCall)
-            .Where(a => a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening)
+            .Where(a => a.ShiftLabel == ShiftLabel.Evening)
             .Where(a => !IsProtected(constraints, user.UserId, a))
             .ToList();
 
@@ -509,19 +510,18 @@ public static class ExactNightQuotaGuard
         ShiftRequirement nightShift,
         DateTime date)
     {
-        var protectedConflict = solution.GetUserAssignments(user.UserId, date)
+        var protectedEvening = solution.GetUserAssignments(user.UserId, date)
             .Where(a => !a.IsOnCall)
-            .Where(a => a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening)
+            .Where(a => a.ShiftLabel == ShiftLabel.Evening)
             .Any(a => IsProtected(constraints, user.UserId, a));
-        if (protectedConflict)
+        if (protectedEvening)
         {
             return false;
         }
 
         if (AdjacentShiftRestRules.WouldConflict(
                 solution.GetUserAllAssignments(user.UserId)
-                    .Where(a => !(a.Date.Date == date.Date &&
-                                  (a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening))),
+                    .Where(a => !(a.Date.Date == date.Date && a.ShiftLabel == ShiftLabel.Evening)),
                 date,
                 ShiftLabel.Night))
         {

@@ -7,6 +7,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 
 /// <summary>
 /// حذف / گزارش توالی ممنوع عصر→شب و شب→صبح.
+/// انتساب‌های ناشی از درخواست تأییدشده در اولویت حفظ می‌مانند.
 /// </summary>
 public static class AdjacentShiftRestGuard
 {
@@ -24,9 +25,15 @@ public static class AdjacentShiftRestGuard
                     break;
                 }
 
-                // انتساب دیرتر حذف می‌شود تا فاصله ایجاد شود
-                var later = pairs[0].Later;
-                solution.RemoveAssignment(later.UserId, later.ShiftId, later.Date);
+                var (earlier, later) = pairs[0];
+                var remove = ChooseRemovable(user, earlier, later);
+                if (remove == null)
+                {
+                    // هر دو محافظت‌شده‌اند — بن‌بست؛ حلقه را قطع کن
+                    break;
+                }
+
+                solution.RemoveAssignment(remove.UserId, remove.ShiftId, remove.Date);
             }
         }
     }
@@ -47,5 +54,38 @@ public static class AdjacentShiftRestGuard
         }
 
         return violations;
+    }
+
+    private static SaShiftAssignment? ChooseRemovable(
+        UserConstraint user,
+        SaShiftAssignment earlier,
+        SaShiftAssignment later)
+    {
+        var earlierProtected = IsApprovedProtected(user, earlier);
+        var laterProtected = IsApprovedProtected(user, later);
+
+        if (!laterProtected)
+        {
+            return later;
+        }
+
+        if (!earlierProtected)
+        {
+            return earlier;
+        }
+
+        return null;
+    }
+
+    private static bool IsApprovedProtected(UserConstraint user, SaShiftAssignment assignment)
+    {
+        if (user.RequiredShiftSlots.Any(s =>
+                s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel))
+        {
+            return true;
+        }
+
+        return !assignment.IsOnCall &&
+               user.RequiredPresenceDates.Any(d => d.Date == assignment.Date.Date);
     }
 }

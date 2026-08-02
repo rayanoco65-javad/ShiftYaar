@@ -7,7 +7,9 @@ namespace ShiftYar.Application.Common.Utilities;
 /// <summary>
 /// قوانین ترکیب شیفت در یک روز:
 /// - صبح+عصر مجاز است
-/// - شب فقط به‌تنهایی (بدون صبح/عصر همان روز)
+/// - صبح+شب مجاز است (عصر بین آن‌ها فاصله زمانی است؛ متوالی نیستند)
+/// - عصر+شب ممنوع است (متوالی و بیش از ۱۲ ساعت)
+/// - صبح+عصر+شب ممنوع است (شامل عصر+شب)
 /// - تکرار همان نوع شیفت در یک روز ممنوع
 /// </summary>
 public static class DailyAssignmentRules
@@ -29,18 +31,7 @@ public static class DailyAssignmentRules
             return false;
         }
 
-        // شب با هیچ شیفت دیگری در همان روز ترکیب نمی‌شود
-        if (newLabel == ShiftLabel.Night && existing.Count > 0)
-        {
-            return false;
-        }
-
-        if (existing.Contains(ShiftLabel.Night))
-        {
-            return false;
-        }
-
-        return true;
+        return IsValidDaySet(existing.Append(newLabel), maxShiftsPerDay <= 0 ? existing.Count + 1 : maxShiftsPerDay, forbidDuplicateLabels);
     }
 
     public static bool IsValidDaySet(IEnumerable<ShiftLabel> labels, int maxShiftsPerDay, bool forbidDuplicateLabels = true)
@@ -56,7 +47,8 @@ public static class DailyAssignmentRules
             return false;
         }
 
-        if (list.Contains(ShiftLabel.Night) && list.Count > 1)
+        // عصر و شب متوالی‌اند و بیش از ۱۲ ساعت می‌شوند
+        if (list.Contains(ShiftLabel.Evening) && list.Contains(ShiftLabel.Night))
         {
             return false;
         }

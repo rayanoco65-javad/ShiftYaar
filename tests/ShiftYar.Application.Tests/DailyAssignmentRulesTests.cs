@@ -16,19 +16,28 @@ public class DailyAssignmentRulesTests
     }
 
     [Fact]
+    public void MorningThenNight_SameDay_IsAllowed()
+    {
+        Assert.True(DailyAssignmentRules.CanAddShift(
+            new[] { ShiftLabel.Morning }, ShiftLabel.Night, maxShiftsPerDay: 2));
+        Assert.True(DailyAssignmentRules.IsValidDaySet(
+            new[] { ShiftLabel.Morning, ShiftLabel.Night }, maxShiftsPerDay: 2));
+    }
+
+    [Fact]
+    public void EveningThenNight_SameDay_IsForbidden()
+    {
+        Assert.False(DailyAssignmentRules.CanAddShift(
+            new[] { ShiftLabel.Evening }, ShiftLabel.Night, maxShiftsPerDay: 2));
+        Assert.False(DailyAssignmentRules.IsValidDaySet(
+            new[] { ShiftLabel.Evening, ShiftLabel.Night }, maxShiftsPerDay: 2));
+    }
+
+    [Fact]
     public void DuplicateMorning_IsForbidden()
     {
         Assert.False(DailyAssignmentRules.CanAddShift(
             new[] { ShiftLabel.Morning }, ShiftLabel.Morning, maxShiftsPerDay: 2));
-    }
-
-    [Fact]
-    public void NightWithMorning_IsForbidden()
-    {
-        Assert.False(DailyAssignmentRules.CanAddShift(
-            new[] { ShiftLabel.Morning }, ShiftLabel.Night, maxShiftsPerDay: 2));
-        Assert.False(DailyAssignmentRules.IsValidDaySet(
-            new[] { ShiftLabel.Morning, ShiftLabel.Night }, maxShiftsPerDay: 2));
     }
 
     [Fact]

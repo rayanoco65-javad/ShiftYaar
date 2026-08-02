@@ -26,6 +26,14 @@ public class AdjacentShiftRestRulesTests
     }
 
     [Fact]
+    public void MorningThenNight_SameDay_IsAllowed()
+    {
+        var d = new DateTime(2026, 8, 25);
+        Assert.False(AdjacentShiftRestRules.IsForbiddenBackToBack(
+            ShiftLabel.Morning, d, ShiftLabel.Night, d));
+    }
+
+    [Fact]
     public void EveningThenMorning_NextDay_IsAllowed()
     {
         var d = new DateTime(2026, 8, 25);
