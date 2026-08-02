@@ -89,10 +89,37 @@ public static class ExactNightQuotaGuard
 
         if (targetHoliday.HasValue)
         {
-            TryFillNights(solution, constraints, user, nightShift, targetHoliday.Value - holidayNights.Count, holidayOnly: true);
-            nights = GetNights(solution, user.UserId);
-            holidayNights = nights.Where(a => constraints.IsHolidayWeekendNight(a.Date)).ToList();
+            var holidayNeed = targetHoliday.Value - holidayNights.Count;
+            if (holidayNeed > 0)
+            {
+                // اول تعویض شب عادی↔تعطیل (تعداد کل ثابت می‌ماند)
+                var minGap = Math.Max(1, user.MinDaysBetweenNightShifts);
+                SwapWeekdayForHoliday(solution, constraints, user, nightShift, holidayNeed, minGap);
+                nights = GetNights(solution, user.UserId);
+                holidayNights = nights.Where(a => constraints.IsHolidayWeekendNight(a.Date)).ToList();
+                holidayNeed = targetHoliday.Value - holidayNights.Count;
+            }
+
+            if (holidayNeed > 0)
+            {
+                // فقط اگر هنوز زیر سقف/حداقل کل هستیم، شب تعطیل اضافه کن — هرگز از ExactNight بالاتر نرو
+                var roomForAdd = targetTotal.HasValue
+                    ? Math.Max(0, targetTotal.Value - nights.Count)
+                    : holidayNeed;
+                if (roomForAdd > 0)
+                {
+                    TryFillNights(solution, constraints, user, nightShift, Math.Min(holidayNeed, roomForAdd), holidayOnly: true);
+                    nights = GetNights(solution, user.UserId);
+                    holidayNights = nights.Where(a => constraints.IsHolidayWeekendNight(a.Date)).ToList();
+                }
+            }
         }
+
+        // اگر به‌اشتباه بالای ExactNight رفته‌ایم، مازاد غیرمحافظت‌شده را بردار
+        TrimExcessNightsAboveExact(solution, constraints, user);
+
+        nights = GetNights(solution, user.UserId);
+        holidayNights = nights.Where(a => constraints.IsHolidayWeekendNight(a.Date)).ToList();
 
         if (targetTotal.HasValue)
         {
@@ -104,7 +131,8 @@ public static class ExactNightQuotaGuard
                     : 0;
                 if (stillNeedHoliday > 0)
                 {
-                    TryFillNights(solution, constraints, user, nightShift, stillNeedHoliday, holidayOnly: true);
+                    // فقط در سقف باقی‌ماندهٔ کل
+                    TryFillNights(solution, constraints, user, nightShift, Math.Min(stillNeedHoliday, remaining), holidayOnly: true);
                     remaining = targetTotal.Value - CountNights(solution, user.UserId);
                 }
 
@@ -115,7 +143,54 @@ public static class ExactNightQuotaGuard
             }
         }
 
-        // ImproveNightSpread در Enforce سراسری بعد از رفع کسری‌ها اجرا می‌شود
+        TrimExcessNightsAboveExact(solution, constraints, user);
+    }
+
+    /// <summary>
+    /// ExactNight حداقل است ولی نباید با افزودن شب تعطیل از آن بیشتر شویم وقتی ماه بدون مازاد ظرفیت است.
+    /// شب‌های مازاد غیرمحافظت‌شده حذف می‌شوند (ترجیحاً غیرتعطیل اگر سهمیه تعطیل حفظ شود).
+    /// </summary>
+    private static void TrimExcessNightsAboveExact(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user)
+    {
+        if (!user.ExactNightShiftCount.HasValue)
+        {
+            return;
+        }
+
+        var target = user.ExactNightShiftCount.Value;
+        var targetHoliday = user.ExactHolidayWeekendNightShiftCount ?? 0;
+
+        while (CountNights(solution, user.UserId) > target)
+        {
+            var nights = GetNights(solution, user.UserId);
+            var holidayCount = nights.Count(a => constraints.IsHolidayWeekendNight(a.Date));
+
+            var removable = nights
+                .Where(a => !IsProtected(constraints, user.UserId, a))
+                .Select(a =>
+                {
+                    var isHol = constraints.IsHolidayWeekendNight(a.Date);
+                    // حذف شب تعطیل فقط اگر بعد از حذف هنوز ≥ سهمیه تعطیل بمانیم
+                    var canRemoveHoliday = !isHol || holidayCount - 1 >= targetHoliday;
+                    return (Assignment: a, IsHol: isHol, CanRemove: canRemoveHoliday);
+                })
+                .Where(x => x.CanRemove)
+                // ترجیح حذف غیرتعطیل تا سهمیه تعطیل حفظ شود؛ وگرنه تعطیل
+                .OrderBy(x => x.IsHol ? 1 : 0)
+                .ThenByDescending(x => x.Assignment.Date)
+                .Select(x => x.Assignment)
+                .FirstOrDefault();
+
+            if (removable == null)
+            {
+                break;
+            }
+
+            solution.RemoveAssignment(removable.UserId, removable.ShiftId, removable.Date);
+        }
     }
 
     private static List<SaShiftAssignment> GetNights(ShiftSolution solution, int userId) =>

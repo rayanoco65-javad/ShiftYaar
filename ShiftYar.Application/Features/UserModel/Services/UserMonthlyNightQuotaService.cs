@@ -248,6 +248,13 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 return ApiResponse<string>.Fail("سهمیه شب ماهانه یافت نشد.");
             }
 
+            var approvedFloorError = await ValidateQuotaAgainstApprovedNightRequestsAsync(
+                entity.UserId, entity.PersianYear, entity.PersianMonth, nightQuota: null, holidayQuota: null);
+            if (approvedFloorError != null)
+            {
+                return ApiResponse<string>.Fail(approvedFloorError);
+            }
+
             _repository.Delete(entity);
             await _repository.SaveAsync();
             return ApiResponse<string>.Success("حذف شد.", "سهمیه شب ماهانه حذف شد.");
@@ -426,11 +433,6 @@ namespace ShiftYar.Application.Features.UserModel.Services
             int? nightQuota,
             int? holidayQuota)
         {
-            if (!nightQuota.HasValue && !holidayQuota.HasValue)
-            {
-                return null;
-            }
-
             var (monthStart, monthEnd, _) = PersianMonthNightCalendar.GetMonthBounds(persianYear, persianMonth);
             var (approvedRequests, _) = await _shiftRequestRepository.GetByFilterAsync(
                 new SimpleFilter<ShiftRequest>(r =>
@@ -446,6 +448,18 @@ namespace ShiftYar.Application.Features.UserModel.Services
             var approvedNightCount = NightQuotaRequestLinker.CountApprovedNightOnRequestsInMonth(
                 approvedRequests, userId, persianYear, persianMonth);
 
+            // حذف کامل سهمیه در حالی که درخواست شب تأییدشده هست ممنوع است
+            if (!nightQuota.HasValue && !holidayQuota.HasValue)
+            {
+                if (approvedNightCount > 0)
+                {
+                    return NightQuotaRequestLinker.ValidateQuotaAgainstApprovedNightRequests(
+                        null, approvedNightCount, null, 0, approvedNightCount, persianYear, persianMonth);
+                }
+
+                return null;
+            }
+
             var (shiftDates, _) = await _shiftDateRepository.GetByFilterAsync(
                 new SimpleFilter<ShiftDate>(d =>
                     d.Date != null &&
@@ -456,15 +470,23 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 .Select(d => d.Date!.Value.Date)
                 .ToHashSet();
 
-            var approvedHolidayCount = NightQuotaRequestLinker.CountApprovedHolidayNightOnRequestsInMonth(
-                approvedRequests,
-                userId,
-                persianYear,
-                persianMonth,
-                date => HolidayWeekendNightRules.IsHolidayWeekendNight(date, holidays));
+            bool IsHolidayNight(DateTime date) =>
+                HolidayWeekendNightRules.IsHolidayWeekendNight(date, holidays);
 
-            return NightQuotaRequestLinker.ValidateQuotaNotBelowApprovedRequests(
-                nightQuota, approvedNightCount, holidayQuota, approvedHolidayCount, persianYear, persianMonth);
+            var approvedHolidayCount = NightQuotaRequestLinker.CountApprovedHolidayNightOnRequestsInMonth(
+                approvedRequests, userId, persianYear, persianMonth, IsHolidayNight);
+
+            var approvedNonHolidayCount = NightQuotaRequestLinker.CountApprovedNonHolidayNightOnRequestsInMonth(
+                approvedRequests, userId, persianYear, persianMonth, IsHolidayNight);
+
+            return NightQuotaRequestLinker.ValidateQuotaAgainstApprovedNightRequests(
+                nightQuota,
+                approvedNightCount,
+                holidayQuota,
+                approvedHolidayCount,
+                approvedNonHolidayCount,
+                persianYear,
+                persianMonth);
         }
 
         private async Task<(int NightDays, int HolidayWeekendNightDays, string? Error)> TryGetMonthNightCapacityAsync(

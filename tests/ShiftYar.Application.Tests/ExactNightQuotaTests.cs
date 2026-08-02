@@ -407,6 +407,147 @@ public class ExactNightQuotaTests
     }
 
     [Fact]
+    public void ExactNightQuotaGuard_DoesNotAddHolidayNightAboveExactTotal()
+    {
+        // ۵ شب محافظت‌شدهٔ غیرتعطیل + سهمیه تعطیل ۱ ⇒ نباید شب ششم اضافه شود (ظرفیت ماه را می‌دزدد)
+        var start = new DateTime(2026, 7, 23);
+        var end = new DateTime(2026, 8, 22);
+        var holidays = new HashSet<DateTime>
+        {
+            new(2026, 7, 24), new(2026, 7, 31), new(2026, 8, 7), new(2026, 8, 14), new(2026, 8, 21)
+        };
+
+        var locked = MakeUser(6, exactNights: 5, exactHolidayNights: 1);
+        locked.RequiredShiftSlots =
+        [
+            new ShiftSlotConstraint { Date = new DateTime(2026, 7, 25), ShiftLabel = ShiftLabel.Night },
+            new ShiftSlotConstraint { Date = new DateTime(2026, 8, 1), ShiftLabel = ShiftLabel.Night },
+            new ShiftSlotConstraint { Date = new DateTime(2026, 8, 8), ShiftLabel = ShiftLabel.Night },
+            new ShiftSlotConstraint { Date = new DateTime(2026, 8, 15), ShiftLabel = ShiftLabel.Night },
+            new ShiftSlotConstraint { Date = new DateTime(2026, 8, 22), ShiftLabel = ShiftLabel.Night }
+        ];
+
+        var needy = MakeUser(4, exactNights: 5, exactHolidayNights: 1);
+        var filler = MakeUser(9, exactNights: 21, exactHolidayNights: null);
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = end,
+            HolidayDates = holidays,
+            UserConstraints = [locked, needy, filler],
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning),
+                Shift(2, ShiftLabel.Evening),
+                Shift(3, ShiftLabel.Night)
+            ]
+        };
+
+        var solution = new ShiftSolution();
+        foreach (var slot in locked.RequiredShiftSlots)
+        {
+            solution.AddAssignment(6, 3, slot.Date, ShiftLabel.Night, false);
+        }
+
+        // needy چهار شب؛ یک شب کم
+        foreach (var d in new[]
+                 {
+                     new DateTime(2026, 7, 26),
+                     new DateTime(2026, 8, 2),
+                     new DateTime(2026, 8, 9),
+                     new DateTime(2026, 8, 16)
+                 })
+        {
+            solution.AddAssignment(4, 3, d, ShiftLabel.Night, false);
+        }
+
+        foreach (var day in Enumerable.Range(0, 31).Select(i => start.AddDays(i)))
+        {
+            if (solution.GetShiftAssignments(3, day).Any())
+            {
+                continue;
+            }
+
+            solution.AddAssignment(9, 3, day, ShiftLabel.Night, false);
+        }
+
+        // یک مازاد روی filler تا needy بتواند ادعا کند
+        // filler روی کف ۲۱ است — یک شب را به کاربر بدون سهمیه نده؛ به‌جای آن quota filler را ۲۰ کن
+        filler.ExactNightShiftCount = 20;
+
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+
+        var nights6 = solution.GetUserAllAssignments(6).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+        var nights4 = solution.GetUserAllAssignments(4).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+
+        Assert.Equal(5, nights6); // نباید ۶ شود
+        Assert.True(nights4 >= 5, $"User 4 expected ≥5 after reclaim, got {nights4}");
+    }
+
+    [Fact]
+    public void NightQuotaRequestLinker_RejectsNonHolidayOnsThatBlockHolidayQuota()
+    {
+        var error = NightQuotaRequestLinker.ValidateNonHolidayOnLeavesRoomForHoliday(
+            approvedNonHolidayNightCountInMonth: 4,
+            exactNightQuota: 5,
+            exactHolidayNightQuota: 1,
+            persianYear: 1405,
+            persianMonth: 5,
+            pendingAdditionalNonHoliday: 1);
+
+        Assert.NotNull(error);
+        Assert.Contains("حداکثر 4", error);
+    }
+
+    [Fact]
+    public void NightQuotaRequestLinker_QuotaUpsert_RejectsWhenBelowApprovedOrBlocksHolidayRoom()
+    {
+        var below = NightQuotaRequestLinker.ValidateQuotaAgainstApprovedNightRequests(
+            newNightQuota: 3,
+            approvedNightCount: 5,
+            newHolidayQuota: 1,
+            approvedHolidayNightCount: 0,
+            approvedNonHolidayNightCount: 5,
+            persianYear: 1405,
+            persianMonth: 5);
+        Assert.NotNull(below);
+        Assert.Contains("کمتر از تعداد درخواست", below);
+
+        var room = NightQuotaRequestLinker.ValidateQuotaAgainstApprovedNightRequests(
+            newNightQuota: 5,
+            approvedNightCount: 5,
+            newHolidayQuota: 1,
+            approvedHolidayNightCount: 0,
+            approvedNonHolidayNightCount: 5,
+            persianYear: 1405,
+            persianMonth: 5);
+        Assert.NotNull(room);
+        Assert.Contains("سازگار نیست", room);
+
+        var clear = NightQuotaRequestLinker.ValidateQuotaAgainstApprovedNightRequests(
+            newNightQuota: null,
+            approvedNightCount: 2,
+            newHolidayQuota: null,
+            approvedHolidayNightCount: 0,
+            approvedNonHolidayNightCount: 2,
+            persianYear: 1405,
+            persianMonth: 5);
+        Assert.NotNull(clear);
+        Assert.Contains("حذف", clear);
+
+        var ok = NightQuotaRequestLinker.ValidateQuotaAgainstApprovedNightRequests(
+            newNightQuota: 5,
+            approvedNightCount: 4,
+            newHolidayQuota: 1,
+            approvedHolidayNightCount: 1,
+            approvedNonHolidayNightCount: 3,
+            persianYear: 1405,
+            persianMonth: 5);
+        Assert.Null(ok);
+    }
+
+    [Fact]
     public void ExactNightQuotaGuard_ClearsNextMorningToClaimSurplusNight()
     {
         // سناریوی واقعی: گیرنده ۴/۵، اهداکننده ۱+۱ مازاد؛ صبح فردای شب مازاد مانع ادعاست.

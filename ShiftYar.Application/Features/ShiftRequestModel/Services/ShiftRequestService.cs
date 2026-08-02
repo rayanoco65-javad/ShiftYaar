@@ -525,9 +525,23 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
             bool IsHolidayNight(DateTime date) =>
                 HolidayWeekendNightRules.IsHolidayWeekendNight(date, holidays);
 
-            if (!IsHolidayNight(entity.RequestDate.Value.Date))
+            var isHolidayNight = IsHolidayNight(entity.RequestDate.Value.Date);
+            if (!isHolidayNight)
             {
-                return null;
+                var approvedNonHolidayCount = NightQuotaRequestLinker.CountApprovedNonHolidayNightOnRequestsInMonth(
+                    approvedRequests,
+                    entity.UserId.Value,
+                    year,
+                    month,
+                    IsHolidayNight,
+                    excludeRequestId: entity.Id);
+
+                return NightQuotaRequestLinker.ValidateNonHolidayOnLeavesRoomForHoliday(
+                    approvedNonHolidayCount,
+                    quota?.ExactNightShiftCount,
+                    quota?.ExactHolidayWeekendNightShiftCount,
+                    year,
+                    month);
             }
 
             var approvedHolidayCount = NightQuotaRequestLinker.CountApprovedHolidayNightOnRequestsInMonth(
