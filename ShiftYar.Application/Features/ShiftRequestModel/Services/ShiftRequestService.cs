@@ -245,16 +245,42 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 var entity = await _repository.GetByIdAsync(id, "User", "Supervisor");
                 if (entity == null)
                     return ApiResponse<ShiftRequestDtoGet>.Fail("درخواست مورد نظر یافت نشد.");
-                if (entity.Status != RequestStatus.Pending)
-                    return ApiResponse<ShiftRequestDtoGet>.Fail("درخواست قبلاً بررسی شده است.");
 
-                if (dto.Status == RequestStatus.Approved)
+                if (dto.Status != RequestStatus.Approved && dto.Status != RequestStatus.Rejected)
                 {
-                    var validationError = await ValidateApprovalAsync(entity);
-                    if (validationError != null)
+                    return ApiResponse<ShiftRequestDtoGet>.Fail(
+                        "وضعیت ارسالی نامعتبر است. فقط تأیید (Approved) یا رد (Rejected) مجاز است.");
+                }
+
+                if (entity.Status == RequestStatus.Rejected)
+                {
+                    return ApiResponse<ShiftRequestDtoGet>.Fail(
+                        "این درخواست قبلاً رد شده است. در صورت نیاز آن را حذف و درخواست جدید ثبت کنید.");
+                }
+
+                if (entity.Status == RequestStatus.Approved)
+                {
+                    // لغو تأیید اشتباه: فقط تبدیل به رد مجاز است
+                    if (dto.Status != RequestStatus.Rejected)
                     {
-                        return ApiResponse<ShiftRequestDtoGet>.Fail(validationError);
+                        return ApiResponse<ShiftRequestDtoGet>.Fail(
+                            "برای درخواست تأییدشده فقط امکان رد (لغو تأیید) وجود دارد.");
                     }
+                }
+                else if (entity.Status == RequestStatus.Pending)
+                {
+                    if (dto.Status == RequestStatus.Approved)
+                    {
+                        var validationError = await ValidateApprovalAsync(entity);
+                        if (validationError != null)
+                        {
+                            return ApiResponse<ShiftRequestDtoGet>.Fail(validationError);
+                        }
+                    }
+                }
+                else
+                {
+                    return ApiResponse<ShiftRequestDtoGet>.Fail("وضعیت فعلی درخواست قابل بررسی نیست.");
                 }
 
                 entity.Status = dto.Status;
@@ -263,7 +289,11 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
 
                 await _repository.SaveAsync();
                 var result = _mapper.Map<ShiftRequestDtoGet>(entity);
-                return ApiResponse<ShiftRequestDtoGet>.Success(result, "درخواست با موفقیت بررسی شد.");
+                return ApiResponse<ShiftRequestDtoGet>.Success(
+                    result,
+                    dto.Status == RequestStatus.Rejected
+                        ? "درخواست با موفقیت رد شد."
+                        : "درخواست با موفقیت تأیید شد.");
             }
             catch (Exception ex)
             {
@@ -278,8 +308,12 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 var entity = await _repository.GetByIdAsync(id);
                 if (entity == null)
                     return ApiResponse<string>.Fail("درخواست مورد نظر یافت نشد.");
-                if (entity.Status != RequestStatus.Pending)
-                    return ApiResponse<string>.Fail("امکان حذف این درخواست وجود ندارد.");
+                if (entity.Status != RequestStatus.Pending && entity.Status != RequestStatus.Rejected)
+                {
+                    return ApiResponse<string>.Fail(
+                        "فقط درخواست‌های در انتظار بررسی یا ردشده قابل حذف هستند. برای حذف درخواست تأییدشده، ابتدا آن را رد کنید.");
+                }
+
                 _repository.Delete(entity);
                 await _repository.SaveAsync();
                 return ApiResponse<string>.Success("درخواست با موفقیت حذف شد.");

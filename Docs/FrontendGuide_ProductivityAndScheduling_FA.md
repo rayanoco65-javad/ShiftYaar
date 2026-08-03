@@ -131,7 +131,64 @@
 - درخواست **حضور** باید `requestType = 1` (`SpecificShift`) + `shiftLabel` (صبح/عصر/شب) باشد.
 - حضور کل‌روز مجاز نیست (سقف ۱۲ ساعت متوالی). ترکیب‌های مجاز یک روز: صبح+عصر یا صبح+شب؛ عصر+شب و شب→صبح روز بعد ممنوع‌اند. بک‌اند درخواست حضور کل‌روز را رد می‌کند.
 
-### اکشن حذف
+## ۱.۶ بررسی درخواست شیفت توسط سوپروایزر (`ShiftRequest`)
+
+فقط درخواست‌های با `status = 1` (`Approved`) در Optimize لحاظ می‌شوند.
+
+### وضعیت‌ها
+
+| مقدار | نام | معنی |
+|------:|-----|------|
+| `0` | `Pending` | در انتظار بررسی |
+| `1` | `Approved` | تأیید شده |
+| `2` | `Rejected` | رد شده |
+
+### اکشن‌ها
+
+| اکشن | روش | توضیح |
+|------|------|--------|
+| `UpdateShiftRequestBySupervisor` | `PUT /api/ShiftRequest/UpdateShiftRequestBySupervisor?id={id}` | تأیید / رد / **لغو تأیید** |
+| `DeleteShiftRequest` | `DELETE /api/ShiftRequest/DeleteShiftRequest?id={id}` | حذف درخواست |
+
+بدنهٔ بررسی سوپروایزر:
+
+```json
+{
+  "status": 2,
+  "supervisorComment": "تأیید قبلی اشتباه بود؛ رد شد."
+}
+```
+
+فیلد DTO: `supervisorComment` (نه `supervisorNote`).
+
+### قواعد وضعیت برای UI
+
+| وضعیت فعلی | عملیات مجاز سوپروایزر | دکمه پیشنهادی |
+|------------|----------------------|----------------|
+| `Pending` | تأیید (`status=1`) یا رد (`status=2`) | «تأیید» / «رد» |
+| `Approved` | فقط رد (`status=2`) — **لغو تأیید اشتباه** | «رد / لغو تأیید» |
+| `Rejected` | تغییر وضعیت ندارد؛ قابل **حذف** است | «حذف» |
+
+| وضعیت فعلی | حذف (`DeleteShiftRequest`) |
+|------------|----------------------------|
+| `Pending` | مجاز (معمولاً توسط خود کاربر قبل از بررسی) |
+| `Rejected` | **مجاز** (پاک‌سازی لیست ردشده‌ها) |
+| `Approved` | **غیرمجاز** — ابتدا رد کنید، سپس در صورت نیاز حذف کنید |
+
+### نکات مهم
+
+- رد کردن درخواست تأییدشده، آن را از قیود Optimize بعدی خارج می‌کند؛ اگر برنامهٔ ماه قبلاً ذخیره شده، برای اعمال تغییر باید دوباره Optimize/ذخیره شود (یا برنامه ماه حذف و از نو ساخته شود).
+- درخواست ردشده را نمی‌توان دوباره تأیید کرد؛ در صورت نیاز حذف و ثبت درخواست جدید.
+- پیام `message` خطای API را عیناً نشان دهید (مثلاً تلاش برای تأیید مجدد درخواست تأییدشده، یا حذف مستقیم Approved).
+
+### اقدام لازم در فرانت
+
+- در لیست درخواست‌ها ستون/برچسب **حضور / عدم‌حضور** (`requestAction`) را نمایش دهید تا با «تأیید شده» اشتباه گرفته نشود.
+- برای ردیف‌های `Approved` دکمه «رد / لغو تأیید» را فعال کنید (همان `UpdateShiftRequestBySupervisor` با `status: 2`).
+- برای ردیف‌های `Rejected` دکمه «حذف» را نشان دهید؛ برای `Approved` حذف را مخفی/غیرفعال کنید.
+- قبل از رد تأییدشده و قبل از حذف ردشده، یک تأیید دو مرحله‌ای (confirm) بگذارید.
+
+### اکشن حذف شیفت‌بندی ماه
 
 | اکشن | روش | توضیح |
 |------|------|--------|
@@ -394,6 +451,9 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - دکمه حذف شیفت‌بندی ماه (`DeleteMonthlySchedule`) + قفل Optimize وقتی برنامه قبلی هست یا ماه شروع شده (با درنظرگرفتن فلگ‌های `allowCurrentMonthScheduling` و `allowMonthlyRescheduleWithAutoDelete`)
 - دو سوئیچ در فرم تنظیمات دپارتمان: `allowCurrentMonthScheduling` و `allowMonthlyRescheduleWithAutoDelete`
 - در فرم درخواست شیفت: برای حضور فقط `SpecificShift`؛ گزینهٔ حضور کل‌روز را نشان ندهید / غیرفعال کنید
+- نمایش ستون `requestAction` (حضور / عدم‌حضور) در لیست درخواست‌ها
+- دکمه «رد / لغو تأیید» برای درخواست‌های `Approved` (`UpdateShiftRequestBySupervisor` با `status: 2`)
+- دکمه حذف برای درخواست‌های `Rejected` و `Pending`؛ مخفی بودن حذف برای `Approved`
 - قبل از ثبت درخواست شب: نمایش باقی‌ماندهٔ سهمیه شب ماهانه کاربر؛ در صورت پر بودن سهمیه، دکمه را قفل کنید
 - نمایش خطای Optimize وقتی سهمیه شب برآورده نشود (`message` را عیناً نشان دهید)
 - توزیع عادلانه صبح/عصر **روزهای تعطیل** (نه فقط تعادل ماهانه M/E)
@@ -406,6 +466,9 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 
 اگر تیم فرانت خواست دقیق‌تر بررسی کند، این فایل‌ها مهم‌ترین نقاط تغییر هستند:
 
+- `ShiftYar.Api/Controllers/ShiftRequestModel/ShiftRequestController.cs`
+- `ShiftYar.Application/Features/ShiftRequestModel/Services/ShiftRequestService.cs`
+- `ShiftYar.Application/DTOs/ShiftModel/ShiftRequestModel/ShiftRequestDtoUpdateBySupervisor.cs`
 - `ShiftYar.Application/DTOs/UserModel/UserDtoAdd.cs`
 - `ShiftYar.Application/DTOs/UserModel/UserDtoGet.cs`
 - `ShiftYar.Application/DTOs/UserModel/UserMonthlyNightQuotaDtoAdd.cs`
