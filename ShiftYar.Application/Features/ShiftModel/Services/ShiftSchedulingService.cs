@@ -1528,6 +1528,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     constraints.HardRules.EnforceWeeklyMaxShifts = deptSettingEarly.EnforceWeeklyMaxShifts ?? false;
                     constraints.HardRules.EnforceNightShiftMonthlyCap = deptSettingEarly.EnforceNightShiftMonthlyCap ?? false;
                     constraints.HardRules.EnforceSpecialtyCapacity = deptSettingEarly.EnforceSpecialtyCapacity ?? false;
+                    constraints.HardRules.AllowEveningAfterNightShift =
+                        deptSettingEarly.AllowEveningAfterNightShift ?? true;
 
                     // تنظیم Soft Weights
                     constraints.SoftWeights.GenderBalanceWeight = deptSettingEarly.GenderBalanceWeight ?? 1.0;
@@ -2207,6 +2209,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     if (deptSetting.EnforceWeeklyMaxShifts.HasValue) constraints.HardRules.EnforceWeeklyMaxShifts = deptSetting.EnforceWeeklyMaxShifts.Value;
                     if (deptSetting.EnforceNightShiftMonthlyCap.HasValue) constraints.HardRules.EnforceNightShiftMonthlyCap = deptSetting.EnforceNightShiftMonthlyCap.Value;
                     if (deptSetting.EnforceSpecialtyCapacity.HasValue) constraints.HardRules.EnforceSpecialtyCapacity = deptSetting.EnforceSpecialtyCapacity.Value;
+                    constraints.HardRules.AllowEveningAfterNightShift =
+                        deptSetting.AllowEveningAfterNightShift ?? true;
 
                     // سقف روزانه از تنظیمات دپارتمان (۱ یا ۲)
                     constraints.HardRules.ForbidDuplicateDailyAssignments = true;
@@ -2365,7 +2369,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     EnforceWeeklyMaxShifts = constraints.HardRules.EnforceWeeklyMaxShifts,
                     EnforceNightShiftMonthlyCap = constraints.HardRules.EnforceNightShiftMonthlyCap,
                     EnforceSpecialtyCapacity = constraints.HardRules.EnforceSpecialtyCapacity,
-                    EnforceProductivityHours = constraints.HardRules.EnforceProductivityHours
+                    EnforceProductivityHours = constraints.HardRules.EnforceProductivityHours,
+                    AllowEveningAfterNightShift = constraints.HardRules.AllowEveningAfterNightShift
                 },
                 SoftWeights = new OrToolsSoftWeights
                 {

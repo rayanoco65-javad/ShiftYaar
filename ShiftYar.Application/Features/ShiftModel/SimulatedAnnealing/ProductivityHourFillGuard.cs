@@ -406,6 +406,7 @@ public static class ProductivityHourFillGuard
                 solution.GetUserAllAssignments(user.UserId),
                 assignment.Date,
                 assignment.ShiftLabel,
+                constraints,
                 ignoreShiftId))
         {
             return false;

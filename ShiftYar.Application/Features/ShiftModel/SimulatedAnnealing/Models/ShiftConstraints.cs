@@ -217,6 +217,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public bool EnforceMaxConsecutiveWorkHours { get; set; } = true; // حداکثر ۱۲ ساعت کار متوالی
         public bool EnforceOvertimeConsent { get; set; } = true; // اضافه‌کاری فقط با رضایت پرسنل
 
+        /// <summary>
+        /// true: روز بعد از شب می‌تواند در صورت نیاز عصر بگیرد (صبح همچنان ممنوع).
+        /// false: روز بعد از شب باید کاملاً بدون شیفت باشد.
+        /// </summary>
+        public bool AllowEveningAfterNightShift { get; set; } = true;
+
         public static HardRuleSet CreateDefault()
         {
             return new HardRuleSet();

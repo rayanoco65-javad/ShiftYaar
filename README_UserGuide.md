@@ -48,6 +48,7 @@
   - Get (paged): `GET /api/DepartmentSchedulingSettings?DepartmentId=1`
   - Get by id: `GET /api/DepartmentSchedulingSettings/{id}`
   - Update: `PUT /api/DepartmentSchedulingSettings/{id}`
+  - فلگ `allowEveningAfterNightShift`: اگر true، عصر روز بعد از شب در صورت نیاز مجاز است؛ اگر false، روز بعد از شب کاملاً بدون شیفت است (صبح بعد از شب همیشه ممنوع).
 
 ### 3.5) تنظیمات الگوریتم‌های بهینه‌سازی (AlgorithmSettings) - فقط ادمین
 ادمین می‌تواند پارامترهای الگوریتم‌های SA، OR-Tools و Hybrid را به‌صورت سراسری یا مخصوص هر دپارتمان تنظیم کند.

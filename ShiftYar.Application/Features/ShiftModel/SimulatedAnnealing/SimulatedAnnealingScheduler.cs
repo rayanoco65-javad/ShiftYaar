@@ -889,7 +889,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             foreach (var userConstraint in _constraints.UserConstraints)
             {
                 if (AdjacentShiftRestRules.HasForbiddenAdjacentPair(
-                        solution.GetUserAllAssignments(userConstraint.UserId)))
+                        solution.GetUserAllAssignments(userConstraint.UserId),
+                        _constraints.HardRules.AllowEveningAfterNightShift))
                 {
                     return false;
                 }
@@ -1541,7 +1542,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             if (solution != null &&
                 AdjacentShiftRestRules.WouldConflict(
-                    solution.GetUserAllAssignments(user.UserId), date, shiftLabel))
+                    solution.GetUserAllAssignments(user.UserId), date, shiftLabel, _constraints))
             {
                 return false;
             }
@@ -1881,7 +1882,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 if (!solution.HasAssignment(user.UserId, shiftReq.ShiftId, date) &&
                     !HasDailyConflict(solution, user.UserId, date, shiftReq.ShiftLabel) &&
                     !AdjacentShiftRestRules.WouldConflict(
-                        solution.GetUserAllAssignments(user.UserId), date, shiftReq.ShiftLabel))
+                        solution.GetUserAllAssignments(user.UserId), date, shiftReq.ShiftLabel, _constraints))
                 {
                     solution.AddAssignment(user.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall);
                     assigned++;
@@ -1909,7 +1910,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 if (!solution.HasAssignment(user.UserId, shiftReq.ShiftId, date) &&
                     !HasDailyConflict(solution, user.UserId, date, shiftReq.ShiftLabel) &&
                     !AdjacentShiftRestRules.WouldConflict(
-                        solution.GetUserAllAssignments(user.UserId), date, shiftReq.ShiftLabel))
+                        solution.GetUserAllAssignments(user.UserId), date, shiftReq.ShiftLabel, _constraints))
                 {
                     solution.AddAssignment(user.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall);
                     current++;
@@ -2016,10 +2017,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             // همان شیفت/روز جابه‌جا می‌شود؛ توالی و ترکیب روزانه را چک کن
             if (AdjacentShiftRestRules.WouldConflict(
                     solution.GetUserAllAssignments(assignment2.UserId),
-                    assignment1.Date, assignment1.ShiftLabel) ||
+                    assignment1.Date, assignment1.ShiftLabel, _constraints) ||
                 AdjacentShiftRestRules.WouldConflict(
                     solution.GetUserAllAssignments(assignment1.UserId),
-                    assignment2.Date, assignment2.ShiftLabel) ||
+                    assignment2.Date, assignment2.ShiftLabel, _constraints) ||
                 HasDailyConflict(solution, assignment2.UserId, assignment1.Date, assignment1.ShiftLabel) ||
                 HasDailyConflict(solution, assignment1.UserId, assignment2.Date, assignment2.ShiftLabel))
             {

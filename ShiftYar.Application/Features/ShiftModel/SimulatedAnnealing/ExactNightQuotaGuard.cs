@@ -773,7 +773,8 @@ public static class ExactNightQuotaGuard
                     AssignmentsIgnoringClearableForNight(solution, constraints, user, target)
                         .Where(a => !(a.ShiftLabel == ShiftLabel.Night && a.Date.Date == fromDate)),
                     target,
-                    ShiftLabel.Night))
+                    ShiftLabel.Night,
+                    constraints))
             {
                 continue;
             }
@@ -836,7 +837,7 @@ public static class ExactNightQuotaGuard
 
         var assignments = AssignmentsIgnoringClearableForNight(solution, constraints, user, takeDate)
             .Where(a => !(a.ShiftLabel == ShiftLabel.Night && a.Date.Date == leaveDate.Date));
-        if (AdjacentShiftRestRules.WouldConflict(assignments, takeDate, ShiftLabel.Night))
+        if (AdjacentShiftRestRules.WouldConflict(assignments, takeDate, ShiftLabel.Night, constraints))
         {
             return false;
         }
@@ -1062,7 +1063,8 @@ public static class ExactNightQuotaGuard
         if (AdjacentShiftRestRules.WouldConflict(
                 AssignmentsIgnoringClearableForNight(solution, constraints, user, date),
                 date,
-                ShiftLabel.Night))
+                ShiftLabel.Night,
+                constraints))
         {
             return false;
         }
@@ -1231,14 +1233,14 @@ public static class ExactNightQuotaGuard
 
         if (AdjacentShiftRestRules.WouldConflict(
                 solution.GetUserAllAssignments(user.UserId).Where(a => !(a.ShiftLabel == ShiftLabel.Night && a.Date.Date == userFrom)),
-                userTo, ShiftLabel.Night))
+                userTo, ShiftLabel.Night, constraints))
         {
             return false;
         }
 
         if (AdjacentShiftRestRules.WouldConflict(
                 solution.GetUserAllAssignments(other.UserId).Where(a => !(a.ShiftLabel == ShiftLabel.Night && a.Date.Date == userTo)),
-                userFrom, ShiftLabel.Night))
+                userFrom, ShiftLabel.Night, constraints))
         {
             return false;
         }
@@ -1356,7 +1358,7 @@ public static class ExactNightQuotaGuard
 
         var forAdjacency = AssignmentsIgnoringClearableForNight(solution, constraints, user, date)
             .Where(a => !(ignoreUserNightOnDate && a.ShiftLabel == ShiftLabel.Night && a.Date.Date == date.Date));
-        if (AdjacentShiftRestRules.WouldConflict(forAdjacency, date, ShiftLabel.Night))
+        if (AdjacentShiftRestRules.WouldConflict(forAdjacency, date, ShiftLabel.Night, constraints))
         {
             return false;
         }

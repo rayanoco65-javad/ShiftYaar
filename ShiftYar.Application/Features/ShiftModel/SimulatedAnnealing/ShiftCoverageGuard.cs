@@ -187,7 +187,8 @@ public static class ShiftCoverageGuard
             return false;
         }
 
-        if (AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(user.UserId), date, label))
+        if (AdjacentShiftRestRules.WouldConflict(
+                solution.GetUserAllAssignments(user.UserId), date, label, constraints))
         {
             return false;
         }

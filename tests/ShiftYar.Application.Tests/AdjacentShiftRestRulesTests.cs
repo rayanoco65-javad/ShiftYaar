@@ -34,6 +34,32 @@ public class AdjacentShiftRestRulesTests
     }
 
     [Fact]
+    public void NightThenEvening_NextDay_AllowedWhenSettingEnabled()
+    {
+        var d = new DateTime(2026, 8, 25);
+        Assert.False(AdjacentShiftRestRules.IsForbiddenBackToBack(
+            ShiftLabel.Night, d, ShiftLabel.Evening, d.AddDays(1), allowEveningAfterNightShift: true));
+    }
+
+    [Fact]
+    public void NightThenEvening_NextDay_ForbiddenWhenSettingDisabled()
+    {
+        var d = new DateTime(2026, 8, 25);
+        Assert.True(AdjacentShiftRestRules.IsForbiddenBackToBack(
+            ShiftLabel.Night, d, ShiftLabel.Evening, d.AddDays(1), allowEveningAfterNightShift: false));
+    }
+
+    [Fact]
+    public void NightThenAnyNextDay_ForbiddenWhenSettingDisabled()
+    {
+        var d = new DateTime(2026, 8, 25);
+        Assert.True(AdjacentShiftRestRules.IsForbiddenBackToBack(
+            ShiftLabel.Night, d, ShiftLabel.Morning, d.AddDays(1), allowEveningAfterNightShift: false));
+        Assert.True(AdjacentShiftRestRules.IsForbiddenBackToBack(
+            ShiftLabel.Night, d, ShiftLabel.Night, d.AddDays(1), allowEveningAfterNightShift: false));
+    }
+
+    [Fact]
     public void EveningThenMorning_NextDay_IsAllowed()
     {
         var d = new DateTime(2026, 8, 25);

@@ -84,5 +84,12 @@ namespace ShiftYar.Domain.Entities.DepartmentModel
         /// اگر true باشد، قبل از ذخیرهٔ برنامهٔ جدید، انتساب‌های همان ماه دپارتمان حذف و جایگزین می‌شوند.
         /// </summary>
         public bool? AllowMonthlyRescheduleWithAutoDelete { get; set; }
+
+        /// <summary>
+        /// اجازهٔ شیفت عصر در روز بعد از شیفت شب.
+        /// true: در صورت نیاز می‌توان عصر روز بعد را داد (صبح روز بعد همچنان ممنوع است).
+        /// false: روز بعد از شب باید کاملاً off باشد (صبح/عصر/شب ممنوع).
+        /// </summary>
+        public bool? AllowEveningAfterNightShift { get; set; }
     }
 }

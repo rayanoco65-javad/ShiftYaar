@@ -171,7 +171,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     // چند پاس پاک‌سازی تا تداخل‌های غیرمحافظت‌شده جلوی حضور اجباری را نگیرند
                     for (var pass = 0; pass < 4; pass++)
                     {
-                        ClearUnprotectedAdjacentConflicts(solution, user, required.Date, required.ShiftLabel);
+                        ClearUnprotectedAdjacentConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
                         ClearUnprotectedSameDayConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
 
                         if (IsUserAvailable(user, required.Date, required.ShiftLabel, solution, constraints))
@@ -190,7 +190,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     MakeRoomForIncoming(solution, constraints, shiftReq, required.Date, user);
 
                     // اگر MakeRoom باعث تداخل تازه شد، دوباره پاک کن
-                    ClearUnprotectedAdjacentConflicts(solution, user, required.Date, required.ShiftLabel);
+                    ClearUnprotectedAdjacentConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
                     ClearUnprotectedSameDayConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
 
                     if (!IsUserAvailable(user, required.Date, required.ShiftLabel, solution, constraints))
@@ -252,7 +252,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         })
                         .ThenBy(s =>
                             Common.Utilities.AdjacentShiftRestRules.WouldConflict(
-                                solution.GetUserAllAssignments(user.UserId), presenceDate, s.ShiftLabel)
+                                solution.GetUserAllAssignments(user.UserId), presenceDate, s.ShiftLabel, constraints)
                                 ? 1
                                 : 0)
                         .ThenBy(s => s.ShiftId)
@@ -261,7 +261,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     ShiftRequirement? target = null;
                     foreach (var candidate in candidates)
                     {
-                        ClearUnprotectedAdjacentConflicts(solution, user, presenceDate, candidate.ShiftLabel);
+                        ClearUnprotectedAdjacentConflicts(solution, constraints, user, presenceDate, candidate.ShiftLabel);
                         ClearUnprotectedSameDayConflicts(solution, constraints, user, presenceDate, candidate.ShiftLabel);
                         if (IsUserAvailable(user, presenceDate, candidate.ShiftLabel, solution, constraints))
                         {
@@ -296,6 +296,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// </summary>
         private static void ClearUnprotectedAdjacentConflicts(
             ShiftSolution solution,
+            ShiftConstraints constraints,
             UserConstraint user,
             DateTime date,
             ShiftLabel label)
@@ -323,7 +324,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
 
                 if (!Common.Utilities.AdjacentShiftRestRules.IsForbiddenBackToBack(
-                        earlierLabel, earlierDate, laterLabel, laterDate))
+                        earlierLabel, earlierDate, laterLabel, laterDate,
+                        constraints.HardRules.AllowEveningAfterNightShift))
                 {
                     continue;
                 }
@@ -501,7 +503,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             if (solution != null &&
                 Common.Utilities.AdjacentShiftRestRules.WouldConflict(
-                    solution.GetUserAllAssignments(user.UserId), date, shiftLabel))
+                    solution.GetUserAllAssignments(user.UserId),
+                    date,
+                    shiftLabel,
+                    allowEveningAfterNightShift: constraints?.HardRules.AllowEveningAfterNightShift ?? true))
             {
                 return false;
             }

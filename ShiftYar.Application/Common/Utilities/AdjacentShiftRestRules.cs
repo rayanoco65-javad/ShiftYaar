@@ -8,6 +8,8 @@ namespace ShiftYar.Application.Common.Utilities;
 
 /// <summary>
 /// ممنوعیت توالی بدون فاصله: عصر→شب (همان روز) و شب→صبح (روز بعد).
+/// اگر <see cref="HardRuleSet.AllowEveningAfterNightShift"/> خاموش باشد،
+/// روز بعد از شب باید کاملاً off باشد (هیچ شیفتی مجاز نیست).
 /// صبح+شب همان روز مجاز است چون شیفت عصر بین آن‌ها فاصله زمانی ایجاد می‌کند.
 /// </summary>
 public static class AdjacentShiftRestRules
@@ -27,7 +29,8 @@ public static class AdjacentShiftRestRules
         ShiftLabel earlierLabel,
         DateTime earlierDate,
         ShiftLabel laterLabel,
-        DateTime laterDate)
+        DateTime laterDate,
+        bool allowEveningAfterNightShift = true)
     {
         var d0 = earlierDate.Date;
         var d1 = laterDate.Date;
@@ -40,27 +43,39 @@ public static class AdjacentShiftRestRules
             return true;
         }
 
-        // شب روز D بلافاصله صبح روز D+1
-        if (earlierLabel == ShiftLabel.Night &&
-            laterLabel == ShiftLabel.Morning &&
-            d1 == d0.AddDays(1))
+        // شب روز D → هر شیفت روز D+1
+        if (earlierLabel == ShiftLabel.Night && d1 == d0.AddDays(1))
         {
-            return true;
+            // صبح روز بعد همیشه ممنوع (استراحت شب→صبح)
+            if (laterLabel == ShiftLabel.Morning)
+            {
+                return true;
+            }
+
+            // اگر اجازهٔ عصر بعد از شب خاموش باشد، کل روز بعد باید off باشد
+            if (!allowEveningAfterNightShift)
+            {
+                return true;
+            }
         }
 
         // صبح+شب همان روز مجاز است (عصر بین آن‌ها فاصله زمانی است)
+        // شب→عصر روز بعد فقط وقتی allowEveningAfterNightShift=true مجاز است
 
         return false;
     }
 
-    public static bool HasForbiddenAdjacentPair(IEnumerable<SaShiftAssignment> assignments)
+    public static bool HasForbiddenAdjacentPair(
+        IEnumerable<SaShiftAssignment> assignments,
+        bool allowEveningAfterNightShift = true)
     {
         var ordered = OrderAssignments(assignments);
         for (var i = 1; i < ordered.Count; i++)
         {
             if (IsForbiddenBackToBack(
                     ordered[i - 1].ShiftLabel, ordered[i - 1].Date,
-                    ordered[i].ShiftLabel, ordered[i].Date))
+                    ordered[i].ShiftLabel, ordered[i].Date,
+                    allowEveningAfterNightShift))
             {
                 return true;
             }
@@ -76,7 +91,8 @@ public static class AdjacentShiftRestRules
         IEnumerable<SaShiftAssignment> existingAssignments,
         DateTime date,
         ShiftLabel label,
-        int? ignoreShiftId = null)
+        int? ignoreShiftId = null,
+        bool allowEveningAfterNightShift = true)
     {
         var proposed = existingAssignments
             .Where(a => !(ignoreShiftId.HasValue &&
@@ -92,7 +108,8 @@ public static class AdjacentShiftRestRules
         {
             if (IsForbiddenBackToBack(
                     proposed[i - 1].Item2, proposed[i - 1].Item1,
-                    proposed[i].Item2, proposed[i].Item1))
+                    proposed[i].Item2, proposed[i].Item1,
+                    allowEveningAfterNightShift))
             {
                 return true;
             }
@@ -101,8 +118,22 @@ public static class AdjacentShiftRestRules
         return false;
     }
 
+    public static bool WouldConflict(
+        IEnumerable<SaShiftAssignment> existingAssignments,
+        DateTime date,
+        ShiftLabel label,
+        ShiftConstraints constraints,
+        int? ignoreShiftId = null) =>
+        WouldConflict(
+            existingAssignments,
+            date,
+            label,
+            ignoreShiftId,
+            constraints.HardRules.AllowEveningAfterNightShift);
+
     public static List<(SaShiftAssignment Earlier, SaShiftAssignment Later)> FindForbiddenPairs(
-        IEnumerable<SaShiftAssignment> assignments)
+        IEnumerable<SaShiftAssignment> assignments,
+        bool allowEveningAfterNightShift = true)
     {
         var ordered = OrderAssignments(assignments);
         var pairs = new List<(SaShiftAssignment, SaShiftAssignment)>();
@@ -110,7 +141,8 @@ public static class AdjacentShiftRestRules
         {
             if (IsForbiddenBackToBack(
                     ordered[i - 1].ShiftLabel, ordered[i - 1].Date,
-                    ordered[i].ShiftLabel, ordered[i].Date))
+                    ordered[i].ShiftLabel, ordered[i].Date,
+                    allowEveningAfterNightShift))
             {
                 pairs.Add((ordered[i - 1], ordered[i]));
             }

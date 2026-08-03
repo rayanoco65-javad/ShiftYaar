@@ -145,6 +145,9 @@ namespace ShiftYar.Infrastructure.Migrations
                     b.Property<bool?>("AllowCurrentMonthScheduling")
                         .HasColumnType("bit");
 
+                    b.Property<bool?>("AllowEveningAfterNightShift")
+                        .HasColumnType("bit");
+
                     b.Property<bool?>("AllowMonthlyRescheduleWithAutoDelete")
                         .HasColumnType("bit");
 

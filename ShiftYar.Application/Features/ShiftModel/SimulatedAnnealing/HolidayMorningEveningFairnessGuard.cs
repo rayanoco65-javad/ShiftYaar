@@ -180,7 +180,8 @@ public static class HolidayMorningEveningFairnessGuard
         if (AdjacentShiftRestRules.WouldConflict(
                 solution.GetUserAllAssignments(user.UserId),
                 date,
-                label))
+                label,
+                constraints))
         {
             return false;
         }

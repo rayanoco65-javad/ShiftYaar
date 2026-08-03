@@ -20,7 +20,8 @@ public static class AdjacentShiftRestGuard
             for (var pass = 0; pass < 8; pass++)
             {
                 var pairs = AdjacentShiftRestRules.FindForbiddenPairs(
-                    solution.GetUserAllAssignments(user.UserId));
+                    solution.GetUserAllAssignments(user.UserId),
+                    constraints.HardRules.AllowEveningAfterNightShift);
                 if (pairs.Count == 0)
                 {
                     break;
@@ -45,12 +46,18 @@ public static class AdjacentShiftRestGuard
         foreach (var user in constraints.UserConstraints)
         {
             foreach (var (earlier, later) in AdjacentShiftRestRules.FindForbiddenPairs(
-                         solution.GetUserAllAssignments(user.UserId)))
+                         solution.GetUserAllAssignments(user.UserId),
+                         constraints.HardRules.AllowEveningAfterNightShift))
             {
+                var detail = earlier.ShiftLabel == ShiftLabel.Night &&
+                             later.Date.Date == earlier.Date.Date.AddDays(1) &&
+                             !constraints.HardRules.AllowEveningAfterNightShift
+                    ? "روز بعد از شب باید بدون شیفت باشد"
+                    : "حداقل یک نوبت فاصله لازم است";
                 violations.Add(
                     $"توالی ممنوع شیفت: کاربر {user.UserId} ({user.UserName}) " +
                     $"{earlier.ShiftLabel} در {earlier.Date:yyyy-MM-dd} بلافاصله با " +
-                    $"{later.ShiftLabel} در {later.Date:yyyy-MM-dd}؛ حداقل یک نوبت فاصله لازم است.");
+                    $"{later.ShiftLabel} در {later.Date:yyyy-MM-dd}؛ {detail}.");
             }
         }
 
