@@ -578,16 +578,8 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                     month);
             }
 
-            var approvedHolidayCount = NightQuotaRequestLinker.CountApprovedHolidayNightOnRequestsInMonth(
-                approvedRequests,
-                entity.UserId.Value,
-                year,
-                month,
-                IsHolidayNight,
-                excludeRequestId: entity.Id);
-
-            return NightQuotaRequestLinker.ValidateHolidayNightOnAgainstQuota(
-                approvedHolidayCount, quota?.ExactHolidayWeekendNightShiftCount, year, month);
+            // شب تعطیل/آخرهفته: ExactHoliday فقط حداقل شیفت‌بندی است، نه سقف تأیید درخواست
+            return null;
         }
 
     }

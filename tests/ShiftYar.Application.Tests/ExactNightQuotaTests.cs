@@ -545,6 +545,38 @@ public class ExactNightQuotaTests
             persianYear: 1405,
             persianMonth: 5);
         Assert.Null(ok);
+
+        // حداقل تعطیل=1 با ۲ درخواست شب تعطیل تأییدشده باید مجاز باشد (حداقل است نه سقف)
+        var holidayMinBelowApproved = NightQuotaRequestLinker.ValidateQuotaAgainstApprovedNightRequests(
+            newNightQuota: 5,
+            approvedNightCount: 3,
+            newHolidayQuota: 1,
+            approvedHolidayNightCount: 2,
+            approvedNonHolidayNightCount: 1,
+            persianYear: 1405,
+            persianMonth: 5);
+        Assert.Null(holidayMinBelowApproved);
+    }
+
+    [Fact]
+    public void NightQuotaRequestLinker_AllowsHolidayNightOnsAboveHolidayMinimum()
+    {
+        // ExactHoliday=1 حداقل است؛ درخواست دوم شب تعطیل تا وقتی ExactNight جا دارد مجاز است
+        var holidayCap = NightQuotaRequestLinker.ValidateHolidayNightOnAgainstQuota(
+            approvedHolidayNightCountInMonth: 1,
+            exactHolidayNightQuota: 1,
+            persianYear: 1405,
+            persianMonth: 5,
+            pendingAdditional: 1);
+        Assert.Null(holidayCap);
+
+        var totalStillOk = NightQuotaRequestLinker.ValidateNightOnAgainstQuota(
+            approvedNightCountInMonth: 1,
+            exactNightQuota: 5,
+            persianYear: 1405,
+            persianMonth: 5,
+            pendingAdditional: 1);
+        Assert.Null(totalStillOk);
     }
 
     [Fact]

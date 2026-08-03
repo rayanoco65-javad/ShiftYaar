@@ -10,8 +10,8 @@ namespace ShiftYar.Application.Common.Utilities;
 
 /// <summary>
 /// هماهنگی دوطرفهٔ سهمیه شب ماهانه با درخواست‌های تأییدشدهٔ شیفت شب.
-/// هر درخواست شب تأییدشده یک واحد از سهمیه همان ماه کاربر مصرف می‌کند
-/// و باید جا برای سهمیه شب تعطیل/آخرهفته هم باقی بماند.
+/// ExactNight سقف/کف کل شب‌های ماه است؛ ExactHoliday فقط حداقل شب تعطیل/آخرهفته است (نه سقف).
+/// درخواست‌های شب تعطیل بیش از حداقل تعطیل مجازند تا وقتی از ExactNight فراتر نروند.
 /// </summary>
 public static class NightQuotaRequestLinker
 {
@@ -115,7 +115,8 @@ public static class NightQuotaRequestLinker
     }
 
     /// <summary>
-    /// هنگام ثبت/تأیید درخواست شب تعطیل: از سهمیه تعطیل بیشتر نشود.
+    /// سهمیه تعطیل/آخرهفته حداقل است، نه سقف.
+    /// درخواست شب تعطیل فقط با سقف کل ExactNight محدود می‌شود (که قبلاً چک شده).
     /// </summary>
     public static string? ValidateHolidayNightOnAgainstQuota(
         int approvedHolidayNightCountInMonth,
@@ -124,23 +125,16 @@ public static class NightQuotaRequestLinker
         int persianMonth,
         int pendingAdditional = 1)
     {
-        if (!exactHolidayNightQuota.HasValue)
-        {
-            return null;
-        }
-
-        if (approvedHolidayNightCountInMonth + pendingAdditional > exactHolidayNightQuota.Value)
-        {
-            return
-                $"امکان تأیید/ثبت این درخواست شب تعطیل/آخرهفته وجود ندارد: سهمیه شب تعطیل کاربر در {persianYear}/{persianMonth:00} " +
-                $"برابر {exactHolidayNightQuota.Value} است و هم‌اکنون {approvedHolidayNightCountInMonth} درخواست شب تعطیل تأییدشده دارد.";
-        }
-
+        _ = approvedHolidayNightCountInMonth;
+        _ = exactHolidayNightQuota;
+        _ = persianYear;
+        _ = persianMonth;
+        _ = pendingAdditional;
         return null;
     }
 
     /// <summary>
-    /// اگر سهمیه تعطیل وجود دارد، درخواست‌های شب غیرتعطیل نباید جا برای آن باقی نگذارند.
+    /// اگر حداقل شب تعطیل وجود دارد، درخواست‌های شب غیرتعطیل نباید جا برای آن باقی نگذارند.
     /// مثال: ExactNight=5 و ExactHoliday=1 ⇒ حداکثر ۴ درخواست شب غیرتعطیل.
     /// </summary>
     public static string? ValidateNonHolidayOnLeavesRoomForHoliday(
@@ -183,7 +177,9 @@ public static class NightQuotaRequestLinker
     }
 
     /// <summary>
-    /// هنگام تعیین/تغییر سهمیه: نباید کمتر از درخواست‌های تأییدشده باشد و نباید با ترکیب غیرتعطیل/تعطیل تناقض داشته باشد.
+    /// هنگام تعیین/تغییر سهمیه: ExactNight نباید کمتر از کل درخواست‌های شب تأییدشده باشد
+    /// و درخواست‌های غیرتعطیل باید جا برای حداقل تعطیل بگذارند.
+    /// ExactHoliday حداقل است؛ می‌تواند کمتر از تعداد درخواست‌های شب تعطیل تأییدشده باشد.
     /// </summary>
     public static string? ValidateQuotaAgainstApprovedNightRequests(
         int? newNightQuota,
@@ -209,19 +205,7 @@ public static class NightQuotaRequestLinker
                 $"({approvedNightCount}) باشد. مقدار پیشنهادی: {newNightQuota.Value}.";
         }
 
-        if (!newHolidayQuota.HasValue && approvedHolidayNightCount > 0)
-        {
-            return
-                $"نمی‌توان سهمیه شب تعطیل/آخرهفته را برای {persianYear}/{persianMonth:00} حذف کرد: " +
-                $"{approvedHolidayNightCount} درخواست شب تعطیل تأییدشده وجود دارد.";
-        }
-
-        if (newHolidayQuota.HasValue && newHolidayQuota.Value < approvedHolidayNightCount)
-        {
-            return
-                $"سهمیه شب تعطیل/آخرهفته برای {persianYear}/{persianMonth:00} نمی‌تواند کمتر از تعداد " +
-                $"درخواست‌های شب تعطیل تأییدشده ({approvedHolidayNightCount}) باشد. مقدار پیشنهادی: {newHolidayQuota.Value}.";
-        }
+        _ = approvedHolidayNightCount;
 
         return ValidateNonHolidayOnLeavesRoomForHoliday(
             approvedNonHolidayNightCount,
