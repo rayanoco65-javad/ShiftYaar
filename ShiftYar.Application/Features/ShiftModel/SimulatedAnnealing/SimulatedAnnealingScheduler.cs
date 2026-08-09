@@ -340,10 +340,18 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         {
                             penalty += (day.RequiredTotalCount - regularCount) * 120;
                         }
+                        else if (regularCount > day.RequiredTotalCount)
+                        {
+                            penalty += (regularCount - day.RequiredTotalCount) * 200;
+                        }
 
                         if (day.OnCallTotalCount > 0 && onCallCount < day.OnCallTotalCount)
                         {
                             penalty += (day.OnCallTotalCount - onCallCount) * 100;
+                        }
+                        else if (onCallCount > day.OnCallTotalCount)
+                        {
+                            penalty += (onCallCount - day.OnCallTotalCount) * 180;
                         }
                     }
                 }
@@ -1444,12 +1452,14 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             // پس از Coverage/Fairness: سهمیه شب و سقف/توالی، سپس ForceApply به‌عنوان آخرین حرف مطلق.
             // هیچ گاردی بعد از ForceApply نهایی اجرا نمی‌شود تا حضور اجباری دوباره حذف نشود.
+            ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             ApprovedRequestGuard.ForceApply(solution, _constraints);
 
             solution.Score = CalculateSolutionScore(solution);
+            solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
             solution.Violations.AddRange(managerWarnings);
             solution.Violations.AddRange(ApprovedRequestGuard.GetUnmetViolations(solution, _constraints));
             solution.Violations.AddRange(ShiftEligibilityGuard.GetViolations(solution, _constraints));

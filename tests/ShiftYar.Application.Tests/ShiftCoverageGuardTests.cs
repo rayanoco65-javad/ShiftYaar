@@ -54,6 +54,97 @@ public class ShiftCoverageGuardTests
     }
 
     [Fact]
+    public void StripExcessCoverage_RemovesExtraNightWhenDayAlreadyFilled()
+    {
+        var start = new DateTime(2026, 7, 1);
+        var end = start.AddDays(30); // 31 days
+        var users = Enumerable.Range(1, 5).Select(MakeUser).ToList();
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = end,
+            UserConstraints = users,
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning, required: 1),
+                Shift(2, ShiftLabel.Evening, required: 1),
+                Shift(3, ShiftLabel.Night, required: 1)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 2 }
+        };
+
+        var solution = new ShiftSolution();
+        foreach (var day in Enumerable.Range(0, 31).Select(i => start.AddDays(i)))
+        {
+            solution.AddAssignment(1, 3, day, ShiftLabel.Night, false);
+        }
+
+        // یک شب اضافه روی همان روز — مجموع 32 به‌جای 31
+        solution.AddAssignment(3, 3, start.AddDays(10), ShiftLabel.Night, false);
+
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+
+        var totalNights = solution.Assignments.Values
+            .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+        Assert.Equal(31, totalNights);
+
+        foreach (var day in Enumerable.Range(0, 31).Select(i => start.AddDays(i)))
+        {
+            var count = solution.GetShiftAssignments(3, day).Count(a => !a.IsOnCall);
+            Assert.True(count <= 1, $"Night over capacity on {day:yyyy-MM-dd}: {count}");
+        }
+    }
+
+    [Fact]
+    public void Enforce_NeverExceedsMonthlyNightCapacity()
+    {
+        var start = new DateTime(2026, 7, 1);
+        var end = start.AddDays(30);
+        var users = Enumerable.Range(1, 6).Select(MakeUser).ToList();
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = end,
+            UserConstraints = users,
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning, required: 1),
+                Shift(2, ShiftLabel.Evening, required: 1),
+                Shift(3, ShiftLabel.Night, required: 1)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 2 }
+        };
+
+        var solution = new ShiftSolution();
+        foreach (var day in Enumerable.Range(0, 31).Select(i => start.AddDays(i)))
+        {
+            solution.AddAssignment(1, 3, day, ShiftLabel.Night, false);
+        }
+
+        solution.AddAssignment(2, 3, start.AddDays(5), ShiftLabel.Night, false);
+        solution.AddAssignment(3, 3, start.AddDays(5), ShiftLabel.Night, false);
+
+        ShiftCoverageGuard.Enforce(solution, constraints);
+
+        var totalNights = solution.Assignments.Values
+            .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+        Assert.Equal(31, totalNights);
+        Assert.Empty(ShiftCoverageGuard.GetOverCapacityViolations(solution, constraints));
+    }
+
+    [Fact]
     public void Optimize_DoesNotLeaveMostMorningEveningEmpty()
     {
         var start = new DateTime(2026, 6, 22);

@@ -16,6 +16,8 @@ public static class ShiftCoverageGuard
 {
     public static void Enforce(ShiftSolution solution, ShiftConstraints constraints)
     {
+        StripExcessCoverage(solution, constraints);
+
         var dates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
             .Select(i => constraints.StartDate.Date.AddDays(i))
             .ToList();
@@ -34,6 +36,180 @@ public static class ShiftCoverageGuard
                 }
             }
         }
+
+        StripExcessCoverage(solution, constraints);
+    }
+
+    /// <summary>
+    /// حذف انتساب‌های بیش از ظرفیت روزانه هر شیفت/تخصص (مثلاً دو شب در یک روز وقتی فقط یک صندلی تعریف شده).
+    /// </summary>
+    public static void StripExcessCoverage(ShiftSolution solution, ShiftConstraints constraints)
+    {
+        if (!constraints.HardRules.EnforceSpecialtyCapacity)
+        {
+            return;
+        }
+
+        var dates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
+            .Select(i => constraints.StartDate.Date.AddDays(i))
+            .ToList();
+
+        foreach (var date in dates)
+        {
+            foreach (var shiftReq in constraints.ShiftRequirements)
+            {
+                foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
+                {
+                    StripSpecialtyExcess(solution, constraints, shiftReq, date, specialtyReq);
+                }
+            }
+        }
+    }
+
+    public static List<string> GetOverCapacityViolations(ShiftSolution solution, ShiftConstraints constraints)
+    {
+        var violations = new List<string>();
+        if (!constraints.HardRules.EnforceSpecialtyCapacity)
+        {
+            return violations;
+        }
+
+        var dates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
+            .Select(i => constraints.StartDate.Date.AddDays(i))
+            .ToList();
+
+        foreach (var date in dates)
+        {
+            foreach (var shiftReq in constraints.ShiftRequirements)
+            {
+                foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
+                {
+                    var day = specialtyReq.ForDay(constraints.IsHoliday(date));
+                    var regular = GetSpecialtyAssignments(
+                        solution, constraints, shiftReq, date, specialtyReq.SpecialtyId, isOnCall: false);
+                    var onCall = GetSpecialtyAssignments(
+                        solution, constraints, shiftReq, date, specialtyReq.SpecialtyId, isOnCall: true);
+
+                    if (regular.Count > day.RequiredTotalCount)
+                    {
+                        violations.Add(
+                            $"Over capacity on {date:yyyy-MM-dd} shift {shiftReq.ShiftLabel} specialty {specialtyReq.SpecialtyId}: " +
+                            $"{regular.Count}/{day.RequiredTotalCount} regular.");
+                    }
+
+                    if (onCall.Count > day.OnCallTotalCount)
+                    {
+                        violations.Add(
+                            $"Over capacity on {date:yyyy-MM-dd} shift {shiftReq.ShiftLabel} specialty {specialtyReq.SpecialtyId}: " +
+                            $"{onCall.Count}/{day.OnCallTotalCount} on-call.");
+                    }
+                }
+            }
+        }
+
+        return violations;
+    }
+
+    private static void StripSpecialtyExcess(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        ShiftRequirement shiftReq,
+        DateTime date,
+        SpecialtyRequirement specialtyReq)
+    {
+        var day = specialtyReq.ForDay(constraints.IsHoliday(date));
+        StripExcessOfType(solution, constraints, shiftReq, date, specialtyReq, day.RequiredTotalCount, isOnCall: false);
+        StripExcessOfType(solution, constraints, shiftReq, date, specialtyReq, day.OnCallTotalCount, isOnCall: true);
+    }
+
+    private static void StripExcessOfType(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        ShiftRequirement shiftReq,
+        DateTime date,
+        SpecialtyRequirement specialtyReq,
+        int maxAllowed,
+        bool isOnCall)
+    {
+        while (true)
+        {
+            var assignments = GetSpecialtyAssignments(
+                solution, constraints, shiftReq, date, specialtyReq.SpecialtyId, isOnCall);
+            if (assignments.Count <= maxAllowed)
+            {
+                break;
+            }
+
+            var removable = RankForRemoval(solution, constraints, assignments)
+                .Where(a => !IsProtectedAssignment(constraints, a))
+                .Take(assignments.Count - maxAllowed)
+                .ToList();
+
+            if (removable.Count == 0)
+            {
+                break;
+            }
+
+            foreach (var assignment in removable)
+            {
+                solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+            }
+        }
+    }
+
+    private static List<SaShiftAssignment> GetSpecialtyAssignments(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        ShiftRequirement shiftReq,
+        DateTime date,
+        int specialtyId,
+        bool isOnCall) =>
+        solution.GetShiftAssignments(shiftReq.ShiftId, date)
+            .Where(a => a.IsOnCall == isOnCall)
+            .Where(a => constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)?.SpecialtyId == specialtyId)
+            .ToList();
+
+    private static IEnumerable<SaShiftAssignment> RankForRemoval(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        IReadOnlyList<SaShiftAssignment> assignments)
+    {
+        return assignments
+            .Select(a =>
+            {
+                var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId);
+                var labelCount = user == null
+                    ? 0
+                    : solution.GetUserAllAssignments(user.UserId)
+                        .Count(x => x.ShiftLabel == a.ShiftLabel && !x.IsOnCall);
+                var nightSurplus = 0;
+                if (user != null &&
+                    a.ShiftLabel == ShiftLabel.Night &&
+                    user.ExactNightShiftCount.HasValue)
+                {
+                    nightSurplus = labelCount - user.ExactNightShiftCount.Value;
+                }
+
+                return (Assignment: a, NightSurplus: nightSurplus, LabelCount: labelCount);
+            })
+            .OrderByDescending(x => x.NightSurplus)
+            .ThenByDescending(x => x.LabelCount)
+            .ThenByDescending(x => x.Assignment.Date)
+            .Select(x => x.Assignment);
+    }
+
+    private static bool IsProtectedAssignment(ShiftConstraints constraints, SaShiftAssignment assignment)
+    {
+        var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == assignment.UserId);
+        if (user == null)
+        {
+            return false;
+        }
+
+        return user.RequiredShiftSlots.Any(s =>
+            s.Date.Date == assignment.Date.Date &&
+            s.ShiftLabel == assignment.ShiftLabel &&
+            (!s.ShiftId.HasValue || s.ShiftId.Value == assignment.ShiftId));
     }
 
     private static void FillSpecialty(
