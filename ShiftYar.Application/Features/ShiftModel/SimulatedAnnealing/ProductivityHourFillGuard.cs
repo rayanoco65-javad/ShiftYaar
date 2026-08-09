@@ -16,20 +16,53 @@ public static class ProductivityHourFillGuard
 {
     private const double DeficitToleranceHours = 2.0;
     private const int ReassignmentPasses = 96;
+    private const int FinalBalancePasses = 3;
 
     public static void Enforce(ShiftSolution solution, ShiftConstraints constraints)
     {
         var lookup = ProductivityWorkedHoursCalculator.BuildShiftInfoLookup(constraints.ShiftRequirements);
-        var productivityUsers = constraints.UserConstraints
-            .Where(u => u.IsActive && u.ShiftType != ShiftTypes.FixedShift)
-            .Where(u => u.IncludedInProductivityPlan && u.ProductivityRequiredHours.HasValue)
-            .ToList();
-
+        var productivityUsers = GetProductivityUsers(constraints);
         if (productivityUsers.Count == 0)
         {
             return;
         }
 
+        RunBalanceCycle(solution, constraints, lookup, productivityUsers);
+    }
+
+    /// <summary>
+    /// پس از ForceApply و ظرفیت: جابجایی ساعات از مازاد به کسری بدون دست‌زدن به ON تأییدشده.
+    /// </summary>
+    public static void EnforceFinalBalance(ShiftSolution solution, ShiftConstraints constraints)
+    {
+        var lookup = ProductivityWorkedHoursCalculator.BuildShiftInfoLookup(constraints.ShiftRequirements);
+        var productivityUsers = GetProductivityUsers(constraints);
+        if (productivityUsers.Count == 0)
+        {
+            return;
+        }
+
+        for (var pass = 0; pass < FinalBalancePasses; pass++)
+        {
+            RunBalanceCycle(solution, constraints, lookup, productivityUsers);
+        }
+
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+        ApprovedRequestGuard.ForceApply(solution, constraints);
+    }
+
+    private static List<UserConstraint> GetProductivityUsers(ShiftConstraints constraints) =>
+        constraints.UserConstraints
+            .Where(u => u.IsActive && u.ShiftType != ShiftTypes.FixedShift)
+            .Where(u => u.IncludedInProductivityPlan && u.ProductivityRequiredHours.HasValue)
+            .ToList();
+
+    private static void RunBalanceCycle(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        List<UserConstraint> productivityUsers)
+    {
         BalanceByReassignment(solution, constraints, lookup, productivityUsers);
         FillUnderstaffedSlots(solution, constraints, lookup, productivityUsers);
         BalanceMorningEveningPeers(solution, constraints, lookup, productivityUsers);
@@ -50,7 +83,6 @@ public static class ProductivityHourFillGuard
                 u => CalculateWorked(solution, u.UserId, lookup, constraints));
 
             var donor = productivityUsers
-                .Where(u => !IsProtectedUser(u))
                 .Where(u => GetSurplusHours(u, hours[u.UserId]) > 0)
                 .OrderByDescending(u => GetSurplusHours(u, hours[u.UserId]))
                 .ThenByDescending(u => hours[u.UserId])
@@ -152,6 +184,8 @@ public static class ProductivityHourFillGuard
         var shiftHours = EstimateShiftHours(assignment, lookup, constraints);
         var before = CalculateRatioSpread(hours, productivityUsers);
 
+        var beforeImbalance = CalculateTotalImbalance(hours, productivityUsers);
+
         var donorAfter = hours[donor.UserId] - shiftHours;
         if (donor.ProductivityRequiredHours.HasValue &&
             donorAfter < (double)donor.ProductivityRequiredHours.Value - DeficitToleranceHours)
@@ -174,8 +208,15 @@ public static class ProductivityHourFillGuard
         }
 
         var after = CalculateRatioSpread(afterHours, productivityUsers);
-        return after < before - 0.001;
+        var afterImbalance = CalculateTotalImbalance(afterHours, productivityUsers);
+        return after < before - 0.001 || afterImbalance < beforeImbalance - 0.25;
     }
+
+    private static double CalculateTotalImbalance(
+        IReadOnlyDictionary<int, double> hours,
+        IEnumerable<UserConstraint> productivityUsers) =>
+        productivityUsers.Sum(u =>
+            GetDeficit(u, hours[u.UserId]) + GetSurplusHours(u, hours[u.UserId]));
 
     private static void FillUnderstaffedSlots(
         ShiftSolution solution,
@@ -471,7 +512,6 @@ public static class ProductivityHourFillGuard
                     .ToList();
 
                 var donorEntry = scored
-                    .Where(x => !IsProtectedUser(x.User))
                     .Where(x => x.surplus > 0 || x.Count > x.fair + 1.5)
                     .OrderByDescending(x => x.Count - x.fair)
                     .ThenByDescending(x => x.surplus)
@@ -737,9 +777,6 @@ public static class ProductivityHourFillGuard
 
         return Math.Max(0, (double)user.ProductivityRequiredHours.Value - worked);
     }
-
-    private static bool IsProtectedUser(UserConstraint user) =>
-        user.RequiredShiftSlots.Count > 0 || user.RequiredPresenceDates.Count > 0;
 
     private static bool IsProtectedAssignment(ShiftConstraints constraints, SaShiftAssignment assignment)
     {

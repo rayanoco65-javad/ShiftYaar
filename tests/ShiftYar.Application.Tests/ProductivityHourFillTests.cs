@@ -178,6 +178,65 @@ public class ProductivityHourFillTests
         Assert.True(worked2 + worked3 > worked1 * 0.6, "Hours should move toward under-target users");
     }
 
+    [Fact]
+    public void EnforceFinalBalance_MovesNonProtectedShiftFromUserWithApprovedRequestOnOtherDay()
+    {
+        var start = new DateTime(2026, 8, 1);
+        var donor = MakeUser(6, requiredHours: 152);
+        donor.RequiredShiftSlots.Add(new ShiftSlotConstraint
+        {
+            Date = start.AddDays(10),
+            ShiftLabel = ShiftLabel.Night
+        });
+        var receiver = MakeUser(2, requiredHours: 152);
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(20),
+            UserConstraints = [donor, receiver, MakeUser(3, 152)],
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning),
+                Shift(2, ShiftLabel.Evening),
+                Shift(3, ShiftLabel.Night)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 2 }
+        };
+
+        var solution = new ShiftSolution();
+        for (var d = 0; d < 21; d++)
+        {
+            var day = start.AddDays(d);
+            solution.AddAssignment(6, 1, day, ShiftLabel.Morning, false);
+            solution.AddAssignment(6, 2, day, ShiftLabel.Evening, false);
+        }
+
+        solution.AddAssignment(6, 3, start.AddDays(10), ShiftLabel.Night, false);
+
+        var lookup = ShiftYar.Application.Common.Utilities.ProductivityWorkedHoursCalculator
+            .BuildShiftInfoLookup(constraints.ShiftRequirements);
+        var beforeDonor = Worked(solution, 6, lookup, constraints);
+        var beforeReceiver = Worked(solution, 2, lookup, constraints);
+
+        ProductivityHourFillGuard.EnforceFinalBalance(solution, constraints);
+
+        var afterDonor = Worked(solution, 6, lookup, constraints);
+        var afterReceiver = Worked(solution, 2, lookup, constraints);
+
+        Assert.True(afterDonor < beforeDonor - 4, "Donor with ON on another day should donate non-protected shifts.");
+        Assert.True(afterReceiver > beforeReceiver + 4, "Receiver should gain hours from rebalance.");
+        Assert.True(
+            solution.GetShiftAssignments(3, start.AddDays(10)).Any(a => a.UserId == 6),
+            "Approved night request must remain after final balance.");
+    }
+
     private static double RatioSpread(
         ShiftSolution solution,
         List<UserConstraint> users,

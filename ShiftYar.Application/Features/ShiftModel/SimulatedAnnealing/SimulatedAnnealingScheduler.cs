@@ -454,6 +454,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 {
                     penalty += shortfall * 8;
                 }
+
+                if (shortfall > 15)
+                {
+                    penalty += shortfall * 12;
+                }
             }
 
             return penalty;
@@ -487,6 +492,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 if (excess > 10)
                 {
                     penalty += excess * 8;
+                }
+
+                if (excess > 15)
+                {
+                    penalty += excess * 12;
                 }
             }
 
@@ -1456,6 +1466,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             ShiftCoverageGuard.EnforceCapacityCeiling(solution, _constraints);
+            ProductivityHourFillGuard.EnforceFinalBalance(solution, _constraints);
 
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
