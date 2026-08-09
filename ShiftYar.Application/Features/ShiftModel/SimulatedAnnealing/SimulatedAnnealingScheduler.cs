@@ -1450,8 +1450,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ExactNightQuotaGuard.Enforce(solution, _constraints);
             ShiftCoverageGuard.Enforce(solution, _constraints);
 
-            // پس از Coverage/Fairness: سهمیه شب و سقف/توالی، سپس ForceApply به‌عنوان آخرین حرف مطلق.
-            // هیچ گاردی بعد از ForceApply نهایی اجرا نمی‌شود تا حضور اجباری دوباره حذف نشود.
+            // پس از Coverage/Fairness: سهمیه شب، سپس ForceApply و تعادل ظرفیت با حفظ حضور اجباری.
             ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);

@@ -145,6 +145,57 @@ public class ShiftCoverageGuardTests
     }
 
     [Fact]
+    public void EnforceCapacityCeiling_PreservesRequiredNightShift()
+    {
+        var start = new DateTime(2026, 7, 1);
+        var end = start.AddDays(30);
+        var requiredUser = MakeUser(6);
+        var requiredDate = start.AddDays(14);
+        requiredUser.RequiredShiftSlots.Add(new ShiftSlotConstraint
+        {
+            Date = requiredDate,
+            ShiftLabel = ShiftLabel.Night
+        });
+
+        var users = Enumerable.Range(1, 5).Select(MakeUser).Append(requiredUser).ToList();
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = end,
+            UserConstraints = users,
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning, required: 1),
+                Shift(2, ShiftLabel.Evening, required: 1),
+                Shift(3, ShiftLabel.Night, required: 1)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 2 }
+        };
+
+        var solution = new ShiftSolution();
+        foreach (var day in Enumerable.Range(0, 31).Select(i => start.AddDays(i)))
+        {
+            solution.AddAssignment(1, 3, day, ShiftLabel.Night, false);
+        }
+
+        solution.AddAssignment(2, 3, requiredDate, ShiftLabel.Night, false);
+        ApprovedRequestGuard.ForceApply(solution, constraints);
+        ShiftCoverageGuard.EnforceCapacityCeiling(solution, constraints);
+
+        Assert.True(
+            solution.GetShiftAssignments(3, requiredDate).Any(a => a.UserId == 6 && !a.IsOnCall),
+            "Required night shift for user 6 must survive capacity ceiling enforcement.");
+        Assert.Equal(1, solution.GetShiftAssignments(3, requiredDate).Count(a => !a.IsOnCall));
+        Assert.Equal(31, solution.Assignments.Values.Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall));
+    }
+
+    [Fact]
     public void EnforceCapacityCeiling_FixesDuplicateNightOnSameDay()
     {
         var start = new DateTime(2026, 7, 1);
