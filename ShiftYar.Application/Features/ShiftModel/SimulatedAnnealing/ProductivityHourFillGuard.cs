@@ -33,6 +33,7 @@ public static class ProductivityHourFillGuard
         BalanceByReassignment(solution, constraints, lookup, productivityUsers);
         FillUnderstaffedSlots(solution, constraints, lookup, productivityUsers);
         BalanceMorningEveningPeers(solution, constraints, lookup, productivityUsers);
+        BalanceShiftLabelOverload(solution, constraints, lookup, productivityUsers);
         BalanceByReassignment(solution, constraints, lookup, productivityUsers);
     }
 
@@ -393,6 +394,114 @@ public static class ProductivityHourFillGuard
                     solution.RemoveAssignment(donor.User.UserId, assignment.ShiftId, assignment.Date);
                     solution.AddAssignment(
                         receiver.User.UserId,
+                        assignment.ShiftId,
+                        assignment.Date,
+                        assignment.ShiftLabel,
+                        assignment.IsOnCall);
+                    moved = true;
+                    break;
+                }
+
+                if (!moved)
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// کاهش تمرکز صبح/عصر روی یک نفر (مثلاً ۹ عصر) با جابجایی به کسری‌موظفی‌ها.
+    /// </summary>
+    private static void BalanceShiftLabelOverload(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        List<UserConstraint> productivityUsers)
+    {
+        foreach (var label in new[] { ShiftLabel.Evening, ShiftLabel.Morning })
+        {
+            for (var pass = 0; pass < 32; pass++)
+            {
+                var snapshot = productivityUsers
+                    .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, label))
+                    .Select(u => (
+                        User: u,
+                        Count: solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == label && !a.IsOnCall),
+                        Worked: CalculateWorked(solution, u.UserId, lookup, constraints)))
+                    .ToList();
+                if (snapshot.Count < 2)
+                {
+                    break;
+                }
+
+                var total = snapshot.Sum(x => x.Count);
+                if (total == 0)
+                {
+                    break;
+                }
+
+                var weights = snapshot.ToDictionary(
+                    x => x.User.UserId,
+                    x => x.User.ProductivityRequiredHours.HasValue && x.User.ProductivityRequiredHours > 0
+                        ? (double)x.User.ProductivityRequiredHours.Value
+                        : 1.0);
+                var totalWeight = weights.Values.Sum();
+                if (totalWeight <= 0)
+                {
+                    totalWeight = snapshot.Count;
+                }
+
+                var scored = snapshot
+                    .Select(x =>
+                    {
+                        var fair = total * weights[x.User.UserId] / totalWeight;
+                        var surplus = GetSurplusHours(x.User, x.Worked);
+                        var deficit = GetDeficit(x.User, x.Worked);
+                        return (x.User, x.Count, fair, surplus, deficit);
+                    })
+                    .ToList();
+
+                var donorEntry = scored
+                    .Where(x => !IsProtectedUser(x.User))
+                    .Where(x => x.surplus > 0 || x.Count > x.fair + 1.5)
+                    .OrderByDescending(x => x.Count - x.fair)
+                    .ThenByDescending(x => x.surplus)
+                    .FirstOrDefault();
+                var receiverEntry = scored
+                    .Where(x => x.deficit > DeficitToleranceHours || x.Count < x.fair - 1)
+                    .OrderByDescending(x => x.deficit)
+                    .ThenBy(x => x.Count)
+                    .FirstOrDefault();
+
+                if (donorEntry.User == null || receiverEntry.User == null ||
+                    donorEntry.User.UserId == receiverEntry.User.UserId)
+                {
+                    break;
+                }
+
+                var moved = false;
+                foreach (var assignment in solution.GetUserAllAssignments(donorEntry.User.UserId)
+                             .Where(a => a.ShiftLabel == label && !a.IsOnCall)
+                             .Where(a => !IsProtectedAssignment(constraints, a))
+                             .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, donorEntry.User, a))
+                             .OrderByDescending(a => constraints.IsHoliday(a.Date)))
+                {
+                    if (!CanUserTakeShift(solution, constraints, lookup, receiverEntry.User, assignment, ignoreShiftId: null))
+                    {
+                        continue;
+                    }
+
+                    var hours = snapshot.ToDictionary(x => x.User.UserId, x => x.Worked);
+                    if (!WouldImproveRatioBalance(
+                            hours, productivityUsers, donorEntry.User, receiverEntry.User, assignment, lookup, constraints))
+                    {
+                        continue;
+                    }
+
+                    solution.RemoveAssignment(donorEntry.User.UserId, assignment.ShiftId, assignment.Date);
+                    solution.AddAssignment(
+                        receiverEntry.User.UserId,
                         assignment.ShiftId,
                         assignment.Date,
                         assignment.ShiftLabel,

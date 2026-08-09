@@ -30,6 +30,15 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         /// </summary>
         public bool IsHolidayWeekendNight(DateTime date) =>
             HolidayWeekendNightRules.IsHolidayWeekendNight(date, IsHoliday);
+
+        /// <summary>فعال‌سازی توزیع نرم شیفت شب بر اساس سابقه (بعد از سهمیه دقیق).</summary>
+        public bool EnableNightShiftDistributionBySeniority { get; set; }
+
+        /// <summary>۰=شب‌دوست، ۱=شب‌گریز، ۲=خنثی.</summary>
+        public int NightShiftDistributionType { get; set; } = 2;
+
+        public double SeniorityDistributionSlope { get; set; } = 1.0;
+
         public GlobalConstraints GlobalConstraints { get; set; } = new GlobalConstraints();
         // قوانین قطعی (سراسری برای همه دپارتمان‌ها)
         public HardRuleSet HardRules { get; set; } = HardRuleSet.CreateDefault();

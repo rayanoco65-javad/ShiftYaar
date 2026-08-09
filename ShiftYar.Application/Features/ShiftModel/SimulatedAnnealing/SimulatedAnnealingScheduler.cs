@@ -246,19 +246,19 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             // حرکت‌های هدفمند بیمارستانی: جابجایی و انتساب مجدد پرتکرارتر از افزودن/حذف تصادفی
             var roll = _random.NextDouble();
-            if (roll < 0.20)
+            if (roll < 0.18)
             {
                 PerformReassignMove(neighbor);
             }
-            else if (roll < 0.35)
+            else if (roll < 0.40)
             {
                 PerformHourBalanceMove(neighbor);
             }
-            else if (roll < 0.50)
+            else if (roll < 0.55)
             {
                 PerformMorningEveningBalanceMove(neighbor);
             }
-            else if (roll < 0.70)
+            else if (roll < 0.72)
             {
                 PerformSwapMove(neighbor);
             }
@@ -572,12 +572,45 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     continue;
                 }
 
-                var counts = eligible
-                    .Select(u => solution.GetUserAllAssignments(u.UserId)
-                        .Count(a => a.ShiftLabel == label && !a.IsOnCall))
-                    .ToList();
-                var avg = counts.Average();
-                penalty += counts.Sum(c => Math.Abs(c - avg)) * 3.0;
+                var counts = eligible.ToDictionary(
+                    u => u.UserId,
+                    u => solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == label && !a.IsOnCall));
+                var total = counts.Values.Sum();
+                if (total == 0)
+                {
+                    continue;
+                }
+
+                var weights = eligible.ToDictionary(u => u.UserId, u => GetProductivityWeight(u));
+                var totalWeight = weights.Values.Sum();
+                if (totalWeight <= 0)
+                {
+                    totalWeight = eligible.Count;
+                }
+
+                foreach (var user in eligible)
+                {
+                    var fairShare = total * weights[user.UserId] / totalWeight;
+                    var diff = counts[user.UserId] - fairShare;
+                    penalty += Math.Abs(diff) * 3.0;
+
+                    if (diff > 1.5)
+                    {
+                        var surplus = GetProductivityHourSurplus(user, solution);
+                        if (surplus > 2)
+                        {
+                            penalty += diff * surplus * 0.35;
+                        }
+                    }
+                    else if (diff < -1.5)
+                    {
+                        var deficit = GetProductivityHourDeficit(user, solution);
+                        if (deficit > 2)
+                        {
+                            penalty += Math.Abs(diff) * deficit * 0.35;
+                        }
+                    }
+                }
             }
 
             return penalty;
@@ -693,43 +726,98 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             var eligible = _constraints.UserConstraints
                 .Where(u => u.ShiftType != ShiftTypes.FixedShift)
+                .Where(u => !u.HasExactNightQuota)
                 .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Night))
                 .ToList();
-            if (eligible.Count < 2) return 0;
+            if (eligible.Count < 2)
+            {
+                return 0;
+            }
 
-            var totalNights = eligible.Sum(u =>
-                solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall));
-            if (totalNights == 0) return 0;
+            var nightCounts = eligible.ToDictionary(
+                u => u.UserId,
+                u => solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall));
+            var totalNights = nightCounts.Values.Sum();
+            if (totalNights == 0)
+            {
+                return 0;
+            }
 
-            double fair = totalNights / (double)eligible.Count;
+            if (!_constraints.EnableNightShiftDistributionBySeniority)
+            {
+                var equalFair = totalNights / (double)eligible.Count;
+                return eligible.Sum(u => Math.Abs(nightCounts[u.UserId] - equalFair));
+            }
+
+            var weights = eligible.ToDictionary(u => u.UserId, u => GetSeniorityNightWeight(u));
+            var totalWeight = weights.Values.Sum();
+            if (totalWeight <= 0)
+            {
+                var equalFair = totalNights / (double)eligible.Count;
+                return eligible.Sum(u => Math.Abs(nightCounts[u.UserId] - equalFair));
+            }
+
             return eligible.Sum(u =>
             {
-                var nights = solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
-                return Math.Abs(nights - fair);
+                var fair = totalNights * weights[u.UserId] / totalWeight;
+                return Math.Abs(nightCounts[u.UserId] - fair);
             });
+        }
+
+        private double GetSeniorityNightWeight(UserConstraint user)
+        {
+            var years = Math.Clamp(user.ExperienceYears, 0, 40);
+            var slope = Math.Max(0.1, _constraints.SeniorityDistributionSlope);
+
+            return _constraints.NightShiftDistributionType switch
+            {
+                0 => Math.Pow(Math.Max(1, years + 1), slope),
+                1 => Math.Pow(Math.Max(1, 40 - years), slope),
+                _ => 1.0
+            };
         }
 
         private double CalculateExtraShiftRotationPenalty(ShiftSolution solution)
         {
-            // اگر کاربری در سابقه اخیر شیفت اضافه بیشتری داشته، دادن شیفت اضافه به او جریمه شود
-            // تعریف ساده: "شیفت اضافه" = بالاتر از میانگین همین ماه
-            var counts = _constraints.UserConstraints
+            var users = _constraints.UserConstraints
                 .Where(u => u.ShiftType != ShiftTypes.FixedShift)
-                .Select(u => (User: u, Count: solution.GetUserAllAssignments(u.UserId).Count))
+                .Select(u => (User: u, Count: solution.GetUserAllAssignments(u.UserId).Count(a => !a.IsOnCall)))
                 .ToList();
-            if (counts.Count == 0) return 0;
-            double avg = counts.Average(c => c.Count);
+            if (users.Count < 2)
+            {
+                return 0;
+            }
+
+            var totalShifts = users.Sum(x => x.Count);
+            if (totalShifts == 0)
+            {
+                return 0;
+            }
+
+            var weights = users.ToDictionary(
+                x => x.User.UserId,
+                x => GetProductivityWeight(x.User));
+            var totalWeight = weights.Values.Sum();
+            if (totalWeight <= 0)
+            {
+                totalWeight = users.Count;
+            }
 
             double penalty = 0;
-            foreach (var (user, count) in counts)
+            foreach (var (user, count) in users)
             {
-                bool isExtraThisMonth = count > avg + 0.5; // آستانه‌ی ساده
-                if (!isExtraThisMonth) continue;
+                var fairShare = totalShifts * weights[user.UserId] / totalWeight;
+                if (count <= fairShare + 0.5)
+                {
+                    continue;
+                }
 
-                // اگر در گذشته هم زیاد گرفته است، جریمه بیشتر
-                int recent = user.RecentTotalShifts;
-                penalty += Math.Max(0, recent - (int)avg);
+                penalty += count - fairShare;
+                var recent = user.RecentTotalShifts;
+                var recentFair = recent / (double)Math.Max(1, users.Count);
+                penalty += Math.Max(0, recent - recentFair) * 0.5;
             }
+
             return penalty;
         }
 
@@ -2228,7 +2316,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             var donorAssignments = solution.GetUserAllAssignments(donor.UserId)
                 .Where(a => !a.IsOnCall && !IsProtectedAssignment(solution, a))
-                .OrderByDescending(a => a.ShiftLabel == ShiftLabel.Night ? 1 : 0)
+                .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, _constraints, donor, a))
+                .OrderBy(a => a.ShiftLabel == ShiftLabel.Morning ? 0 : a.ShiftLabel == ShiftLabel.Evening ? 1 : 2)
+                .ThenByDescending(a => GetShiftEffectiveHours(a))
                 .ToList();
             foreach (var assignment in donorAssignments)
             {
@@ -2274,16 +2364,36 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     User: u,
                     Count: CountUserLabelShifts(solution, u.UserId, label),
                     HolidayCount: HolidayMorningEveningFairnessGuard.CountHolidayLabel(
-                        solution, _constraints, u.UserId, label)))
-                .OrderByDescending(x => x.HolidayCount)
-                .ThenByDescending(x => x.Count)
+                        solution, _constraints, u.UserId, label),
+                    Surplus: GetProductivityHourSurplus(u, solution),
+                    Deficit: GetProductivityHourDeficit(u, solution)))
                 .ToList();
-            var donor = ranked.First().User;
-            var receiver = ranked.Last().User;
-            if (ranked.First().HolidayCount - ranked.Last().HolidayCount < 2 &&
-                ranked.First().Count - ranked.Last().Count < 2)
+
+            var donorPick = ranked
+                .Where(x => x.Surplus > 2 || x.Count >= ranked.Average(r => r.Count) + 2)
+                .OrderByDescending(x => x.Surplus)
+                .ThenByDescending(x => x.HolidayCount)
+                .ThenByDescending(x => x.Count)
+                .FirstOrDefault();
+
+            var receiverPick = ranked
+                .Where(x => x.Deficit > 2)
+                .OrderByDescending(x => x.Deficit)
+                .ThenBy(x => x.Count)
+                .FirstOrDefault();
+
+            var donor = donorPick.User != null
+                ? donorPick.User
+                : ranked.OrderByDescending(x => x.HolidayCount).ThenByDescending(x => x.Count).First().User;
+            var receiver = receiverPick.User != null && receiverPick.User.UserId != donor.UserId
+                ? receiverPick.User
+                : ranked.Where(x => x.User.UserId != donor.UserId).OrderByDescending(x => x.Deficit).ThenBy(x => x.Count).First().User;
+
+            if (ranked.Max(x => x.HolidayCount) - ranked.Min(x => x.HolidayCount) < 2 &&
+                ranked.Max(x => x.Count) - ranked.Min(x => x.Count) < 2 &&
+                GetProductivityHourSurplus(donor, solution) <= 2 &&
+                GetProductivityHourDeficit(receiver, solution) <= 2)
             {
-                // اگر تعداد برچسب نزدیک است، کاربری با هفتهٔ پرتراکم را سبک کن
                 donor = eligible
                     .OrderByDescending(u => MaxConsecutiveRun(solution, u.UserId))
                     .ThenByDescending(u => CountUserLabelShifts(solution, u.UserId, label))
@@ -2295,7 +2405,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     .FirstOrDefault() ?? receiver;
             }
 
-            var preferHolidayMove = ranked.First().HolidayCount - ranked.Last().HolidayCount >= 2;
+            var preferHolidayMove = ranked.Max(x => x.HolidayCount) - ranked.Min(x => x.HolidayCount) >= 2;
             var donorMe = solution.GetUserAllAssignments(donor.UserId)
                 .Where(a => !a.IsOnCall && (a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening))
                 .Where(a => !IsProtectedAssignment(solution, a))
@@ -2374,13 +2484,28 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private double GetProductivityHourSurplus(UserConstraint user, ShiftSolution solution)
         {
+            const double tolerance = 2.0;
             if (!user.IncludedInProductivityPlan || !user.ProductivityRequiredHours.HasValue)
             {
                 return CalculateUserWorkedHours(solution.GetUserAllAssignments(user.UserId));
             }
 
             var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(user.UserId));
-            return Math.Max(0, worked - (double)user.ProductivityRequiredHours.Value);
+            return Math.Max(0, worked - (double)user.ProductivityRequiredHours.Value - tolerance);
+        }
+
+        private static double GetProductivityWeight(UserConstraint user) =>
+            user.IncludedInProductivityPlan && user.ProductivityRequiredHours.HasValue && user.ProductivityRequiredHours > 0
+                ? (double)user.ProductivityRequiredHours.Value
+                : 1.0;
+
+        private double GetShiftEffectiveHours(SaShiftAssignment assignment)
+        {
+            var duration = GetShiftDuration(assignment.ShiftId);
+            return ProductivityWorkedHoursCalculator.DefaultHandoverHours +
+                   (_constraints.IsHoliday(assignment.Date) || assignment.ShiftLabel == ShiftLabel.Night
+                       ? duration * ProductivityWorkedHoursCalculator.DefaultNightHolidayMultiplier
+                       : duration);
         }
 
         private List<StaffingSlotGap> FindUnderstaffedSlots(ShiftSolution solution)

@@ -1129,6 +1129,24 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             return Math.Max(1, duration);
         }
 
+        private static int ResolveExperienceYears(User user, DateTime referenceDate)
+        {
+            if (!user.DateOfEmployment.HasValue)
+            {
+                return 0;
+            }
+
+            var employment = StaffEmploymentInfo.NormalizeEmploymentDate(user.DateOfEmployment.Value);
+            var totalMonths = (referenceDate.Year - employment.Year) * 12
+                              + (referenceDate.Month - employment.Month);
+            if (totalMonths < 0)
+            {
+                return 0;
+            }
+
+            return (int)Math.Floor(totalMonths / 12m);
+        }
+
         private static string ToPersianDateString(DateTime date) => DateConverter.ConvertToPersianDate(date);
 
         /// <summary>
@@ -1549,6 +1567,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     constraints.SoftWeights.WorkdaySpreadWeight = 1.5;
                     constraints.SoftWeights.ProductivityShortfallWeight = 8.0;
                     constraints.SoftWeights.ProductivityOvertimeWeight = 6.0;
+                    constraints.EnableNightShiftDistributionBySeniority =
+                        deptSettingEarly.EnableNightShiftDistributionBySeniority ?? false;
+                    constraints.NightShiftDistributionType = deptSettingEarly.NightShiftDistributionType ?? 2;
+                    constraints.SeniorityDistributionSlope = deptSettingEarly.SeniorityDistributionSlope ?? 1.0;
                     constraints.SoftWeights.NightShiftDistributionBySeniorityWeight =
                         Math.Max(1.0, deptSettingEarly.NightShiftDistributionWeight ?? 1.0);
                     constraints.HardRules.EnforceProductivityHours = true;
@@ -1656,6 +1678,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         HardshipPercent = user.HardshipPercent ?? 0m,
                         OvertimeConsent = user.OvertimeConsent ?? false,
                         DateOfEmployment = DateConverter.NormalizeEmploymentDate(user.DateOfEmployment),
+                        ExperienceYears = ResolveExperienceYears(user, constraints.StartDate),
                         ExactNightShiftCount = monthQuota?.ExactNightShiftCount,
                         ExactHolidayWeekendNightShiftCount = monthQuota?.ExactHolidayWeekendNightShiftCount
                     };
@@ -2257,6 +2280,18 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     constraints.SoftWeights.FairNightShiftBalanceWeight = Math.Max(2.0, constraints.SoftWeights.FairNightShiftBalanceWeight);
                     constraints.SoftWeights.ProductivityShortfallWeight = Math.Max(8.0, constraints.SoftWeights.ProductivityShortfallWeight);
                     constraints.SoftWeights.ProductivityOvertimeWeight = Math.Max(6.0, constraints.SoftWeights.ProductivityOvertimeWeight);
+
+                    constraints.EnableNightShiftDistributionBySeniority =
+                        deptSetting.EnableNightShiftDistributionBySeniority ?? constraints.EnableNightShiftDistributionBySeniority;
+                    if (deptSetting.NightShiftDistributionType.HasValue)
+                    {
+                        constraints.NightShiftDistributionType = deptSetting.NightShiftDistributionType.Value;
+                    }
+
+                    if (deptSetting.SeniorityDistributionSlope.HasValue)
+                    {
+                        constraints.SeniorityDistributionSlope = deptSetting.SeniorityDistributionSlope.Value;
+                    }
 
                     // Night shift distribution weights
                     if (deptSetting.NightShiftDistributionWeight.HasValue)
