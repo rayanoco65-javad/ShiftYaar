@@ -419,34 +419,44 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return;
             }
 
-            // هر کسی به‌جز دارندگان «حضور اجباری همان شیفت» قابل جایگزینی است
-            var removable = regulars
-                .OrderBy(a =>
-                {
-                    var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
-                    if (u != null &&
-                        u.RequiredShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
-                    {
-                        return 2;
-                    }
-
-                    if (u != null && u.RequiredPresenceDates.Any(d => d.Date == date.Date))
-                    {
-                        return 1;
-                    }
-
-                    return 0;
-                })
-                .FirstOrDefault(a =>
-                {
-                    var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
-                    return u == null ||
-                           !u.RequiredShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel);
-                });
-
-            if (removable != null)
+            var targetBeforeAdd = Math.Max(0, dayCounts.RequiredTotalCount - 1);
+            while (regulars.Count > targetBeforeAdd)
             {
+                var removable = regulars
+                    .OrderBy(a =>
+                    {
+                        var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
+                        if (u != null &&
+                            u.RequiredShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
+                        {
+                            return 2;
+                        }
+
+                        if (u != null && u.RequiredPresenceDates.Any(d => d.Date == date.Date))
+                        {
+                            return 1;
+                        }
+
+                        return 0;
+                    })
+                    .FirstOrDefault(a =>
+                    {
+                        var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
+                        return u == null ||
+                               !u.RequiredShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel);
+                    });
+
+                if (removable == null)
+                {
+                    break;
+                }
+
                 solution.RemoveAssignment(removable.UserId, removable.ShiftId, removable.Date);
+                regulars = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                    .Where(a => !a.IsOnCall &&
+                                a.UserId != incoming.UserId &&
+                                GetSpecialty(constraints, a.UserId) == incoming.SpecialtyId)
+                    .ToList();
             }
         }
 

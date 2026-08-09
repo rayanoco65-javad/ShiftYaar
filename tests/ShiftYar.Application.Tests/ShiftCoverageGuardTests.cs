@@ -145,6 +145,50 @@ public class ShiftCoverageGuardTests
     }
 
     [Fact]
+    public void EnforceCapacityCeiling_FixesDuplicateNightOnSameDay()
+    {
+        var start = new DateTime(2026, 7, 1);
+        var end = start.AddDays(30);
+        var users = Enumerable.Range(1, 5).Select(MakeUser).ToList();
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = end,
+            UserConstraints = users,
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning, required: 1),
+                Shift(2, ShiftLabel.Evening, required: 1),
+                Shift(3, ShiftLabel.Night, required: 1)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 2 }
+        };
+
+        var solution = new ShiftSolution();
+        var collisionDay = start.AddDays(14);
+        foreach (var day in Enumerable.Range(0, 31).Select(i => start.AddDays(i)))
+        {
+            solution.AddAssignment(1, 3, day, ShiftLabel.Night, false);
+        }
+
+        solution.AddAssignment(2, 3, collisionDay, ShiftLabel.Night, false);
+
+        ShiftCoverageGuard.EnforceCapacityCeiling(solution, constraints);
+
+        var totalNights = solution.Assignments.Values
+            .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+        Assert.Equal(31, totalNights);
+        Assert.Equal(1, solution.GetShiftAssignments(3, collisionDay).Count(a => !a.IsOnCall));
+        Assert.Empty(ShiftCoverageGuard.GetOverCapacityViolations(solution, constraints));
+    }
+
+    [Fact]
     public void Optimize_DoesNotLeaveMostMorningEveningEmpty()
     {
         var start = new DateTime(2026, 6, 22);

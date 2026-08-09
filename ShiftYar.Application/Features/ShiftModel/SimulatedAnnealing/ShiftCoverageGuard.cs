@@ -17,12 +17,34 @@ public static class ShiftCoverageGuard
     public static void Enforce(ShiftSolution solution, ShiftConstraints constraints)
     {
         StripExcessCoverage(solution, constraints);
+        FillMissingCoverage(solution, constraints);
+        StripExcessCoverage(solution, constraints);
+    }
 
+    /// <summary>
+    /// پس از ForceApply: حذف قطعی مازاد ظرفیت و پر کردن جای خالی — بدون تجاوز از سقف روزانه.
+    /// </summary>
+    public static void EnforceCapacityCeiling(ShiftSolution solution, ShiftConstraints constraints)
+    {
+        for (var pass = 0; pass < 8; pass++)
+        {
+            StripExcessCoverage(solution, constraints, removeProtectedIfNeeded: true);
+            FillMissingCoverage(solution, constraints);
+            if (!HasAnyOverCapacity(solution, constraints))
+            {
+                break;
+            }
+        }
+
+        StripExcessCoverage(solution, constraints, removeProtectedIfNeeded: true);
+    }
+
+    private static void FillMissingCoverage(ShiftSolution solution, ShiftConstraints constraints)
+    {
         var dates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
             .Select(i => constraints.StartDate.Date.AddDays(i))
             .ToList();
 
-        // شب اول، بعد صبح و عصر — تا سهمیه شب قبل از پر شدن ME قفل شود
         foreach (var label in new[] { ShiftLabel.Night, ShiftLabel.Morning, ShiftLabel.Evening })
         {
             foreach (var date in dates)
@@ -36,20 +58,16 @@ public static class ShiftCoverageGuard
                 }
             }
         }
-
-        StripExcessCoverage(solution, constraints);
     }
 
     /// <summary>
     /// حذف انتساب‌های بیش از ظرفیت روزانه هر شیفت/تخصص (مثلاً دو شب در یک روز وقتی فقط یک صندلی تعریف شده).
     /// </summary>
-    public static void StripExcessCoverage(ShiftSolution solution, ShiftConstraints constraints)
+    public static void StripExcessCoverage(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        bool removeProtectedIfNeeded = false)
     {
-        if (!constraints.HardRules.EnforceSpecialtyCapacity)
-        {
-            return;
-        }
-
         var dates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
             .Select(i => constraints.StartDate.Date.AddDays(i))
             .ToList();
@@ -60,19 +78,18 @@ public static class ShiftCoverageGuard
             {
                 foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
                 {
-                    StripSpecialtyExcess(solution, constraints, shiftReq, date, specialtyReq);
+                    StripSpecialtyExcess(solution, constraints, shiftReq, date, specialtyReq, removeProtectedIfNeeded);
                 }
             }
         }
     }
 
+    public static bool HasAnyOverCapacity(ShiftSolution solution, ShiftConstraints constraints) =>
+        GetOverCapacityViolations(solution, constraints).Count > 0;
+
     public static List<string> GetOverCapacityViolations(ShiftSolution solution, ShiftConstraints constraints)
     {
         var violations = new List<string>();
-        if (!constraints.HardRules.EnforceSpecialtyCapacity)
-        {
-            return violations;
-        }
 
         var dates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
             .Select(i => constraints.StartDate.Date.AddDays(i))
@@ -115,11 +132,14 @@ public static class ShiftCoverageGuard
         ShiftConstraints constraints,
         ShiftRequirement shiftReq,
         DateTime date,
-        SpecialtyRequirement specialtyReq)
+        SpecialtyRequirement specialtyReq,
+        bool removeProtectedIfNeeded)
     {
         var day = specialtyReq.ForDay(constraints.IsHoliday(date));
-        StripExcessOfType(solution, constraints, shiftReq, date, specialtyReq, day.RequiredTotalCount, isOnCall: false);
-        StripExcessOfType(solution, constraints, shiftReq, date, specialtyReq, day.OnCallTotalCount, isOnCall: true);
+        StripExcessOfType(
+            solution, constraints, shiftReq, date, specialtyReq, day.RequiredTotalCount, isOnCall: false, removeProtectedIfNeeded);
+        StripExcessOfType(
+            solution, constraints, shiftReq, date, specialtyReq, day.OnCallTotalCount, isOnCall: true, removeProtectedIfNeeded);
     }
 
     private static void StripExcessOfType(
@@ -129,7 +149,8 @@ public static class ShiftCoverageGuard
         DateTime date,
         SpecialtyRequirement specialtyReq,
         int maxAllowed,
-        bool isOnCall)
+        bool isOnCall,
+        bool removeProtectedIfNeeded)
     {
         while (true)
         {
@@ -140,10 +161,18 @@ public static class ShiftCoverageGuard
                 break;
             }
 
+            var excess = assignments.Count - maxAllowed;
             var removable = RankForRemoval(solution, constraints, assignments)
                 .Where(a => !IsProtectedAssignment(constraints, a))
-                .Take(assignments.Count - maxAllowed)
+                .Take(excess)
                 .ToList();
+
+            if (removable.Count < excess && removeProtectedIfNeeded)
+            {
+                removable = RankForRemoval(solution, constraints, assignments)
+                    .Take(excess)
+                    .ToList();
+            }
 
             if (removable.Count == 0)
             {
@@ -190,10 +219,11 @@ public static class ShiftCoverageGuard
                     nightSurplus = labelCount - user.ExactNightShiftCount.Value;
                 }
 
-                return (Assignment: a, NightSurplus: nightSurplus, LabelCount: labelCount);
+                return (Assignment: a, NightSurplus: nightSurplus, LabelCount: labelCount, Protected: IsProtectedAssignment(constraints, a));
             })
             .OrderByDescending(x => x.NightSurplus)
             .ThenByDescending(x => x.LabelCount)
+            .ThenBy(x => x.Protected ? 1 : 0)
             .ThenByDescending(x => x.Assignment.Date)
             .Select(x => x.Assignment);
     }

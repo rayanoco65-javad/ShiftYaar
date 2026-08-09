@@ -852,6 +852,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
             EnsureHardDailyRulesOrThrow(solution, constraints);
+            EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
 
             var result = await ConvertSolutionToResultAsync(solution, constraints);
             result.AlgorithmUsed = SchedulingAlgorithm.SimulatedAnnealing;
@@ -1253,6 +1254,18 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 "قیود سخت روزانه رعایت نشدند:\n" + string.Join("\n", daily.Concat(adjacency)));
         }
 
+        private static void EnsureSpecialtyCapacityNotExceededOrThrow(ShiftSolution solution, ShiftConstraints constraints)
+        {
+            var over = ShiftCoverageGuard.GetOverCapacityViolations(solution, constraints);
+            if (over.Count == 0)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                "تعداد شیفت‌های اختصاص‌یافته از ظرفیت روزانه بیشتر است:\n" + string.Join("\n", over));
+        }
+
         /// <summary>
         /// اگر درخواست‌های شب تأییدشدهٔ غیرتعطیل جا برای سهمیه تعطیل نگذارند، Optimize از ابتدا fail می‌شود.
         /// </summary>
@@ -1545,7 +1558,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     constraints.HardRules.EnforceMaxConsecutiveShifts = deptSettingEarly.EnforceMaxConsecutiveShifts ?? false;
                     constraints.HardRules.EnforceWeeklyMaxShifts = deptSettingEarly.EnforceWeeklyMaxShifts ?? false;
                     constraints.HardRules.EnforceNightShiftMonthlyCap = deptSettingEarly.EnforceNightShiftMonthlyCap ?? false;
-                    constraints.HardRules.EnforceSpecialtyCapacity = deptSettingEarly.EnforceSpecialtyCapacity ?? false;
+                    constraints.HardRules.EnforceSpecialtyCapacity = deptSettingEarly.EnforceSpecialtyCapacity ?? true;
                     constraints.HardRules.AllowEveningAfterNightShift =
                         deptSettingEarly.AllowEveningAfterNightShift ?? true;
 
@@ -2618,6 +2631,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
             EnsureHardDailyRulesOrThrow(solution, constraints);
+            EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
         }
 
 
@@ -2670,6 +2684,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
             EnsureHardDailyRulesOrThrow(solution, constraints);
+            EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
 
             var result = await ConvertSolutionToResultAsync(solution, constraints);
             result.AlgorithmUsed = SchedulingAlgorithm.SimulatedAnnealing;
