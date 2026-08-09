@@ -1,14 +1,11 @@
 ﻿using AutoMapper;
+using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.DTOs.DepartmentModel;
 using ShiftYar.Application.DTOs.UserModel;
 using ShiftYar.Domain.Entities.DepartmentModel;
 using ShiftYar.Domain.Entities.RoleModel;
 using ShiftYar.Domain.Entities.UserModel;
-using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace ShiftYar.Application.Common.Mappings
 {
@@ -20,13 +17,17 @@ namespace ShiftYar.Application.Common.Mappings
                 .ForMember(dest => dest.OtherPhoneNumbers, opt => opt.MapFrom(src =>
                     src.OtherPhoneNumbers != null ? src.OtherPhoneNumbers.Select(p => p.PhoneNumber).ToList() : null))
                 .ForMember(dest => dest.UserRoles, opt => opt.MapFrom(src =>
-                    src.UserRoles != null ? src.UserRoles.Select(r => r.RoleId).ToList() : null));
+                    src.UserRoles != null ? src.UserRoles.Select(r => r.RoleId).ToList() : null))
+                .ForMember(dest => dest.DateOfEmployment, opt => opt.MapFrom(src =>
+                    DateConverter.EmploymentDateToPersianString(src.DateOfEmployment)));
 
             CreateMap<UserDtoAdd, User>()
                 .ForMember(dest => dest.OtherPhoneNumbers, opt => opt.MapFrom(src =>
                     src.OtherPhoneNumbers != null ? src.OtherPhoneNumbers.Select(p => new UserPhoneNumber { PhoneNumber = p }).ToList() : null))
                 .ForMember(dest => dest.UserRoles, opt => opt.MapFrom(src =>
-                    src.UserRoles != null ? src.UserRoles.Select(r => new UserRole { RoleId = r }).ToList() : null));
+                    src.UserRoles != null ? src.UserRoles.Select(r => new UserRole { RoleId = r }).ToList() : null))
+                // تاریخ استخدام شمسی است؛ تبدیل در UserService انجام می‌شود تا AutoMapper اشتباه پارس نکند.
+                .ForMember(dest => dest.DateOfEmployment, opt => opt.Ignore());
 
             CreateMap<UserPhoneNumber, UserPhoneNumber>()
                 .ForMember(dest => dest.User, opt => opt.Ignore());
@@ -35,6 +36,8 @@ namespace ShiftYar.Application.Common.Mappings
                 .ForMember(dest => dest.User, opt => opt.Ignore());
 
             CreateMap<User, UserDtoGet>()
+                .ForMember(dest => dest.DateOfEmployment, opt => opt.MapFrom(src =>
+                    DateConverter.NormalizeEmploymentDate(src.DateOfEmployment)))
                 .ForMember(dest => dest.OtherPhoneNumbers, opt => opt.MapFrom(src =>
                     src.OtherPhoneNumbers.Select(p => new UserPhoneNumber
                     {

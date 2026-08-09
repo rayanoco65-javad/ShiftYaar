@@ -45,26 +45,38 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
         }
 
         /// <summary>
-        /// بعضی رکوردهای قدیمی، اجزای تاریخ شمسی را داخل DateTime میلادی ذخیره کرده‌اند (مثلاً سال ۱۳۸۰).
+        /// تشخیص اینکه آیا DateTime به‌اشتباه اجزای شمسی را به‌صورت سال/ماه/روز میلادی نگه داشته است.
+        /// </summary>
+        public static bool LooksLikeMisstoredPersianComponents(DateTime stored)
+            => stored.Year >= 1200 && stored.Year <= 1500;
+
+        /// <summary>
+        /// بعضی رکوردهای قدیمی، اجزای تاریخ شمسی را داخل DateTime میلادی ذخیره کرده‌اند (مثلاً ۱۳۸۰/۰۱/۰۴ → 1380-01-04).
+        /// این متد آن‌ها را به میلادی واقعی تبدیل می‌کند؛ تاریخ‌های صحیح دست‌نخورده می‌مانند.
         /// </summary>
         public static DateTime NormalizeEmploymentDate(DateTime stored)
         {
-            if (stored.Year < 1200 || stored.Year > 1500)
+            if (!LooksLikeMisstoredPersianComponents(stored))
             {
-                return stored;
+                return DateTime.SpecifyKind(stored.Date, DateTimeKind.Unspecified);
             }
 
             try
             {
                 var persian = new PersianCalendar();
-                var day = Math.Clamp(stored.Day, 1, persian.GetDaysInMonth(stored.Year, stored.Month));
-                return persian.ToDateTime(stored.Year, stored.Month, day, 0, 0, 0, 0);
+                var month = Math.Clamp(stored.Month, 1, 12);
+                var day = Math.Clamp(stored.Day, 1, persian.GetDaysInMonth(stored.Year, month));
+                var result = persian.ToDateTime(stored.Year, month, day, 0, 0, 0, 0);
+                return DateTime.SpecifyKind(result.Date, DateTimeKind.Unspecified);
             }
             catch
             {
-                return stored;
+                return DateTime.SpecifyKind(stored.Date, DateTimeKind.Unspecified);
             }
         }
+
+        public static DateTime? NormalizeEmploymentDate(DateTime? stored)
+            => stored.HasValue ? NormalizeEmploymentDate(stored.Value) : null;
 
         /// <summary>
         /// Convenience helper to build employment info straight from existing User aggregate to avoid data duplication.
@@ -83,7 +95,7 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
             {
                 StaffId = user.Id ?? 0,
                 StaffFullName = user.FullName,
-                DateOfEmployment = user.DateOfEmployment,
+                DateOfEmployment = NormalizeEmploymentDate(user.DateOfEmployment),
                 HardshipPercent = user.HardshipPercent ?? 0m,
                 HasUncommonRotatingShifts = hasUncommonRotatingShifts,
                 YearsOfServiceOverride = yearsOfServiceOverride

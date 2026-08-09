@@ -132,7 +132,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 }
 
                 var user = _mapper.Map<User>(dto);
-                // تبدیل تاریخ استخدام از شمسی به میلادی
+                // تبدیل تاریخ استخدام از شمسی به میلادی واقعی (مپر DateOfEmployment را Ignore می‌کند)
                 if (!string.IsNullOrWhiteSpace(dto.DateOfEmployment))
                 {
                     user.DateOfEmployment = DateConverter.ConvertToGregorianDate(dto.DateOfEmployment);
@@ -322,14 +322,18 @@ namespace ShiftYar.Application.Features.UserModel.Services
                     }
                 }
 
-                // تبدیل تاریخ استخدام از شمسی به میلادی
+                // Update other user properties (DateOfEmployment در مپر Ignore است)
+                _mapper.Map(dto, user);
+
+                // تبدیل تاریخ استخدام از شمسی به میلادی واقعی
                 if (!string.IsNullOrWhiteSpace(dto.DateOfEmployment))
                 {
                     user.DateOfEmployment = DateConverter.ConvertToGregorianDate(dto.DateOfEmployment);
                 }
-
-                // Update other user properties
-                _mapper.Map(dto, user);
+                else
+                {
+                    user.DateOfEmployment = DateConverter.NormalizeEmploymentDate(user.DateOfEmployment);
+                }
 
                 //Update Image
                 if(dto.Image != null)

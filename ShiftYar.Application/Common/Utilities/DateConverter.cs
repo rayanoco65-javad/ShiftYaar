@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Globalization;
-using System.Linq;
 using System.Text;
+using ShiftYar.Domain.Entities.ProductivityModel;
 
 namespace ShiftYar.Application.Common.Utilities
 {
@@ -11,6 +11,26 @@ namespace ShiftYar.Application.Common.Utilities
     public static class DateConverter
     {
         private static readonly PersianCalendar PersianCalendar = new();
+
+        /// <summary>
+        /// اگر تاریخ استخدام به‌اشتباه با اجزای شمسی در فیلد میلادی ذخیره شده باشد، آن را به میلادی واقعی تبدیل می‌کند.
+        /// </summary>
+        public static DateTime NormalizeEmploymentDate(DateTime stored)
+            => StaffEmploymentInfo.NormalizeEmploymentDate(stored);
+
+        public static DateTime? NormalizeEmploymentDate(DateTime? stored)
+            => StaffEmploymentInfo.NormalizeEmploymentDate(stored);
+
+        /// <summary>
+        /// تاریخ استخدام ذخیره‌شده را برای نمایش/ویرایش به رشته شمسی yyyy/MM/dd برمی‌گرداند.
+        /// </summary>
+        public static string? EmploymentDateToPersianString(DateTime? stored)
+        {
+            if (!stored.HasValue)
+                return null;
+
+            return ConvertToPersianDate(NormalizeEmploymentDate(stored.Value));
+        }
 
         /// <summary>
         /// تبدیل رشته تاریخ شمسی به تاریخ میلادی (نیمه‌شب، <see cref="DateTimeKind.Unspecified"/>).

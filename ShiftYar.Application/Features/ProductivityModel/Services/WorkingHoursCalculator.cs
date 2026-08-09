@@ -93,7 +93,7 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
             {
                 StaffId = dto.StaffId,
                 StaffFullName = dto.StaffFullName,
-                DateOfEmployment = dto.DateOfEmployment,
+                DateOfEmployment = StaffEmploymentInfo.NormalizeEmploymentDate(dto.DateOfEmployment),
                 YearsOfServiceOverride = dto.YearsOfServiceOverride,
                 HardshipPercent = dto.HardshipPercent,
                 HasUncommonRotatingShifts = dto.HasUncommonRotatingShifts
