@@ -118,6 +118,67 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             return violations;
         }
 
+        /// <summary>
+        /// چند درخواست ON تأییدشده برای یک صندلی/روز — از قبل غیرممکن است.
+        /// </summary>
+        public static List<string> GetConflictingRequiredShiftSlotViolations(ShiftConstraints constraints)
+        {
+            var violations = new List<string>();
+            if (constraints.ShiftRequirements.Count == 0)
+            {
+                return violations;
+            }
+
+            var dates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
+                .Select(i => constraints.StartDate.Date.AddDays(i));
+
+            foreach (var date in dates)
+            {
+                foreach (var shiftReq in constraints.ShiftRequirements)
+                {
+                    foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
+                    {
+                        var day = specialtyReq.ForDay(constraints.IsHoliday(date));
+                        if (day.RequiredTotalCount <= 0)
+                        {
+                            continue;
+                        }
+
+                        var claimants = constraints.UserConstraints
+                            .Where(u => u.IsActive && u.SpecialtyId == specialtyReq.SpecialtyId)
+                            .Where(u => u.RequiredShiftSlots.Any(s =>
+                                s.Date.Date == date.Date &&
+                                s.ShiftLabel == shiftReq.ShiftLabel &&
+                                (!s.ShiftId.HasValue || s.ShiftId.Value == shiftReq.ShiftId)))
+                            .ToList();
+
+                        if (claimants.Count <= day.RequiredTotalCount)
+                        {
+                            continue;
+                        }
+
+                        var names = string.Join("، ", claimants.Select(u =>
+                            string.IsNullOrWhiteSpace(u.UserName) ? $"User {u.UserId}" : u.UserName));
+                        violations.Add(
+                            $"تداخل درخواست تأییدشده: {claimants.Count} نفر ({names}) برای {shiftReq.ShiftLabel} " +
+                            $"در {date:yyyy-MM-dd} درخواست ON دارند، در حالی که ظرفیت این شیفت {day.RequiredTotalCount} نفر است.");
+                    }
+                }
+            }
+
+            return violations;
+        }
+
+        public static bool IsApprovedRequiredSlot(
+            UserConstraint user,
+            DateTime date,
+            ShiftLabel label,
+            int? shiftId = null) =>
+            user.RequiredShiftSlots.Any(s =>
+                s.Date.Date == date.Date &&
+                s.ShiftLabel == label &&
+                (!shiftId.HasValue || !s.ShiftId.HasValue || s.ShiftId.Value == shiftId.Value));
+
         private static void StripUnavailableAssignments(ShiftSolution solution, ShiftConstraints constraints)
         {
             foreach (var assignment in solution.Assignments.Values.ToList())
@@ -137,74 +198,72 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private static void ForceRequiredShiftSlots(ShiftSolution solution, ShiftConstraints constraints)
         {
-            foreach (var user in constraints.UserConstraints)
+            var requiredEntries = constraints.UserConstraints
+                .SelectMany(u => u.RequiredShiftSlots.Select(r => (User: u, Required: r)))
+                .Where(x => x.Required.Date.Date >= constraints.StartDate.Date &&
+                            x.Required.Date.Date <= constraints.EndDate.Date)
+                .OrderBy(x => x.Required.Date)
+                .ThenBy(x => x.Required.ShiftLabel)
+                .ThenBy(x => x.User.UserId)
+                .ToList();
+
+            foreach (var (user, required) in requiredEntries)
             {
-                foreach (var required in user.RequiredShiftSlots)
+                if (!IsOffConflictFree(user, required.Date, required.ShiftLabel) ||
+                    !Common.Utilities.ShiftEligibilityResolver.IsLabelAllowed(
+                        user.AllowedShiftLabels, required.ShiftLabel))
                 {
-                    if (required.Date.Date < constraints.StartDate.Date ||
-                        required.Date.Date > constraints.EndDate.Date)
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    if (!IsOffConflictFree(user, required.Date, required.ShiftLabel) ||
-                        !Common.Utilities.ShiftEligibilityResolver.IsLabelAllowed(
-                            user.AllowedShiftLabels, required.ShiftLabel))
-                    {
-                        continue;
-                    }
+                var shiftReq = ResolveShift(constraints, required.ShiftLabel, user.SpecialtyId, required.ShiftId);
+                if (shiftReq == null)
+                {
+                    continue;
+                }
 
-                    var shiftReq = ResolveShift(constraints, required.ShiftLabel, user.SpecialtyId, required.ShiftId);
-                    if (shiftReq == null)
-                    {
-                        continue;
-                    }
+                var existing = solution.GetShiftAssignments(shiftReq.ShiftId, required.Date)
+                    .FirstOrDefault(a => a.UserId == user.UserId);
 
-                    var existing = solution.GetShiftAssignments(shiftReq.ShiftId, required.Date)
-                        .FirstOrDefault(a => a.UserId == user.UserId);
+                if (existing != null && !existing.IsOnCall)
+                {
+                    continue;
+                }
 
-                    if (existing != null && !existing.IsOnCall)
-                    {
-                        continue;
-                    }
-
-                    // چند پاس پاک‌سازی تا تداخل‌های غیرمحافظت‌شده جلوی حضور اجباری را نگیرند
-                    for (var pass = 0; pass < 4; pass++)
-                    {
-                        ClearUnprotectedAdjacentConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
-                        ClearUnprotectedSameDayConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
-
-                        if (IsUserAvailable(user, required.Date, required.ShiftLabel, solution, constraints))
-                        {
-                            break;
-                        }
-                    }
-
-                    if (!IsUserAvailable(user, required.Date, required.ShiftLabel, solution, constraints))
-                    {
-                        // همچنان بن‌بست با انتساب محافظت‌شده — GetUnmetViolations گزارش می‌کند
-                        continue;
-                    }
-
-                    RemoveOtherDailyAssignments(solution, constraints, user, required.Date, shiftReq.ShiftId);
-                    MakeRoomForIncoming(solution, constraints, shiftReq, required.Date, user);
-
-                    // اگر MakeRoom باعث تداخل تازه شد، دوباره پاک کن
+                // چند پاس پاک‌سازی تا تداخل‌های غیرمحافظت‌شده جلوی حضور اجباری را نگیرند
+                for (var pass = 0; pass < 4; pass++)
+                {
                     ClearUnprotectedAdjacentConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
                     ClearUnprotectedSameDayConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
 
-                    if (!IsUserAvailable(user, required.Date, required.ShiftLabel, solution, constraints))
+                    if (IsUserAvailable(user, required.Date, required.ShiftLabel, solution, constraints))
                     {
-                        continue;
+                        break;
                     }
-
-                    solution.AddAssignment(
-                        user.UserId,
-                        shiftReq.ShiftId,
-                        required.Date.Date,
-                        required.ShiftLabel,
-                        isOnCall: false);
                 }
+
+                if (!IsUserAvailable(user, required.Date, required.ShiftLabel, solution, constraints))
+                {
+                    continue;
+                }
+
+                RemoveOtherDailyAssignments(solution, constraints, user, required.Date, shiftReq.ShiftId);
+                MakeRoomForIncoming(solution, constraints, shiftReq, required.Date, user);
+
+                ClearUnprotectedAdjacentConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
+                ClearUnprotectedSameDayConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
+
+                if (!IsUserAvailable(user, required.Date, required.ShiftLabel, solution, constraints))
+                {
+                    continue;
+                }
+
+                solution.AddAssignment(
+                    user.UserId,
+                    shiftReq.ShiftId,
+                    required.Date.Date,
+                    required.ShiftLabel,
+                    isOnCall: false);
             }
         }
 
@@ -420,18 +479,31 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             var targetBeforeAdd = Math.Max(0, dayCounts.RequiredTotalCount - 1);
+            var incomingHasRequired = IsApprovedRequiredSlot(incoming, date, shiftReq.ShiftLabel, shiftReq.ShiftId);
+
             while (regulars.Count > targetBeforeAdd)
             {
                 var removable = regulars
+                    .Where(a => a.UserId != incoming.UserId)
+                    .Where(a =>
+                    {
+                        var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
+                        if (u == null)
+                        {
+                            return true;
+                        }
+
+                        // هرگز ON تأییدشدهٔ دیگر را برای همین صندلی حذف نکن
+                        if (IsApprovedRequiredSlot(u, date, shiftReq.ShiftLabel, shiftReq.ShiftId))
+                        {
+                            return false;
+                        }
+
+                        return true;
+                    })
                     .OrderBy(a =>
                     {
                         var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
-                        if (u != null &&
-                            u.RequiredShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
-                        {
-                            return 2;
-                        }
-
                         if (u != null && u.RequiredPresenceDates.Any(d => d.Date == date.Date))
                         {
                             return 1;
@@ -439,12 +511,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                         return 0;
                     })
-                    .FirstOrDefault(a =>
-                    {
-                        var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
-                        return u == null ||
-                               !u.RequiredShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel);
-                    });
+                    .FirstOrDefault();
 
                 if (removable == null)
                 {
@@ -457,6 +524,21 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                                 a.UserId != incoming.UserId &&
                                 GetSpecialty(constraints, a.UserId) == incoming.SpecialtyId)
                     .ToList();
+            }
+
+            // اگر ورودی ON تأییدشده دارد و هنوز صندلی پر است، فقط غیر ON را یک بار دیگر پاک کن
+            if (incomingHasRequired && regulars.Count >= dayCounts.RequiredTotalCount)
+            {
+                foreach (var occupant in regulars.ToList())
+                {
+                    var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == occupant.UserId);
+                    if (u != null && IsApprovedRequiredSlot(u, date, shiftReq.ShiftLabel, shiftReq.ShiftId))
+                    {
+                        continue;
+                    }
+
+                    solution.RemoveAssignment(occupant.UserId, occupant.ShiftId, occupant.Date);
+                }
             }
         }
 

@@ -845,6 +845,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
             var scheduler = new SimulatedAnnealingScheduler(constraints, parameters);
             EnsureNightQuotaRequestsFeasibleOrThrow(constraints);
+            EnsureConflictingApprovedRequestsOrThrow(constraints);
             var solution = scheduler.Optimize();
             var statistics = scheduler.GetStatistics();
 
@@ -883,6 +884,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
             var scheduler = new OrToolsCPSatScheduler(ortoolsConstraints, parameters);
             EnsureNightQuotaRequestsFeasibleOrThrow(constraints);
+            EnsureConflictingApprovedRequestsOrThrow(constraints);
             var solution = scheduler.Optimize();
 
             var saSolution = ConvertOrToolsToShiftSolution(solution);
@@ -1252,6 +1254,18 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
             throw new InvalidOperationException(
                 "قیود سخت روزانه رعایت نشدند:\n" + string.Join("\n", daily.Concat(adjacency)));
+        }
+
+        private static void EnsureConflictingApprovedRequestsOrThrow(ShiftConstraints constraints)
+        {
+            var conflicts = ApprovedRequestGuard.GetConflictingRequiredShiftSlotViolations(constraints);
+            if (conflicts.Count == 0)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                "ترکیب درخواست‌های تأییدشده غیرممکن است:\n" + string.Join("\n", conflicts));
         }
 
         private static void EnsureSpecialtyCapacityNotExceededOrThrow(ShiftSolution solution, ShiftConstraints constraints)
@@ -2677,6 +2691,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
             var scheduler = new SimulatedAnnealingScheduler(constraints, parameters);
             EnsureNightQuotaRequestsFeasibleOrThrow(constraints);
+            EnsureConflictingApprovedRequestsOrThrow(constraints);
             var solution = scheduler.Optimize();
             var statistics = scheduler.GetStatistics();
 

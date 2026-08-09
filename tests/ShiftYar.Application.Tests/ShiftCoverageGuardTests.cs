@@ -145,6 +145,57 @@ public class ShiftCoverageGuardTests
     }
 
     [Fact]
+    public void EnforceCapacityCeiling_ResolvesTwoNightsOnSameDayWhenOneIsRequired()
+    {
+        var start = new DateTime(2026, 7, 1);
+        var end = start.AddDays(30);
+        var requiredDate = start.AddDays(14);
+        var requiredUser = MakeUser(6);
+        requiredUser.RequiredShiftSlots.Add(new ShiftSlotConstraint
+        {
+            Date = requiredDate,
+            ShiftLabel = ShiftLabel.Night
+        });
+
+        var users = Enumerable.Range(1, 5).Select(MakeUser).Append(requiredUser).ToList();
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = end,
+            UserConstraints = users,
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning, required: 1),
+                Shift(2, ShiftLabel.Evening, required: 1),
+                Shift(3, ShiftLabel.Night, required: 1)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 2 }
+        };
+
+        var solution = new ShiftSolution();
+        foreach (var day in Enumerable.Range(0, 31).Select(i => start.AddDays(i)))
+        {
+            solution.AddAssignment(1, 3, day, ShiftLabel.Night, false);
+        }
+
+        solution.AddAssignment(2, 3, requiredDate, ShiftLabel.Night, false);
+        ShiftCoverageGuard.EnforceCapacityCeiling(solution, constraints);
+
+        Assert.Equal(1, solution.GetShiftAssignments(3, requiredDate).Count(a => !a.IsOnCall));
+        Assert.Contains(
+            solution.GetShiftAssignments(3, requiredDate),
+            a => a.UserId == 6 && !a.IsOnCall);
+        Assert.Equal(31, solution.Assignments.Values.Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall));
+        Assert.Empty(ShiftCoverageGuard.GetOverCapacityViolations(solution, constraints));
+    }
+
+    [Fact]
     public void EnforceCapacityCeiling_PreservesRequiredNightShift()
     {
         var start = new DateTime(2026, 7, 1);
@@ -237,6 +288,28 @@ public class ShiftCoverageGuardTests
         Assert.Equal(31, totalNights);
         Assert.Equal(1, solution.GetShiftAssignments(3, collisionDay).Count(a => !a.IsOnCall));
         Assert.Empty(ShiftCoverageGuard.GetOverCapacityViolations(solution, constraints));
+    }
+
+    [Fact]
+    public void GetConflictingRequiredShiftSlotViolations_DetectsTwoOnSameNightSlot()
+    {
+        var start = new DateTime(2026, 7, 1);
+        var date = start.AddDays(14);
+        var userA = MakeUser(6);
+        var userB = MakeUser(7);
+        userA.RequiredShiftSlots.Add(new ShiftSlotConstraint { Date = date, ShiftLabel = ShiftLabel.Night });
+        userB.RequiredShiftSlots.Add(new ShiftSlotConstraint { Date = date, ShiftLabel = ShiftLabel.Night });
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(30),
+            UserConstraints = [userA, userB],
+            ShiftRequirements = [Shift(3, ShiftLabel.Night, required: 1)]
+        };
+
+        var conflicts = ApprovedRequestGuard.GetConflictingRequiredShiftSlotViolations(constraints);
+        Assert.Single(conflicts);
     }
 
     [Fact]

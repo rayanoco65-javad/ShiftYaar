@@ -22,17 +22,16 @@ public static class ShiftCoverageGuard
     }
 
     /// <summary>
-    /// پس از ForceApply: حذف مازاد غیرمحافظت‌شده، بازاعمال حضور اجباری، پر کردن جای خالی.
-    /// انتساب‌های درخواست ON تأییدشده هرگز حذف نمی‌شوند.
+    /// پس از گاردهای عدالت: حذف مازاد غیر ON، پر کردن جای خالی، سپس ForceApply به‌عنوان آخرین حرف مطلق.
+    /// هیچ strip بعد از ForceApply اجرا نمی‌شود تا درخواست ON حذف نشود.
     /// </summary>
     public static void EnforceCapacityCeiling(ShiftSolution solution, ShiftConstraints constraints)
     {
         for (var pass = 0; pass < 8; pass++)
         {
             StripExcessCoverage(solution, constraints);
-            ApprovedRequestGuard.ForceApply(solution, constraints);
             FillMissingCoverage(solution, constraints);
-            StripExcessCoverage(solution, constraints);
+            ApprovedRequestGuard.ForceApply(solution, constraints);
 
             if (!HasAnyOverCapacity(solution, constraints))
             {
@@ -41,7 +40,6 @@ public static class ShiftCoverageGuard
         }
 
         ApprovedRequestGuard.ForceApply(solution, constraints);
-        StripExcessCoverage(solution, constraints);
     }
 
     private static void FillMissingCoverage(ShiftSolution solution, ShiftConstraints constraints)
@@ -167,11 +165,6 @@ public static class ShiftCoverageGuard
                 .Take(excess)
                 .ToList();
 
-            if (removable.Count == 0)
-            {
-                break;
-            }
-
             foreach (var assignment in removable)
             {
                 solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
@@ -229,11 +222,27 @@ public static class ShiftCoverageGuard
             return false;
         }
 
-        return user.RequiredShiftSlots.Any(s =>
-            s.Date.Date == assignment.Date.Date &&
-            s.ShiftLabel == assignment.ShiftLabel &&
-            (!s.ShiftId.HasValue || s.ShiftId.Value == assignment.ShiftId));
+        return ApprovedRequestGuard.IsApprovedRequiredSlot(
+            user, assignment.Date, assignment.ShiftLabel, assignment.ShiftId);
     }
+
+    /// <summary>
+    /// اگر کاربری درخواست ON برای این روز/شیفت دارد ولی هنوز انتساب نگرفته، Coverage خودکار جای او را پر نکند.
+    /// </summary>
+    private static bool HasUnmetRequiredSlotForShift(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        ShiftRequirement shiftReq,
+        DateTime date,
+        SpecialtyRequirement specialtyReq) =>
+        constraints.UserConstraints
+            .Where(u => u.IsActive && u.SpecialtyId == specialtyReq.SpecialtyId)
+            .Any(u => u.RequiredShiftSlots.Any(s =>
+                s.Date.Date == date.Date &&
+                s.ShiftLabel == shiftReq.ShiftLabel &&
+                (!s.ShiftId.HasValue || s.ShiftId.Value == shiftReq.ShiftId) &&
+                !solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                    .Any(a => a.UserId == u.UserId && !a.IsOnCall)));
 
     private static void FillSpecialty(
         ShiftSolution solution,
@@ -245,6 +254,11 @@ public static class ShiftCoverageGuard
         var day = specialtyReq.ForDay(constraints.IsHoliday(date));
         var needed = day.RequiredTotalCount;
         if (needed <= 0)
+        {
+            return;
+        }
+
+        if (HasUnmetRequiredSlotForShift(solution, constraints, shiftReq, date, specialtyReq))
         {
             return;
         }
