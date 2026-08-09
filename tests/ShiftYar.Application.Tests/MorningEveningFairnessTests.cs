@@ -150,6 +150,58 @@ public class MorningEveningFairnessTests
             $"Holiday evening spread too large: [{string.Join(",", holidayEvenings)}]");
     }
 
+    [Fact]
+    public void MorningEveningBalanceGuard_SwapsSameDayBetweenImbalancedUsers()
+    {
+        var start = new DateTime(2026, 7, 1);
+        var mHeavy = MakeUser(1);
+        var eHeavy = MakeUser(2);
+        var constraints = BuildConstraints(start, days: 7, [mHeavy, eHeavy]);
+
+        var solution = new ShiftSolution();
+        var day = start.AddDays(2);
+        // کاربر ۱: فقط صبح؛ کاربر ۲: فقط عصر — هر دو در یک روز
+        solution.AddAssignment(1, 1, day, ShiftLabel.Morning, false);
+        solution.AddAssignment(2, 2, day, ShiftLabel.Evening, false);
+        solution.AddAssignment(1, 1, start, ShiftLabel.Morning, false);
+        solution.AddAssignment(1, 1, start.AddDays(1), ShiftLabel.Morning, false);
+        solution.AddAssignment(1, 1, start.AddDays(3), ShiftLabel.Morning, false);
+        solution.AddAssignment(2, 2, start.AddDays(1), ShiftLabel.Evening, false);
+        solution.AddAssignment(2, 2, start.AddDays(3), ShiftLabel.Evening, false);
+        solution.AddAssignment(2, 2, start.AddDays(4), ShiftLabel.Evening, false);
+
+        MorningEveningBalanceGuard.Enforce(solution, constraints);
+
+        var spread1 = MorningEveningBalanceGuard.GetMorningEveningSpread(solution, mHeavy);
+        var spread2 = MorningEveningBalanceGuard.GetMorningEveningSpread(solution, eHeavy);
+
+        Assert.True(spread1 <= 2, $"User 1 M/E spread {spread1} too large");
+        Assert.True(spread2 <= 2, $"User 2 M/E spread {spread2} too large");
+        Assert.True(MorningEveningBalanceGuard.CountMorning(solution, 1) > 0);
+        Assert.True(MorningEveningBalanceGuard.CountMorning(solution, 2) > 0);
+        Assert.True(MorningEveningBalanceGuard.CountEvening(solution, 1) > 0);
+        Assert.True(MorningEveningBalanceGuard.CountEvening(solution, 2) > 0);
+    }
+
+    [Fact]
+    public void Optimize_KeepsMorningEveningSpreadWithinTwoPerUser()
+    {
+        var start = new DateTime(2026, 6, 22);
+        var users = Enumerable.Range(1, 9).Select(i => MakeUser(i)).ToList();
+        var constraints = BuildConstraints(start, days: 31, users);
+        constraints.SoftWeights.MorningEveningBalanceWeight = 8;
+        constraints.SoftWeights.FairMorningEveningPeerWeight = 4;
+
+        var solution = new SimulatedAnnealingScheduler(constraints, SoftSaParams()).Optimize();
+
+        foreach (var user in users)
+        {
+            var spread = MorningEveningBalanceGuard.GetMorningEveningSpread(solution, user);
+            Assert.True(spread <= 2,
+                $"User {user.UserId} M/E spread {spread} (M={MorningEveningBalanceGuard.CountMorning(solution, user.UserId)}, E={MorningEveningBalanceGuard.CountEvening(solution, user.UserId)})");
+        }
+    }
+
     private static UserConstraint MakeUser(int id) => new()
     {
         UserId = id,

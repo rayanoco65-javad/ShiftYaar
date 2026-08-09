@@ -254,9 +254,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public double FairShiftCountBalanceWeight { get; set; } = 1.0; // تعادل تعداد شیفت بین افراد در این ماه
         public double FairWorkedHoursBalanceWeight { get; set; } = 8.0; // تعادل ساعات مؤثر کار (با ضریب شب/تعطیل)
         public double FairNightShiftBalanceWeight { get; set; } = 2.5; // تعادل تعداد شیفت شب بین افراد واجد شرایط
-        public double MorningEveningBalanceWeight { get; set; } = 2.0; // تناسب تعداد شیفت صبح و عصر درون هر کاربر
+        public double MorningEveningBalanceWeight { get; set; } = 8.0; // تناسب تعداد شیفت صبح و عصر درون هر کاربر
         /// <summary>تعادل تعداد صبح/عصر بین کاربران گردشی (نه فقط درون یک نفر).</summary>
-        public double FairMorningEveningPeerWeight { get; set; } = 2.5;
+        public double FairMorningEveningPeerWeight { get; set; } = 4.0;
         /// <summary>تعادل صبح/عصر روزهای تعطیل بین کاربران گردشی (جدا از تعادل ماهانه).</summary>
         public double FairHolidayMorningEveningPeerWeight { get; set; } = 8.0;
         /// <summary>جریمه تراکم روزهای کاری (چند روز متوالی یا پر کردن کل هفته). سبک نگه دار تا پوشش ظرفیت خراب نشود.</summary>

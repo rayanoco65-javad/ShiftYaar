@@ -251,6 +251,14 @@ public static class ProductivityHourFillGuard
             return [ShiftLabel.Night, ShiftLabel.Evening, ShiftLabel.Morning];
         }
 
+        // اگر اختلاف صبح/عصر زیاد است، اول برچسب کمتر را امتحان کن
+        if (Math.Abs(m - e) > 2)
+        {
+            return m < e
+                ? [ShiftLabel.Morning, ShiftLabel.Evening, ShiftLabel.Night]
+                : [ShiftLabel.Evening, ShiftLabel.Morning, ShiftLabel.Night];
+        }
+
         if (m <= e)
         {
             return [ShiftLabel.Morning, ShiftLabel.Evening, ShiftLabel.Night];

@@ -250,15 +250,15 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             {
                 PerformReassignMove(neighbor);
             }
-            else if (roll < 0.40)
+            else if (roll < 0.38)
             {
                 PerformHourBalanceMove(neighbor);
             }
-            else if (roll < 0.55)
+            else if (roll < 0.58)
             {
                 PerformMorningEveningBalanceMove(neighbor);
             }
-            else if (roll < 0.72)
+            else if (roll < 0.73)
             {
                 PerformSwapMove(neighbor);
             }
@@ -539,17 +539,33 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             double penalty = 0;
             foreach (var u in _constraints.UserConstraints)
             {
-                if (u.ShiftType != ShiftTypes.RotatingShift) continue;
+                if (u.ShiftType == ShiftTypes.FixedShift || !u.IsActive)
+                {
+                    continue;
+                }
+
                 if (!ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Morning) ||
                     !ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Evening))
                 {
                     continue;
                 }
 
-                var ua = solution.GetUserAllAssignments(u.UserId);
-                var morning = ua.Count(a => a.ShiftLabel == ShiftLabel.Morning && !a.IsOnCall);
-                var evening = ua.Count(a => a.ShiftLabel == ShiftLabel.Evening && !a.IsOnCall);
-                penalty += Math.Abs(morning - evening) * 2.0;
+                var morning = MorningEveningBalanceGuard.CountMorning(solution, u.UserId);
+                var evening = MorningEveningBalanceGuard.CountEvening(solution, u.UserId);
+                var diff = Math.Abs(morning - evening);
+                if (diff == 0)
+                {
+                    continue;
+                }
+
+                penalty += diff * diff * 4 + diff * 3;
+
+                // جریمه شدید وقتی یک سمت کاملاً صفر است ولی شیفت کافی دارد
+                var meTotal = morning + evening;
+                if (meTotal >= 4 && (morning == 0 || evening == 0))
+                {
+                    penalty += 30 + meTotal * 8;
+                }
             }
 
             return penalty;
@@ -1416,11 +1432,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ProductivityHourFillGuard.Enforce(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
             HolidayMorningEveningFairnessGuard.Enforce(solution, _constraints);
+            MorningEveningBalanceGuard.Enforce(solution, _constraints);
             ShiftCoverageGuard.Enforce(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
 
             // یک پاس نهایی برای نزدیک کردن ساعات مؤثر به موظفی پس از گاردهای پوشش/تعطیل
             ProductivityHourFillGuard.Enforce(solution, _constraints);
+            MorningEveningBalanceGuard.Enforce(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
             ShiftCoverageGuard.Enforce(solution, _constraints);
 
@@ -2349,6 +2367,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// </summary>
         private void PerformMorningEveningBalanceMove(ShiftSolution solution)
         {
+            if (MorningEveningBalanceGuard.TrySingleSwap(solution, _constraints))
+            {
+                return;
+            }
+
             var label = _random.Next(2) == 0 ? ShiftLabel.Morning : ShiftLabel.Evening;
             var eligible = _constraints.UserConstraints
                 .Where(u => u.IsActive && u.ShiftType != ShiftTypes.FixedShift)
