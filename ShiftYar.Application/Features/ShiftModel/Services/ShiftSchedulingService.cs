@@ -1541,13 +1541,14 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     constraints.SoftWeights.FairShiftCountBalanceWeight = deptSettingEarly.FairShiftCountBalanceWeight ?? 2.0;
                     constraints.SoftWeights.ExtraShiftRotationWeight = deptSettingEarly.ExtraShiftRotationWeight ?? 1.0;
                     constraints.SoftWeights.ShiftLabelBalanceWeight = Math.Max(1.0, deptSettingEarly.ShiftLabelBalanceWeight ?? 1.0);
-                    constraints.SoftWeights.FairWorkedHoursBalanceWeight = 4.0;
+                    constraints.SoftWeights.FairWorkedHoursBalanceWeight = 8.0;
                     constraints.SoftWeights.FairNightShiftBalanceWeight = 2.5;
                     constraints.SoftWeights.MorningEveningBalanceWeight = 2.5;
                     constraints.SoftWeights.FairMorningEveningPeerWeight = 2.5;
                     constraints.SoftWeights.FairHolidayMorningEveningPeerWeight = 8.0;
                     constraints.SoftWeights.WorkdaySpreadWeight = 1.5;
-                    constraints.SoftWeights.ProductivityShortfallWeight = 5.0;
+                    constraints.SoftWeights.ProductivityShortfallWeight = 8.0;
+                    constraints.SoftWeights.ProductivityOvertimeWeight = 6.0;
                     constraints.SoftWeights.NightShiftDistributionBySeniorityWeight =
                         Math.Max(1.0, deptSettingEarly.NightShiftDistributionWeight ?? 1.0);
                     constraints.HardRules.EnforceProductivityHours = true;
@@ -2249,12 +2250,13 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     if (deptSetting.FairnessLookbackMonths.HasValue) constraints.SoftWeights.FairnessLookbackMonths = deptSetting.FairnessLookbackMonths.Value;
 
                     // تعادل ساعت مؤثر و شیفت شب (پیش‌فرض قوی؛ قابل‌جایگزینی با وزن شب از تنظیمات)
-                    constraints.SoftWeights.FairWorkedHoursBalanceWeight = Math.Max(4.0, constraints.SoftWeights.FairWorkedHoursBalanceWeight);
+                    constraints.SoftWeights.FairWorkedHoursBalanceWeight = Math.Max(8.0, constraints.SoftWeights.FairWorkedHoursBalanceWeight);
                     constraints.SoftWeights.FairMorningEveningPeerWeight = Math.Max(2.5, constraints.SoftWeights.FairMorningEveningPeerWeight);
                     constraints.SoftWeights.FairHolidayMorningEveningPeerWeight = Math.Max(8.0, constraints.SoftWeights.FairHolidayMorningEveningPeerWeight);
                     constraints.SoftWeights.WorkdaySpreadWeight = Math.Max(1.5, constraints.SoftWeights.WorkdaySpreadWeight);
                     constraints.SoftWeights.FairNightShiftBalanceWeight = Math.Max(2.0, constraints.SoftWeights.FairNightShiftBalanceWeight);
-                    constraints.SoftWeights.ProductivityShortfallWeight = Math.Max(5.0, constraints.SoftWeights.ProductivityShortfallWeight);
+                    constraints.SoftWeights.ProductivityShortfallWeight = Math.Max(8.0, constraints.SoftWeights.ProductivityShortfallWeight);
+                    constraints.SoftWeights.ProductivityOvertimeWeight = Math.Max(6.0, constraints.SoftWeights.ProductivityOvertimeWeight);
 
                     // Night shift distribution weights
                     if (deptSetting.NightShiftDistributionWeight.HasValue)

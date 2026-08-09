@@ -243,7 +243,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
 
         // Fairness weights
         public double FairShiftCountBalanceWeight { get; set; } = 1.0; // تعادل تعداد شیفت بین افراد در این ماه
-        public double FairWorkedHoursBalanceWeight { get; set; } = 2.5; // تعادل ساعات مؤثر کار (با ضریب شب/تعطیل)
+        public double FairWorkedHoursBalanceWeight { get; set; } = 8.0; // تعادل ساعات مؤثر کار (با ضریب شب/تعطیل)
         public double FairNightShiftBalanceWeight { get; set; } = 2.5; // تعادل تعداد شیفت شب بین افراد واجد شرایط
         public double MorningEveningBalanceWeight { get; set; } = 2.0; // تناسب تعداد شیفت صبح و عصر درون هر کاربر
         /// <summary>تعادل تعداد صبح/عصر بین کاربران گردشی (نه فقط درون یک نفر).</summary>
@@ -259,8 +259,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
 
         // Night shift distribution weights
         public double NightShiftDistributionBySeniorityWeight { get; set; } = 1.0; // وزن توزیع شیفت‌های شب بر اساس سابقه
-        public double ProductivityOvertimeWeight { get; set; } = 2.0; // وزن جریمه مازاد ساعات موظفی
-        public double ProductivityShortfallWeight { get; set; } = 5.0; // وزن جریمه کمبود ساعات موظفی
+        public double ProductivityOvertimeWeight { get; set; } = 6.0; // وزن جریمه مازاد ساعات موظفی
+        public double ProductivityShortfallWeight { get; set; } = 8.0; // وزن جریمه کمبود ساعات موظفی
 
         public static SoftRuleWeights CreateDefault()
         {

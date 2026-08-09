@@ -119,7 +119,89 @@ public class ProductivityHourFillTests
         Assert.True(ratios.Max() - ratios.Min() < 0.35, $"Hour balance spread too high: [{string.Join(", ", ratios.Select(r => r.ToString("P0")))}]");
     }
 
-    private static UserConstraint MakeUser(int id, decimal requiredHours) => new()
+    [Fact]
+    public void ProductivityHourFillGuard_RebalancesFromOverTargetToUnderTarget_ByRequiredHoursRatio()
+    {
+        var start = new DateTime(2026, 7, 23);
+        var users = new List<UserConstraint>
+        {
+            MakeUser(1, requiredHours: 152, exactNights: 5),
+            MakeUser(2, requiredHours: 156, exactNights: 3),
+            MakeUser(3, requiredHours: 156, exactNights: 3)
+        };
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(20),
+            UserConstraints = users,
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning),
+                Shift(2, ShiftLabel.Evening),
+                Shift(3, ShiftLabel.Night)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true,
+                EnforceProductivityHours = true,
+                AllowEveningAfterNightShift = false
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 }
+        };
+
+        var solution = new ShiftSolution();
+        // کاربر ۱ (موظفی کمتر) ساعات زیاد؛ ۲ و ۳ کسری شدید
+        for (var i = 0; i < 8; i++)
+        {
+            solution.AddAssignment(1, 3, start.AddDays(i * 2), ShiftLabel.Night, false);
+            solution.AddAssignment(1, 1, start.AddDays(i * 2 + 1), ShiftLabel.Morning, false);
+        }
+
+        solution.AddAssignment(2, 1, start.AddDays(1), ShiftLabel.Morning, false);
+        solution.AddAssignment(3, 2, start.AddDays(2), ShiftLabel.Evening, false);
+
+        var lookup = ShiftYar.Application.Common.Utilities.ProductivityWorkedHoursCalculator
+            .BuildShiftInfoLookup(constraints.ShiftRequirements);
+        var ratioBefore = RatioSpread(solution, users, lookup, constraints);
+
+        ProductivityHourFillGuard.Enforce(solution, constraints);
+
+        var ratioAfter = RatioSpread(solution, users, lookup, constraints);
+        var worked1 = Worked(solution, 1, lookup, constraints);
+        var worked2 = Worked(solution, 2, lookup, constraints);
+        var worked3 = Worked(solution, 3, lookup, constraints);
+
+        Assert.True(ratioAfter <= ratioBefore + 0.05, $"Ratio spread worsened: before={ratioBefore:F2}, after={ratioAfter:F2}");
+        Assert.True(worked2 + worked3 > worked1 * 0.6, "Hours should move toward under-target users");
+    }
+
+    private static double RatioSpread(
+        ShiftSolution solution,
+        List<UserConstraint> users,
+        IReadOnlyDictionary<int, ShiftYar.Application.Common.Utilities.ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        ShiftConstraints constraints)
+    {
+        var ratios = users.Select(u =>
+        {
+            var worked = Worked(solution, u.UserId, lookup, constraints);
+            return worked / (double)u.ProductivityRequiredHours!.Value;
+        }).ToList();
+        var avg = ratios.Average();
+        return ratios.Sum(r => Math.Abs(r - avg));
+    }
+
+    private static double Worked(
+        ShiftSolution solution,
+        int userId,
+        IReadOnlyDictionary<int, ShiftYar.Application.Common.Utilities.ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        ShiftConstraints constraints) =>
+        ShiftYar.Application.Common.Utilities.ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
+            solution.GetUserAllAssignments(userId), lookup, constraints.IsHoliday);
+
+    private static UserConstraint MakeUser(int id, decimal requiredHours, int? exactNights = null) => new()
     {
         UserId = id,
         Gender = id % 2 == 0 ? UserGender.Female : UserGender.Male,
@@ -130,10 +212,12 @@ public class ProductivityHourFillTests
         AllowedShiftLabels = [ShiftLabel.Morning, ShiftLabel.Evening, ShiftLabel.Night],
         IncludedInProductivityPlan = true,
         ProductivityRequiredHours = requiredHours,
+        ExactNightShiftCount = exactNights,
         OvertimeConsent = false,
         MaxShiftsPerWeek = 7,
         MaxConsecutiveShifts = 30,
-        MinRestDaysBetweenShifts = 0
+        MinRestDaysBetweenShifts = 1,
+        MinDaysBetweenNightShifts = 2
     };
 
     private static ShiftRequirement Shift(int id, ShiftLabel label) => new()

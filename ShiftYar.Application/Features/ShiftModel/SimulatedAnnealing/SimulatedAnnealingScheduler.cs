@@ -302,6 +302,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             score += CalculateFairShiftCountBalancePenalty(solution) * _constraints.SoftWeights.FairShiftCountBalanceWeight;
             score += CalculateFairWorkedHoursBalancePenalty(solution) * _constraints.SoftWeights.FairWorkedHoursBalanceWeight;
             score += CalculateProductivityShortfallPenalty(solution) * _constraints.SoftWeights.ProductivityShortfallWeight;
+            score += CalculateProductivityOvertimePenalty(solution) * _constraints.SoftWeights.ProductivityOvertimeWeight;
             score += CalculateFairNightShiftBalancePenalty(solution) * _constraints.SoftWeights.FairNightShiftBalanceWeight;
             score += CalculateMorningEveningBalancePenalty(solution) * _constraints.SoftWeights.MorningEveningBalanceWeight;
             score += CalculateFairMorningEveningPeerPenalty(solution) * _constraints.SoftWeights.FairMorningEveningPeerWeight;
@@ -353,16 +354,40 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private double CalculateFairShiftCountBalancePenalty(ShiftSolution solution)
         {
-            // اختلاف تعداد شیفت‌های این ماه نسبت به میانگین دپارتمان
-            // پرسنل فیکس (حضور روزانهٔ اجباری) از محاسبه حذف می‌شوند تا میانگین گردشی‌ها را منحرف نکنند
-            var counts = _constraints.UserConstraints
+            // سهم عادلانهٔ تعداد شیفت متناسب با موظفی هر نفر (نه میانگین ساده)
+            var users = _constraints.UserConstraints
                 .Where(u => u.ShiftType != ShiftTypes.FixedShift)
-                .Select(u => (UserId: u.UserId, Count: solution.GetUserAllAssignments(u.UserId).Count))
                 .ToList();
-            if (counts.Count == 0) return 0;
-            double avg = counts.Average(c => c.Count);
-            double sumAbs = counts.Sum(c => Math.Abs(c.Count - avg));
-            return sumAbs; // وزن بیرونی اعمال می‌شود
+            if (users.Count < 2)
+            {
+                return 0;
+            }
+
+            var counts = users.ToDictionary(
+                u => u.UserId,
+                u => solution.GetUserAllAssignments(u.UserId).Count(a => !a.IsOnCall));
+            var totalShifts = counts.Values.Sum();
+            if (totalShifts == 0)
+            {
+                return 0;
+            }
+
+            var weights = users.ToDictionary(
+                u => u.UserId,
+                u => u.IncludedInProductivityPlan && u.ProductivityRequiredHours.HasValue && u.ProductivityRequiredHours > 0
+                    ? (double)u.ProductivityRequiredHours.Value
+                    : 1.0);
+            var totalWeight = weights.Values.Sum();
+            if (totalWeight <= 0)
+            {
+                totalWeight = users.Count;
+            }
+
+            return users.Sum(u =>
+            {
+                var fairShare = totalShifts * weights[u.UserId] / totalWeight;
+                return Math.Abs(counts[u.UserId] - fairShare);
+            });
         }
 
         private double CalculateFairWorkedHoursBalancePenalty(ShiftSolution solution)
@@ -384,12 +409,17 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             var avgRatio = entries.Average();
-            // جریمه انحراف از میانگین نسبت تحقق موظفی (تعادل بین پرسنل با سقف‌های متفاوت)
-            return entries.Sum(r => Math.Abs(r - avgRatio)) * 100;
+            // جریمه درجه دوم برای انحراف از میانگین نسبت تحقق موظفی
+            return entries.Sum(r =>
+            {
+                var delta = Math.Abs(r - avgRatio);
+                return delta * delta * 100 + delta * 20;
+            });
         }
 
         private double CalculateProductivityShortfallPenalty(ShiftSolution solution)
         {
+            const double tolerance = 2.0;
             double penalty = 0;
             foreach (var user in _constraints.UserConstraints)
             {
@@ -406,10 +436,49 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(user.UserId));
                 var required = (double)user.ProductivityRequiredHours.Value;
                 var shortfall = required - worked;
-                if (shortfall > 2)
+                if (shortfall <= tolerance)
                 {
-                    // جریمه درجه دوم برای کمبود بزرگ ساعت موظفی
-                    penalty += shortfall * shortfall;
+                    continue;
+                }
+
+                penalty += shortfall * shortfall;
+                if (shortfall > 10)
+                {
+                    penalty += shortfall * 8;
+                }
+            }
+
+            return penalty;
+        }
+
+        private double CalculateProductivityOvertimePenalty(ShiftSolution solution)
+        {
+            const double tolerance = 2.0;
+            double penalty = 0;
+            foreach (var user in _constraints.UserConstraints)
+            {
+                if (!user.IncludedInProductivityPlan || !user.ProductivityRequiredHours.HasValue)
+                {
+                    continue;
+                }
+
+                if (user.ShiftType == ShiftTypes.FixedShift)
+                {
+                    continue;
+                }
+
+                var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(user.UserId));
+                var required = (double)user.ProductivityRequiredHours.Value;
+                var excess = worked - required;
+                if (excess <= tolerance)
+                {
+                    continue;
+                }
+
+                penalty += excess * excess;
+                if (excess > 10)
+                {
+                    penalty += excess * 8;
                 }
             }
 
@@ -1261,6 +1330,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             HolidayMorningEveningFairnessGuard.Enforce(solution, _constraints);
             ShiftCoverageGuard.Enforce(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
+
+            // یک پاس نهایی برای نزدیک کردن ساعات مؤثر به موظفی پس از گاردهای پوشش/تعطیل
+            ProductivityHourFillGuard.Enforce(solution, _constraints);
+            ExactNightQuotaGuard.Enforce(solution, _constraints);
+            ShiftCoverageGuard.Enforce(solution, _constraints);
 
             // پس از Coverage/Fairness: سهمیه شب و سقف/توالی، سپس ForceApply به‌عنوان آخرین حرف مطلق.
             // هیچ گاردی بعد از ForceApply نهایی اجرا نمی‌شود تا حضور اجباری دوباره حذف نشود.

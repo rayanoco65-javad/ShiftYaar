@@ -15,6 +15,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 public static class ProductivityHourFillGuard
 {
     private const double DeficitToleranceHours = 2.0;
+    private const int ReassignmentPasses = 96;
 
     public static void Enforce(ShiftSolution solution, ShiftConstraints constraints)
     {
@@ -41,17 +42,19 @@ public static class ProductivityHourFillGuard
         IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
         List<UserConstraint> productivityUsers)
     {
-        for (var pass = 0; pass < 48; pass++)
+        for (var pass = 0; pass < ReassignmentPasses; pass++)
         {
             var hours = productivityUsers.ToDictionary(
                 u => u.UserId,
                 u => CalculateWorked(solution, u.UserId, lookup, constraints));
-            var avg = hours.Values.Average();
+
             var donor = productivityUsers
                 .Where(u => !IsProtectedUser(u))
-                .Where(u => hours[u.UserId] > avg + 4)
-                .OrderByDescending(u => hours[u.UserId] - (double)u.ProductivityRequiredHours!.Value)
+                .Where(u => GetSurplusHours(u, hours[u.UserId]) > 0)
+                .OrderByDescending(u => GetSurplusHours(u, hours[u.UserId]))
+                .ThenByDescending(u => hours[u.UserId])
                 .FirstOrDefault();
+
             var receiver = productivityUsers
                 .Where(u => GetDeficit(u, hours[u.UserId]) > DeficitToleranceHours)
                 .OrderByDescending(u => GetDeficit(u, hours[u.UserId]))
@@ -66,14 +69,15 @@ public static class ProductivityHourFillGuard
             foreach (var assignment in solution.GetUserAllAssignments(donor.UserId)
                          .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, a))
                          .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, donor, a))
-                         .OrderByDescending(a => EstimateShiftHours(a, lookup, constraints)))
+                         .OrderBy(a => DonationPriority(a))
+                         .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints)))
             {
                 if (!CanUserTakeShift(solution, constraints, lookup, receiver, assignment, ignoreShiftId: null))
                 {
                     continue;
                 }
 
-                if (!WouldImproveBalance(hours, donor.UserId, receiver.UserId, assignment, lookup, constraints))
+                if (!WouldImproveRatioBalance(hours, productivityUsers, donor, receiver, assignment, lookup, constraints))
                 {
                     continue;
                 }
@@ -94,6 +98,82 @@ public static class ProductivityHourFillGuard
                 return;
             }
         }
+    }
+
+    private static int DonationPriority(SaShiftAssignment assignment) =>
+        assignment.ShiftLabel switch
+        {
+            ShiftLabel.Morning => 0,
+            ShiftLabel.Evening => 1,
+            _ => 2
+        };
+
+    private static double GetSurplusHours(UserConstraint user, double worked)
+    {
+        if (!user.ProductivityRequiredHours.HasValue)
+        {
+            return 0;
+        }
+
+        return Math.Max(0, worked - (double)user.ProductivityRequiredHours.Value - DeficitToleranceHours);
+    }
+
+    private static double CalculateRatioSpread(
+        IReadOnlyDictionary<int, double> hours,
+        IEnumerable<UserConstraint> productivityUsers)
+    {
+        var ratios = productivityUsers
+            .Select(u =>
+            {
+                var required = (double)u.ProductivityRequiredHours!.Value;
+                return required > 0 ? hours[u.UserId] / required : 0;
+            })
+            .ToList();
+
+        if (ratios.Count < 2)
+        {
+            return 0;
+        }
+
+        var avg = ratios.Average();
+        return ratios.Sum(r => Math.Abs(r - avg));
+    }
+
+    private static bool WouldImproveRatioBalance(
+        Dictionary<int, double> hours,
+        List<UserConstraint> productivityUsers,
+        UserConstraint donor,
+        UserConstraint receiver,
+        SaShiftAssignment assignment,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        ShiftConstraints constraints)
+    {
+        var shiftHours = EstimateShiftHours(assignment, lookup, constraints);
+        var before = CalculateRatioSpread(hours, productivityUsers);
+
+        var donorAfter = hours[donor.UserId] - shiftHours;
+        if (donor.ProductivityRequiredHours.HasValue &&
+            donorAfter < (double)donor.ProductivityRequiredHours.Value - DeficitToleranceHours)
+        {
+            return false;
+        }
+
+        var afterHours = new Dictionary<int, double>(hours)
+        {
+            [donor.UserId] = donorAfter,
+            [receiver.UserId] = hours[receiver.UserId] + shiftHours
+        };
+
+        var receiverRequired = (double)receiver.ProductivityRequiredHours!.Value;
+        if (receiverRequired > 0 &&
+            afterHours[receiver.UserId] / receiverRequired > 1.15 &&
+            !receiver.OvertimeConsent)
+        {
+            return false;
+        }
+
+        var after = CalculateRatioSpread(afterHours, productivityUsers);
+        return after < before - 0.001;
     }
 
     private static void FillUnderstaffedSlots(
@@ -124,8 +204,7 @@ public static class ProductivityHourFillGuard
                 }
 
                 var added = false;
-                // اول تک‌برچسب برای جلوگیری از پر کردن هر روز با صبح+عصر
-                foreach (var label in PreferLabelsForUser(solution, user))
+                foreach (var label in PreferLabelsForUser(solution, user, deficit))
                 {
                     if (TryAddLabel(solution, constraints, lookup, user, date.Value, label))
                     {
@@ -134,7 +213,6 @@ public static class ProductivityHourFillGuard
                     }
                 }
 
-                // فقط اگر هنوز کسری زیاد است و روز خالی مانده، صبح+عصر همان روز
                 if (!added && deficit > 10)
                 {
                     var m = TryAddLabel(solution, constraints, lookup, user, date.Value, ShiftLabel.Morning);
@@ -144,7 +222,6 @@ public static class ProductivityHourFillGuard
 
                 if (!added)
                 {
-                    // این تاریخ را دیگر امتحان نکن
                     allDates.Remove(date.Value);
                     if (allDates.Count == 0)
                     {
@@ -155,11 +232,24 @@ public static class ProductivityHourFillGuard
         }
     }
 
-    private static IEnumerable<ShiftLabel> PreferLabelsForUser(ShiftSolution solution, UserConstraint user)
+    private static IEnumerable<ShiftLabel> PreferLabelsForUser(
+        ShiftSolution solution,
+        UserConstraint user,
+        double deficitHours)
     {
         var ua = solution.GetUserAllAssignments(user.UserId);
         var m = ua.Count(a => a.ShiftLabel == ShiftLabel.Morning && !a.IsOnCall);
         var e = ua.Count(a => a.ShiftLabel == ShiftLabel.Evening && !a.IsOnCall);
+        var n = ua.Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+
+        // اگر کسری زیاد است، شب (ساعت مؤثر بیشتر) را زودتر امتحان کن
+        if (deficitHours > 12 &&
+            ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, ShiftLabel.Night) &&
+            (!user.HasExactNightQuota || n < user.ExactNightShiftCount))
+        {
+            return [ShiftLabel.Night, ShiftLabel.Evening, ShiftLabel.Morning];
+        }
+
         if (m <= e)
         {
             return [ShiftLabel.Morning, ShiftLabel.Evening, ShiftLabel.Night];
@@ -190,7 +280,7 @@ public static class ProductivityHourFillGuard
     {
         if (workDates.Contains(date.Date))
         {
-            return 0; // همان روز قبلاً شیفت دارد — برای تکمیل صبح/عصر خوب است
+            return 0;
         }
 
         var prevRun = 0;
@@ -230,7 +320,6 @@ public static class ProductivityHourFillGuard
             score += weekCount * 5;
         }
 
-        // فاصله از نزدیک‌ترین روز کاری موجود — هرچه دورتر بهتر
         if (workDates.Count > 0)
         {
             var minGap = workDates.Min(d => Math.Abs((d - date.Date).Days));
@@ -243,7 +332,7 @@ public static class ProductivityHourFillGuard
     private static int CountLabelOnDate(ShiftSolution solution, DateTime date, ShiftLabel label) =>
         solution.Assignments.Values.Count(a => a.Date.Date == date.Date && a.ShiftLabel == label && !a.IsOnCall);
 
-        private static void BalanceMorningEveningPeers(
+    private static void BalanceMorningEveningPeers(
         ShiftSolution solution,
         ShiftConstraints constraints,
         IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
@@ -259,8 +348,10 @@ public static class ProductivityHourFillGuard
                         User: u,
                         Count: solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == label && !a.IsOnCall),
                         HolidayCount: HolidayMorningEveningFairnessGuard.CountHolidayLabel(
-                            solution, constraints, u.UserId, label)))
+                            solution, constraints, u.UserId, label),
+                        Worked: CalculateWorked(solution, u.UserId, lookup, constraints)))
                     .OrderByDescending(x => x.HolidayCount)
+                    .ThenByDescending(x => GetSurplusHours(x.User, x.Worked))
                     .ThenByDescending(x => x.Count)
                     .ToList();
                 if (ranked.Count < 2)
@@ -271,7 +362,9 @@ public static class ProductivityHourFillGuard
                 var donor = ranked.First();
                 var receiver = ranked.Last();
                 var holidayGap = donor.HolidayCount - receiver.HolidayCount;
-                if (holidayGap < 2 && donor.Count - receiver.Count < 2)
+                if (holidayGap < 2 && donor.Count - receiver.Count < 2 &&
+                    GetSurplusHours(donor.User, donor.Worked) <= 0 &&
+                    GetDeficit(receiver.User, receiver.Worked) <= DeficitToleranceHours)
                 {
                     break;
                 }
@@ -289,11 +382,10 @@ public static class ProductivityHourFillGuard
                         continue;
                     }
 
-                    // جابه‌جایی نباید کسری شدید ساعت برای اهداکننده بسازد
                     var donorHours = CalculateWorked(solution, donor.User.UserId, lookup, constraints);
                     var shiftHours = EstimateShiftHours(assignment, lookup, constraints);
                     if (donor.User.ProductivityRequiredHours.HasValue &&
-                        donorHours - shiftHours < (double)donor.User.ProductivityRequiredHours.Value - 8)
+                        donorHours - shiftHours < (double)donor.User.ProductivityRequiredHours.Value - DeficitToleranceHours)
                     {
                         continue;
                     }
@@ -412,14 +504,17 @@ public static class ProductivityHourFillGuard
             return false;
         }
 
-        // سقف هفته/متوالی فقط ترجیح نرم در ScoreFillDate است؛ اینجا بلاک سخت نمی‌کنیم
-        // تا پر کردن موظفی و پوشش ظرفیت مختل نشود.
-
         if (assignment.ShiftLabel == ShiftLabel.Night)
         {
             var nights = solution.GetUserAllAssignments(user.UserId)
                 .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall)
                 .ToList();
+
+            if (user.HasExactNightQuota &&
+                nights.Count >= user.ExactNightShiftCount)
+            {
+                return false;
+            }
 
             if (user.MinDaysBetweenNightShifts > 0)
             {
@@ -446,7 +541,6 @@ public static class ProductivityHourFillGuard
 
     private static bool SameWeek(DateTime a, DateTime b)
     {
-        // هفته از شنبه — هم‌تراز GetWeekNumber در SimulatedAnnealingScheduler
         static DateTime WeekStart(DateTime d)
         {
             var offset = ((int)d.DayOfWeek - (int)DayOfWeek.Saturday + 7) % 7;
@@ -492,25 +586,6 @@ public static class ProductivityHourFillGuard
             .Count(a => !a.IsOnCall && a.UserId > 0 &&
                         constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)?.SpecialtyId == specialtyId);
         return current < Math.Max(day.RequiredTotalCount, 1);
-    }
-
-    private static bool WouldImproveBalance(
-        Dictionary<int, double> hours,
-        int donorId,
-        int receiverId,
-        SaShiftAssignment assignment,
-        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
-        ShiftConstraints constraints)
-    {
-        var shiftHours = EstimateShiftHours(assignment, lookup, constraints);
-        var before = hours.Values.Sum(h => Math.Abs(h - hours.Values.Average()));
-        var afterHours = new Dictionary<int, double>(hours)
-        {
-            [donorId] = hours[donorId] - shiftHours,
-            [receiverId] = hours[receiverId] + shiftHours
-        };
-        var after = afterHours.Values.Sum(h => Math.Abs(h - afterHours.Values.Average()));
-        return after < before - 0.01;
     }
 
     private static double EstimateShiftHours(
