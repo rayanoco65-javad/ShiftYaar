@@ -172,11 +172,14 @@ public class MorningEveningFairnessTests
 
         MorningEveningBalanceGuard.Enforce(solution, constraints);
 
+        var limits = MorningEveningBalanceGuard.GetDepartmentSpreadLimits(solution, [mHeavy, eHeavy]);
         var spread1 = MorningEveningBalanceGuard.GetMorningEveningSpread(solution, mHeavy);
         var spread2 = MorningEveningBalanceGuard.GetMorningEveningSpread(solution, eHeavy);
 
-        Assert.True(spread1 <= 2, $"User 1 M/E spread {spread1} too large");
-        Assert.True(spread2 <= 2, $"User 2 M/E spread {spread2} too large");
+        Assert.True(MorningEveningBalanceGuard.IsWithinAllowedSpread(solution, mHeavy, limits),
+            $"User 1 M/E spread {spread1} exceeds limits M<={limits.MaxMorningSurplus} E<={limits.MaxEveningSurplus}");
+        Assert.True(MorningEveningBalanceGuard.IsWithinAllowedSpread(solution, eHeavy, limits),
+            $"User 2 M/E spread {spread2} exceeds limits M<={limits.MaxMorningSurplus} E<={limits.MaxEveningSurplus}");
         Assert.True(MorningEveningBalanceGuard.CountMorning(solution, 1) > 0);
         Assert.True(MorningEveningBalanceGuard.CountMorning(solution, 2) > 0);
         Assert.True(MorningEveningBalanceGuard.CountEvening(solution, 1) > 0);
@@ -184,7 +187,24 @@ public class MorningEveningFairnessTests
     }
 
     [Fact]
-    public void Optimize_KeepsMorningEveningSpreadWithinTwoPerUser()
+    public void GetDepartmentSpreadLimits_UsesIntegerRatioBetweenTotals()
+    {
+        Assert.Equal(new MorningEveningBalanceGuard.MorningEveningSpreadLimits(1, 1),
+            MorningEveningBalanceGuard.GetDepartmentSpreadLimits(31, 31));
+        Assert.Equal(new MorningEveningBalanceGuard.MorningEveningSpreadLimits(2, 1),
+            MorningEveningBalanceGuard.GetDepartmentSpreadLimits(51, 49));
+        Assert.Equal(new MorningEveningBalanceGuard.MorningEveningSpreadLimits(2, 1),
+            MorningEveningBalanceGuard.GetDepartmentSpreadLimits(51, 49, balanceableUserCount: 9));
+        Assert.Equal(new MorningEveningBalanceGuard.MorningEveningSpreadLimits(2, 1),
+            MorningEveningBalanceGuard.GetDepartmentSpreadLimits(62, 31));
+        Assert.Equal(new MorningEveningBalanceGuard.MorningEveningSpreadLimits(1, 2),
+            MorningEveningBalanceGuard.GetDepartmentSpreadLimits(31, 62));
+        Assert.Equal(new MorningEveningBalanceGuard.MorningEveningSpreadLimits(2, 1),
+            MorningEveningBalanceGuard.GetDepartmentSpreadLimits(500, 499, balanceableUserCount: 9));
+    }
+
+    [Fact]
+    public void Optimize_KeepsMorningEveningSpreadWithinDepartmentLimitsPerUser()
     {
         var start = new DateTime(2026, 6, 22);
         var users = Enumerable.Range(1, 9).Select(i => MakeUser(i)).ToList();
@@ -193,12 +213,15 @@ public class MorningEveningFairnessTests
         constraints.SoftWeights.FairMorningEveningPeerWeight = 4;
 
         var solution = new SimulatedAnnealingScheduler(constraints, SoftSaParams()).Optimize();
+        var limits = MorningEveningBalanceGuard.GetDepartmentSpreadLimits(solution, users);
 
         foreach (var user in users)
         {
-            var spread = MorningEveningBalanceGuard.GetMorningEveningSpread(solution, user);
-            Assert.True(spread <= 2,
-                $"User {user.UserId} M/E spread {spread} (M={MorningEveningBalanceGuard.CountMorning(solution, user.UserId)}, E={MorningEveningBalanceGuard.CountEvening(solution, user.UserId)})");
+            Assert.True(MorningEveningBalanceGuard.IsWithinAllowedSpread(solution, user, limits),
+                $"User {user.UserId} exceeds department M/E limits " +
+                $"(M={MorningEveningBalanceGuard.CountMorning(solution, user.UserId)}, " +
+                $"E={MorningEveningBalanceGuard.CountEvening(solution, user.UserId)}, " +
+                $"limits M<={limits.MaxMorningSurplus} E<={limits.MaxEveningSurplus})");
         }
     }
 

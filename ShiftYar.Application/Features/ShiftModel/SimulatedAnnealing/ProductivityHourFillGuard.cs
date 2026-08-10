@@ -246,7 +246,7 @@ public static class ProductivityHourFillGuard
                 }
 
                 var added = false;
-                foreach (var label in PreferLabelsForUser(solution, user, deficit))
+                foreach (var label in PreferLabelsForUser(solution, constraints, user, deficit))
                 {
                     if (TryAddLabel(solution, constraints, lookup, user, date.Value, label))
                     {
@@ -276,6 +276,7 @@ public static class ProductivityHourFillGuard
 
     private static IEnumerable<ShiftLabel> PreferLabelsForUser(
         ShiftSolution solution,
+        ShiftConstraints constraints,
         UserConstraint user,
         double deficitHours)
     {
@@ -283,6 +284,12 @@ public static class ProductivityHourFillGuard
         var m = ua.Count(a => a.ShiftLabel == ShiftLabel.Morning && !a.IsOnCall);
         var e = ua.Count(a => a.ShiftLabel == ShiftLabel.Evening && !a.IsOnCall);
         var n = ua.Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+        var limits = MorningEveningBalanceGuard.GetDepartmentSpreadLimits(
+            solution,
+            constraints.UserConstraints
+                .Where(u => u.IsActive && u.ShiftType != ShiftTypes.FixedShift)
+                .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Morning) &&
+                            ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Evening)));
 
         // اگر کسری زیاد است، شب (ساعت مؤثر بیشتر) را زودتر امتحان کن
         if (deficitHours > 12 &&
@@ -292,12 +299,15 @@ public static class ProductivityHourFillGuard
             return [ShiftLabel.Night, ShiftLabel.Evening, ShiftLabel.Morning];
         }
 
-        // اگر اختلاف صبح/عصر زیاد است، اول برچسب کمتر را امتحان کن
-        if (Math.Abs(m - e) > 2)
+        var delta = m - e;
+        if (delta > limits.MaxMorningSurplus)
         {
-            return m < e
-                ? [ShiftLabel.Morning, ShiftLabel.Evening, ShiftLabel.Night]
-                : [ShiftLabel.Evening, ShiftLabel.Morning, ShiftLabel.Night];
+            return [ShiftLabel.Evening, ShiftLabel.Morning, ShiftLabel.Night];
+        }
+
+        if (-delta > limits.MaxEveningSurplus)
+        {
+            return [ShiftLabel.Morning, ShiftLabel.Evening, ShiftLabel.Night];
         }
 
         if (m <= e)

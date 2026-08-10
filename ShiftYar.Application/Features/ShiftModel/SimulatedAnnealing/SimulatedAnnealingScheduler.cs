@@ -554,29 +554,30 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private double CalculateMorningEveningBalancePenalty(ShiftSolution solution)
         {
+            var balanceableUsers = _constraints.UserConstraints
+                .Where(u => u.IsActive && u.ShiftType != ShiftTypes.FixedShift)
+                .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Morning) &&
+                            ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Evening))
+                .ToList();
+            var limits = MorningEveningBalanceGuard.GetDepartmentSpreadLimits(solution, balanceableUsers);
+
             double penalty = 0;
-            foreach (var u in _constraints.UserConstraints)
+            foreach (var u in balanceableUsers)
             {
-                if (u.ShiftType == ShiftTypes.FixedShift || !u.IsActive)
-                {
-                    continue;
-                }
-
-                if (!ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Morning) ||
-                    !ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Evening))
-                {
-                    continue;
-                }
-
                 var morning = MorningEveningBalanceGuard.CountMorning(solution, u.UserId);
                 var evening = MorningEveningBalanceGuard.CountEvening(solution, u.UserId);
-                var diff = Math.Abs(morning - evening);
-                if (diff == 0)
+                var excess = MorningEveningBalanceGuard.GetMorningEveningViolation(solution, u, limits);
+                if (excess == 0)
                 {
                     continue;
                 }
 
-                penalty += diff * diff * 4 + diff * 3;
+                penalty += excess * excess * 4 + excess * 3;
+
+                if (excess > 1)
+                {
+                    penalty += (excess - 1) * (excess - 1) * 12 + (excess - 1) * 8;
+                }
 
                 // جریمه شدید وقتی یک سمت کاملاً صفر است ولی شیفت کافی دارد
                 var meTotal = morning + evening;
@@ -1467,6 +1468,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             ShiftCoverageGuard.EnforceCapacityCeiling(solution, _constraints);
             ProductivityHourFillGuard.EnforceFinalBalance(solution, _constraints);
+            MorningEveningBalanceGuard.Enforce(solution, _constraints);
+            ApprovedRequestGuard.ForceApply(solution, _constraints);
+            ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
+            ShiftCoverageGuard.Enforce(solution, _constraints);
 
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
