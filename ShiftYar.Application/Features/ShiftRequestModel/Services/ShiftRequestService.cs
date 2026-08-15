@@ -434,6 +434,12 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 return typeError;
             }
 
+            var capacityError = await ValidateOnShiftCapacityAsync(entity);
+            if (capacityError != null)
+            {
+                return capacityError;
+            }
+
             var nightQuotaError = await ValidateNightOnRequestAgainstMonthlyQuotaAsync(entity);
             if (nightQuotaError != null)
             {
@@ -500,6 +506,103 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// سوپروایزر نباید درخواست حضور (ON) بیش از ظرفیت شیفت/تخصص در همان روز تأیید کند.
+        /// </summary>
+        private async Task<string?> ValidateOnShiftCapacityAsync(ShiftRequest entity)
+        {
+            if (entity.RequestAction != RequestAction.RequestToBeOnShift ||
+                entity.RequestType != RequestType.SpecificShift ||
+                !entity.ShiftLabel.HasValue ||
+                !entity.RequestDate.HasValue ||
+                entity.User == null ||
+                !entity.User.SpecialtyId.HasValue ||
+                !entity.User.DepartmentId.HasValue)
+            {
+                return null;
+            }
+
+            var departmentId = entity.User.DepartmentId.Value;
+            var specialtyId = entity.User.SpecialtyId.Value;
+            var requestDate = entity.RequestDate.Value.Date;
+            var shiftLabel = entity.ShiftLabel.Value;
+
+            var (shifts, _) = await _shiftRepository.GetByFilterAsync(
+                new ShiftFilter
+                {
+                    DepartmentId = departmentId,
+                    PageNumber = 1,
+                    PageSize = 100
+                },
+                "RequiredSpecialties");
+
+            var capacity = ApprovedOnShiftCapacityValidator.ResolveCapacityForSpecialty(
+                shifts, shiftLabel, specialtyId, await IsHolidayDateAsync(requestDate));
+            if (capacity <= 0)
+            {
+                return null;
+            }
+
+            var (departmentUsers, _) = await _repositoryUser.GetByFilterAsync(
+                new SimpleFilter<User>(u =>
+                    u.DepartmentId == departmentId &&
+                    u.SpecialtyId == specialtyId));
+            var departmentUserIds = departmentUsers
+                .Where(u => u.Id.HasValue)
+                .Select(u => u.Id!.Value)
+                .ToHashSet();
+            if (departmentUserIds.Count == 0)
+            {
+                return null;
+            }
+
+            var (approvedRequests, _) = await _repository.GetByFilterAsync(
+                new SimpleFilter<ShiftRequest>(r =>
+                    r.Id != entity.Id &&
+                    r.Status == RequestStatus.Approved &&
+                    r.RequestAction == RequestAction.RequestToBeOnShift &&
+                    r.RequestType == RequestType.SpecificShift &&
+                    r.ShiftLabel == shiftLabel &&
+                    r.RequestDate != null &&
+                    r.RequestDate.Value.Date == requestDate &&
+                    r.UserId != null &&
+                    departmentUserIds.Contains(r.UserId.Value)),
+                "User");
+
+            var approvedNames = approvedRequests
+                .Select(r => FormatUserDisplayName(r.User))
+                .ToList();
+
+            return ApprovedOnShiftCapacityValidator.BuildExceededCapacityMessage(
+                approvedRequests.Count,
+                capacity,
+                shiftLabel,
+                requestDate,
+                approvedNames);
+        }
+
+        private async Task<bool> IsHolidayDateAsync(DateTime requestDate)
+        {
+            var (shiftDates, _) = await _shiftDateRepository.GetByFilterAsync(
+                new SimpleFilter<ShiftDate>(d => d.Date != null && d.Date.Value.Date == requestDate.Date));
+            return shiftDates.Any(d => d.IsHoliday == true);
+        }
+
+        private static string FormatUserDisplayName(User? user)
+        {
+            if (user == null)
+            {
+                return "کاربر نامشخص";
+            }
+
+            if (!string.IsNullOrWhiteSpace(user.FullName))
+            {
+                return user.FullName.Trim();
+            }
+
+            return user.Id.HasValue ? $"کاربر {user.Id.Value}" : "کاربر نامشخص";
         }
 
         /// <summary>
