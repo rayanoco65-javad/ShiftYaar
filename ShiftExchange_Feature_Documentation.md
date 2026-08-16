@@ -10,9 +10,10 @@
 #### ShiftExchange
 - **شناسه**: `Id`
 - **کاربر درخواست کننده**: `RequestingUserId`
-- **کاربر پیشنهاد دهنده**: `OfferingUserId`
+- **کاربر پیشنهاد دهنده / دریافت‌کننده**: `OfferingUserId`
 - **شیفت درخواست کننده**: `RequestingShiftAssignmentId`
-- **شیفت پیشنهاد دهنده**: `OfferingShiftAssignmentId`
+- **شیفت پیشنهاد دهنده**: `OfferingShiftAssignmentId` (در واگذاری `Transfer` خالی است)
+- **نوع عملیات**: `ExchangeType` (`Swap` = جابجایی دوطرفه، `Transfer` = واگذاری به کاربر آزاد)
 - **وضعیت**: `Status` (Pending, Approved, Rejected, Executed, Cancelled)
 - **تاریخ درخواست**: `RequestDate`
 - **دلیل**: `Reason`
@@ -28,14 +29,19 @@
 - `Executed`: اجرا شده
 - `Cancelled`: لغو شده
 
+### 2.1 نوع عملیات (ExchangeType)
+- `Swap` (0): **جابجایی دوطرفه** — هر دو کاربر باید شیفت داشته باشند؛ پس از اجرا `UserId` دو انتساب عوض می‌شود.
+- `Transfer` (1): **واگذاری** — کاربر A شیفت خود را به کاربر B می‌دهد؛ B در **همان تاریخ و همان شیفت** نباید انتساب داشته باشد. پس از اجرا فقط انتساب A به B منتقل می‌شود و A آزاد می‌شود.
+
 ### 3. DTOs
 
 #### ShiftExchangeDtoAdd
 برای ایجاد درخواست جدید:
-- `RequestingUserId`: شناسه کاربر درخواست کننده
-- `OfferingUserId`: شناسه کاربر پیشنهاد دهنده
-- `RequestingShiftAssignmentId`: شناسه شیفت درخواست کننده
-- `OfferingShiftAssignmentId`: شناسه شیفت پیشنهاد دهنده
+- `RequestingUserId`: شناسه کاربر درخواست‌کننده / واگذارکننده
+- `OfferingUserId`: شناسه کاربر مقابل / دریافت‌کننده
+- `RequestingShiftAssignmentId`: شناسه شیفت واگذارکننده (همیشه الزامی)
+- `OfferingShiftAssignmentId`: شناسه شیفت کاربر مقابل — **فقط برای `Swap` الزامی**؛ برای `Transfer` باید `null` باشد
+- `ExchangeType`: `0 = Swap` (پیش‌فرض)، `1 = Transfer`
 - `Reason`: دلیل درخواست
 
 #### ShiftExchangeDtoGet
@@ -79,20 +85,23 @@
 ## فرآیند جابجایی شیفت
 
 ### 1. ایجاد درخواست
-1. کاربر درخواست کننده درخواست جابجایی ایجاد می‌کند
-2. سیستم بررسی می‌کند که شیفت‌ها متعلق به کاربران هستند
-3. سیستم سوپروایزر دپارتمان را پیدا می‌کند
-4. درخواست با وضعیت `Pending` ایجاد می‌شود
+1. کاربر درخواست را ثبت می‌کند (`Swap` یا `Transfer`)
+2. سیستم بررسی می‌کند شیفت متعلق به کاربر درخواست‌کننده است
+3. برای `Swap`: شیفت کاربر مقابل هم باید وجود داشته باشد
+4. برای `Transfer`: کاربر مقابل در همان زمان شیفت نباید داشته باشد؛ هر دو کاربر باید هم‌دپارتمان باشند
+5. سوپروایزر دپارتمان روی درخواست ثبت می‌شود
+6. وضعیت: `Pending`
 
 ### 2. تأیید درخواست
 1. سوپروایزر درخواست را بررسی می‌کند
-2. سوپروایزر درخواست را تأیید یا رد می‌کند
-3. وضعیت درخواست به `Approved` یا `Rejected` تغییر می‌کند
+2. تأیید یا رد
+3. وضعیت → `Approved` یا `Rejected`
 
-### 3. اجرای جابجایی
-1. پس از تأیید، جابجایی اجرا می‌شود
-2. کاربران شیفت‌ها را با یکدیگر جابجا می‌کنند
-3. وضعیت درخواست به `Executed` تغییر می‌کند
+### 3. اجرا
+1. پس از تأیید، `POST /api/ShiftExchange/execute/{id}` فراخوانی می‌شود
+2. **Swap**: دو `UserId` جابجا می‌شوند
+3. **Transfer**: `UserId` انتساب واگذارکننده به دریافت‌کننده تغییر می‌کند
+4. وضعیت → `Executed`
 
 ## قوانین کسب و کار
 
@@ -106,33 +115,47 @@
 - بررسی تکراری نبودن درخواست
 - بررسی تعلق شیفت‌ها به کاربران
 - بررسی وجود سوپروایزر دپارتمان
+- برای `Transfer`: کاربر دریافت‌کننده در همان slot شیفت نداشته باشد
+- هر دو کاربر از یک دپارتمان باشند
 
 ## نصب و راه‌اندازی
 
-### 1. اضافه کردن Migration
-```powershell
-# اجرای اسکریپت PowerShell
-.\add-shift-exchange-migration.ps1
-```
+Migration فیلد `ExchangeType`: `20260816120000_AddExchangeTypeToShiftExchange`
 
-### 2. اعمال Migration
 ```bash
 dotnet ef database update
 ```
 
-### 3. تست API
-```bash
-# ایجاد درخواست جدید
+### تست API
+
+#### Swap (جابجایی دوطرفه)
+```json
 POST /api/ShiftExchange
 {
   "requestingUserId": 1,
   "offeringUserId": 2,
   "requestingShiftAssignmentId": 10,
   "offeringShiftAssignmentId": 20,
-  "reason": "دلیل جابجایی"
+  "exchangeType": 0,
+  "reason": "جابجایی دوطرفه"
 }
+```
 
-# تأیید درخواست
+#### Transfer (واگذاری به کاربر آزاد)
+```json
+POST /api/ShiftExchange
+{
+  "requestingUserId": 1,
+  "offeringUserId": 3,
+  "requestingShiftAssignmentId": 10,
+  "offeringShiftAssignmentId": null,
+  "exchangeType": 1,
+  "reason": "واگذاری شیفت به همکار آزاد"
+}
+```
+
+#### تأیید و اجرا
+```json
 POST /api/ShiftExchange/approve
 {
   "id": 1,
@@ -140,7 +163,6 @@ POST /api/ShiftExchange/approve
   "supervisorComment": "تأیید شد"
 }
 
-# اجرای جابجایی
 POST /api/ShiftExchange/execute/1
 ```
 

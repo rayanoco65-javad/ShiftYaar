@@ -33,10 +33,13 @@ namespace ShiftYar.Domain.Entities.ShiftExchangeModel
         public int? RequestingShiftAssignmentId { get; set; }
         public ShiftAssignment? RequestingShiftAssignment { get; set; }
 
-        // شیفت پیشنهاد دهنده
+        // شیفت پیشنهاد دهنده (در واگذاری Transfer خالی است)
         [ForeignKey("OfferingShiftAssignment")]
         public int? OfferingShiftAssignmentId { get; set; }
         public ShiftAssignment? OfferingShiftAssignment { get; set; }
+
+        /// <summary>Swap = تبادل دو شیفت؛ Transfer = واگذاری به کاربر بدون شیفت در همان زمان.</summary>
+        public ExchangeType? ExchangeType { get; set; }
 
         // وضعیت درخواست
         public ExchangeStatus? Status { get; set; }
@@ -68,6 +71,7 @@ namespace ShiftYar.Domain.Entities.ShiftExchangeModel
             this.RequestingShiftAssignment = null;
             this.OfferingShiftAssignmentId = null;
             this.OfferingShiftAssignment = null;
+            this.ExchangeType = global::ShiftYar.Domain.Enums.ShiftExchangeModel.ExchangeType.Swap;
             this.Status = null;
             this.RequestDate = null;
             this.Reason = null;

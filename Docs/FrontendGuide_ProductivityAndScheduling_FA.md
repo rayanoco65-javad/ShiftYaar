@@ -80,7 +80,7 @@
 
 1. تکمیل `ShiftDates` ماه موردنظر  
 2. تنظیم سهمیه شب ماهانه (`UserMonthlyNightQuota`) طوری که مجموع ≤ تعداد شب‌های ماه باشد  
-3. ثبت/تأیید درخواست‌ها (درخواست شب فقط داخل سهمیه)  
+3. ثبت/تأیید درخواست‌ها (درخواست شب فقط داخل سهمیه؛ **تأیید حضور فقط تا ظرفیت شیفت/تخصص**)  
 4. در صورت نیاز حذف برنامه قبلی (`DeleteMonthlySchedule`) یا فعال بودن `allowMonthlyRescheduleWithAutoDelete`  
 5. `optimize-and-save` / `optimize-and-save-async`
 
@@ -183,12 +183,61 @@
 - درخواست ردشده را نمی‌توان دوباره تأیید کرد؛ در صورت نیاز حذف و ثبت درخواست جدید.
 - پیام `message` خطای API را عیناً نشان دهید (مثلاً تلاش برای تأیید مجدد درخواست تأییدشده، یا حذف مستقیم Approved).
 
+### محدودیت ظرفیت هنگام تأیید حضور (جدید)
+
+سوپروایزر **نمی‌تواند** درخواست **حضور در شیفت مشخص** (`requestAction = 0` یعنی `RequestToBeOnShift` + `requestType = 1` یعنی `SpecificShift`) را بیش از **ظرفیت همان شیفت برای تخصص کاربر** در همان روز تأیید کند.
+
+#### منبع ظرفیت
+
+- از `ShiftRequiredSpecialty` همان دپارتمان خوانده می‌شود:
+  - روز عادی: `requiredTottalCount`
+  - روز تعطیل: `holidayRequiredTottalCount` (اگر خالی باشد همان `requiredTottalCount`)
+- ظرفیت **به ازای تخصص** است، نه کل دپارتمان. مثلاً اگر شیفت صبح برای تخصص «هوشبری» ظرفیت ۲ نفر دارد، حداکثر ۲ درخواست حضور تأییدشده برای همان **تاریخ + شیفت + تخصص** مجاز است.
+
+#### زمان اعمال
+
+- فقط هنگام **`UpdateShiftRequestBySupervisor`** با `status: 1` (`Approved`) و وقتی درخواست فعلاً `Pending` است.
+- درخواست‌های **عدم‌حضور (OFF)**، **کل‌روز**، یا **رد/لغو تأیید** تحت این قاعده نیستند.
+- ثبت درخواست توسط کاربر (`CreateShiftRequest`) هنوز مسدود نمی‌شود؛ محدودیت در **لحظه تأیید** اعمال می‌شود.
+
+#### پاسخ API در صورت پر بودن ظرفیت
+
+- `isSuccess: false`
+- `message` نمونه:
+
+```text
+ظرفیت شیفت صبح در تاریخ 1405/05/24 تکمیل شده است. در حال حاضر 2 درخواست حضور تأییدشده (علی رضایی، مینا جاهدی) وجود دارد و ظرفیت این شیفت 2 نفر است. امکان تأیید درخواست حضور بیش از ظرفیت وجود ندارد.
+```
+
+#### اقدام لازم در فرانت (ظرفیت)
+
+| مورد | پیشنهاد UI |
+|------|------------|
+| خطای تأیید | پس از `PUT UpdateShiftRequestBySupervisor` اگر `isSuccess === false` بود، **`message` را در toast/alert/modal عیناً** نشان دهید (نه پیام عمومی «خطا در تأیید»). |
+| دکمه تأیید | برای ردیف‌های `Pending` با `requestAction = حضور` و `requestType = SpecificShift`، **اختیاری:** قبل از کلیک، با شمارش درخواست‌های `Approved` همان روز/شیفت/تخصص در لیست فعلی، اگر ظرفیت پر است دکمه «تأیید» را **غیرفعال** کنید و tooltip بگذارید: «ظرفیت این شیفت تکمیل شده است». |
+| شمارش سمت کلاینت | API جداگانه برای «ظرفیت باقی‌مانده» وجود ندارد؛ می‌توانید از همان `GetShiftRequests` با فیلتر `status=Approved` + همان `requestDate` + `shiftLabel` + تخصص کاربر درخواست‌دهنده، تعداد را با `requiredTottalCount` (یا مقدار تعطیل از `ShiftRequiredSpecialty`) مقایسه کنید. **منبع حقیقت نهایی بک‌اند است** — حتی با پیش‌نمایش UI، پاسخ خطای API را همیشه پوشش دهید. |
+| نمایش لیست | در جزئیات درخواست یا کنار دکمه تأیید، **اختیاری:** «تأییدشده برای این شیفت: X از Y» را نشان دهید تا سوپروایزر قبل از کلیک بداند. |
+| لغو تأیید | با **رد** (`status: 2`) یک درخواست `Approved`، یک جایگاه ظرفیت آزاد می‌شود؛ دکمه تأیید درخواست‌های Pending همان slot دوباره فعال می‌شود. |
+| Optimize | اگر قبلاً بیش از ظرفیت تأیید شده بود، Optimize همچنان خطا می‌دهد؛ این قاعده جدید از **تأیید نفر سوم به بعد** جلوگیری می‌کند. |
+
+#### فیلدهای مرتبط برای مقایسه در UI
+
+| فیلد درخواست | کاربرد |
+|--------------|--------|
+| `requestDate` / `requestPersianDate` | روز مورد نظر |
+| `shiftLabel` | `0=Morning`, `1=Evening`, `2=Night` |
+| `requestAction` | فقط `0` (حضور) مشمول سقف |
+| `requestType` | فقط `1` (SpecificShift) مشمول سقف |
+| `status` | فقط `Approved` در شمارش ظرفیت مصرف‌شده |
+| `user.specialtyId` | تخصص برای تطبیق با `ShiftRequiredSpecialty` |
+
 ### اقدام لازم در فرانت
 
 - در لیست درخواست‌ها ستون/برچسب **حضور / عدم‌حضور** (`requestAction`) را نمایش دهید تا با «تأیید شده» اشتباه گرفته نشود.
 - برای ردیف‌های `Approved` دکمه «رد / لغو تأیید» را فعال کنید (همان `UpdateShiftRequestBySupervisor` با `status: 2`).
 - برای ردیف‌های `Rejected` دکمه «حذف» را نشان دهید؛ برای `Approved` حذف را مخفی/غیرفعال کنید.
 - قبل از رد تأییدشده و قبل از حذف ردشده، یک تأیید دو مرحله‌ای (confirm) بگذارید.
+- برای درخواست **حضور** (`Pending`): خطای ظرفیت پر (`message` شامل «ظرفیت شیفت») را عیناً نشان دهید؛ در صورت امکان دکمه تأیید را وقتی ظرفیت پر است غیرفعال کنید.
 
 ### اکشن حذف شیفت‌بندی ماه
 
@@ -219,6 +268,133 @@
 ### توزیع صبح/عصر در روزهای تعطیل
 
 الگوریتم علاوه بر تعادل ماهانهٔ صبح/عصر، **تعداد شیفت صبح و عصر روی روزهای تعطیل** را هم بین پرسنل گردشی هم‌تخصص پخش می‌کند (`HolidayMorningEveningFairnessGuard` + وزن نرم `FairHolidayMorningEveningPeerWeight`). بعد از Optimize مجدد، انتظار این است که تعطیلات روی چند نفر خاص متمرکز نشوند.
+
+## ۱.۷ جابجایی / واگذاری شیفت (`ShiftExchange`)
+
+علاوه بر **جابجایی دوطرفه** (هر دو نفر شیفت دارند)، امکان **واگذاری شیفت به همکار آزاد** اضافه شده است: کاربر A شیفت خود را به B می‌دهد؛ B در همان تاریخ و همان شیفت انتساب ندارد؛ A آزاد می‌شود.
+
+### APIها
+
+| اکشن | روش | توضیح |
+|------|------|--------|
+| `GetAll` / `GetById` | `GET /api/ShiftExchange` ، `GET /api/ShiftExchange/{id}` | لیست / جزئیات |
+| `GetByUserId` | `GET /api/ShiftExchange/user/{userId}` | درخواست‌های مرتبط با کاربر |
+| `GetPendingApprovals` | `GET /api/ShiftExchange/pending-approvals/{supervisorId}` | در انتظار تأیید سوپروایزر |
+| `Create` | `POST /api/ShiftExchange` | ثبت درخواست |
+| `Update` | `PUT /api/ShiftExchange` | ویرایش دلیل (فقط `Pending`) |
+| `Approve` | `POST /api/ShiftExchange/approve` | تأیید / رد |
+| `ExecuteExchange` | `POST /api/ShiftExchange/execute/{exchangeId}` | اعمال روی برنامه (پس از تأیید) |
+| `Cancel` | `POST /api/ShiftExchange/cancel/{exchangeId}` | لغو |
+| `Delete` | `DELETE /api/ShiftExchange/{id}` | حذف (غیر از `Executed`) |
+
+### نوع عملیات (`exchangeType`)
+
+| مقدار | نام | معنی UI |
+|------:|-----|---------|
+| `0` | `Swap` | **جابجایی دوطرفه** — هر دو کاربر یک `ShiftAssignment` انتخاب می‌کنند |
+| `1` | `Transfer` | **واگذاری** — فقط شیفت کاربر A؛ B در همان slot **آزاد** (Off) است |
+
+فیلد جدید در پاسخ: `exchangeType` در `ShiftExchangeDtoGet`.
+
+### وضعیت‌ها (`status` / `ExchangeStatus`)
+
+| مقدار | نام | معنی |
+|------:|-----|------|
+| `0` | `Pending` | در انتظار تأیید |
+| `1` | `Approved` | تأیید شده — آمادهٔ `execute` |
+| `2` | `Rejected` | رد شده |
+| `3` | `Executed` | روی برنامه اعمال شده |
+| `4` | `Cancelled` | لغو شده |
+
+### بدنهٔ ثبت — جابجایی دوطرفه (`Swap`)
+
+```json
+{
+  "requestingUserId": 1,
+  "offeringUserId": 2,
+  "requestingShiftAssignmentId": 10,
+  "offeringShiftAssignmentId": 20,
+  "exchangeType": 0,
+  "reason": "جابجایی دوطرفه"
+}
+```
+
+### بدنهٔ ثبت — واگذاری به کاربر آزاد (`Transfer`)
+
+```json
+{
+  "requestingUserId": 1,
+  "offeringUserId": 3,
+  "requestingShiftAssignmentId": 10,
+  "offeringShiftAssignmentId": null,
+  "exchangeType": 1,
+  "reason": "واگذاری شیفت به همکار آزاد"
+}
+```
+
+**نکته:** برای `Transfer` حتماً `offeringShiftAssignmentId` را **`null` بفرستید** (نه `0`). اگر شیفت طرف مقابل انتخاب شود، API خطا می‌دهد.
+
+### بدنهٔ تأیید سوپروایزر
+
+```json
+{
+  "id": 1,
+  "isApproved": true,
+  "supervisorComment": "تأیید شد"
+}
+```
+
+### فرآیند UI (پیشنهادی)
+
+```
+کاربر A → انتخاب نوع (Swap | Transfer)
+       → انتخاب شیفت خودش (requestingShiftAssignmentId)
+       → انتخاب کاربر B
+       → [فقط Swap] انتخاب شیفت B
+       → POST Create → Pending
+سوپروایزر → GET pending-approvals → Approve/Reject
+         → [پس از Approved] POST execute/{id}
+```
+
+اجرای `execute` جدا از تأیید است؛ بعد از تأیید، دکمه «اعمال روی برنامه» را نشان دهید.
+
+### قواعد اعتبارسنجی (خطاهای رایج — `message` را عیناً نشان دهید)
+
+| شرایط | پیام / رفتار |
+|--------|----------------|
+| `Transfer` + `offeringShiftAssignmentId` پر | «در واگذاری شیفت به کاربر آزاد، نباید شیفت برای کاربر مقابل انتخاب شود.» |
+| `Swap` بدون `offeringShiftAssignmentId` | «برای جابجایی دوطرفه، شناسه شیفت کاربر مقابل الزامی است.» |
+| B در همان تاریخ+شیفت انتساب دارد | «کاربر دریافت‌کننده در زمان این شیفت انتساب فعال دارد…» |
+| A و B دپارتمان متفاوت | «کاربر دریافت‌کننده باید از همان دپارتمان…» |
+| A = B | «امکان جابجایی یا واگذاری شیفت با خودتان وجود ندارد.» |
+| اجرا و B دیگر آزاد نیست | «کاربر دریافت‌کننده اکنون در زمان این شیفت انتساب دارد…» |
+
+### اقدام لازم در فرانت
+
+| بخش | کار |
+|-----|-----|
+| **فرم ثبت** | سوئیچ یا radio: «جابجایی با همکار» (`Swap`) / «واگذاری به همکار آزاد» (`Transfer`) |
+| **انتخاب کاربر B** | در `Transfer`: لیست همکاران **بدون انتساب** روی همان `shiftDateId` + `shiftId` (یا همان روز/برچسب شیفت از برنامهٔ ماه) |
+| **انتخاب شیفت B** | فقط در `Swap` نمایش داده شود؛ در `Transfer` مخفی باشد |
+| **لیست درخواست‌ها** | ستون «نوع»: جابجایی / واگذاری (`exchangeType`) |
+| **سوپروایزر** | در `Transfer` فقط یک شیفت (A) و نام دریافت‌کننده را نشان دهید، نه دو شیفت |
+| **پس از Approved** | دکمه `POST execute/{id}`؛ پس از موفقیت برنامهٔ ماه را refresh کنید |
+| **خطا** | `BadRequest` با متن فارسی — در toast/modal **عین `message`** |
+
+### تشخیص «کاربر آزاد» در UI
+
+- Off = **بدون** `ShiftAssignment` برای همان `shiftDateId` + `shiftId`.
+- داشتن شیفت **دیگر** در همان روز (مثلاً عصر وقتی صبح واگذاری می‌شود) مانع `Transfer` نیست؛ فقط **همان slot** نباید انتساب داشته باشد.
+- منبع داده: همان API/جدول برنامهٔ ماه که برای جابجایی قبلی استفاده می‌کردید.
+
+### سازگاری با نسخه قبل
+
+- درخواست‌های قدیمی بدون `exchangeType` در DB مقدار `0` (`Swap`) دارند.
+- اگر `exchangeType` ارسال نشود، پیش‌فرض `Swap` است؛ رفتار قبلی حفظ می‌شود.
+
+### Migration
+
+ستون `ExchangeType` روی `ShiftExchanges` — migration: `20260816120000_AddExchangeTypeToShiftExchange` (بعد از `Update-Database`).
 
 ## 2. تغییرات مربوط به نیازمندی تخصص شیفت
 
@@ -466,6 +642,9 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - در فرم درخواست شیفت: برای حضور فقط `SpecificShift`؛ گزینهٔ حضور کل‌روز را نشان ندهید / غیرفعال کنید
 - نمایش ستون `requestAction` (حضور / عدم‌حضور) در لیست درخواست‌ها
 - دکمه «رد / لغو تأیید» برای درخواست‌های `Approved` (`UpdateShiftRequestBySupervisor` با `status: 2`)
+- **اعتبارسنجی ظرفیت هنگام تأیید حضور:** نمایش عین `message` API؛ غیرفعال کردن اختیاری دکمه تأیید وقتی X از Y جایگاه پر است
+- **جابجایی شیفت (`ShiftExchange`):** radio Swap/Transfer؛ در Transfer فقط شیفت A + کاربر آزاد؛ `offeringShiftAssignmentId: null`؛ ستون `exchangeType` در لیست
+- **پس از تأیید جابجایی:** دکمه `execute/{id}` و refresh برنامهٔ ماه
 - دکمه حذف برای درخواست‌های `Rejected` و `Pending`؛ مخفی بودن حذف برای `Approved`
 - قبل از ثبت درخواست شب: نمایش باقی‌ماندهٔ سهمیه شب ماهانه کاربر؛ در صورت پر بودن سهمیه، دکمه را قفل کنید
 - نمایش خطای Optimize وقتی سهمیه شب برآورده نشود (`message` را عیناً نشان دهید)
@@ -481,6 +660,12 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 
 - `ShiftYar.Api/Controllers/ShiftRequestModel/ShiftRequestController.cs`
 - `ShiftYar.Application/Features/ShiftRequestModel/Services/ShiftRequestService.cs`
+- `ShiftYar.Application/Common/Utilities/ApprovedOnShiftCapacityValidator.cs`
+- `ShiftYar.Api/Controllers/ShiftExchangeModel/ShiftExchangeController.cs`
+- `ShiftYar.Application/Features/ShiftExchangeModel/Services/ShiftExchangeService.cs`
+- `ShiftYar.Application/Common/Utilities/ShiftExchangeValidator.cs`
+- `ShiftYar.Application/DTOs/ShiftExchangeModel/ShiftExchangeDtoAdd.cs`
+- `ShiftExchange_Feature_Documentation.md` (جزئیات کامل API جابجایی)
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftRequestModel/ShiftRequestDtoUpdateBySupervisor.cs`
 - `ShiftYar.Application/DTOs/UserModel/UserDtoAdd.cs`
 - `ShiftYar.Application/DTOs/UserModel/UserDtoGet.cs`

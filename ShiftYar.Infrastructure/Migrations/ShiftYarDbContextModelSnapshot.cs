@@ -700,6 +700,9 @@ namespace ShiftYar.Infrastructure.Migrations
                     b.Property<DateTime?>("ExecutionDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<int?>("ExchangeType")
+                        .HasColumnType("int");
+
                     b.Property<int?>("OfferingShiftAssignmentId")
                         .HasColumnType("int");
 

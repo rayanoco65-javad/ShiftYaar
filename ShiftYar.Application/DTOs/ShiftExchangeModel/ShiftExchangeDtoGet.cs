@@ -16,6 +16,7 @@ namespace ShiftYar.Application.DTOs.ShiftExchangeModel
         public string? OfferingUserFullName { get; set; }
         public int? RequestingShiftAssignmentId { get; set; }
         public int? OfferingShiftAssignmentId { get; set; }
+        public ExchangeType? ExchangeType { get; set; }
         public ExchangeStatus? Status { get; set; }
         public DateTime? RequestDate { get; set; }
         public string? Reason { get; set; }

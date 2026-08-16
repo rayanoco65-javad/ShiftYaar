@@ -1,4 +1,6 @@
 using AutoMapper;
+using ShiftYar.Application.Common.Filters;
+using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.DTOs.ShiftExchangeModel;
 using ShiftYar.Application.Interfaces;
 using ShiftYar.Application.Interfaces.Persistence;
@@ -9,7 +11,6 @@ using ShiftYar.Domain.Enums.ShiftExchangeModel;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace ShiftYar.Application.Features.ShiftExchangeModel.Services
@@ -61,40 +62,86 @@ namespace ShiftYar.Application.Features.ShiftExchangeModel.Services
 
         public async Task<ShiftExchangeDtoGet?> CreateAsync(ShiftExchangeDtoAdd dto)
         {
-            // بررسی اینکه آیا درخواست قبلی وجود دارد یا نه
-            var existingResult = await _repository.GetByFilterAsync();
-            var existingExchange = existingResult.Items.FirstOrDefault(x => 
-                (x.RequestingUserId == dto.RequestingUserId && x.OfferingUserId == dto.OfferingUserId &&
-                 x.RequestingShiftAssignmentId == dto.RequestingShiftAssignmentId && 
-                 x.OfferingShiftAssignmentId == dto.OfferingShiftAssignmentId) ||
-                (x.RequestingUserId == dto.OfferingUserId && x.OfferingUserId == dto.RequestingUserId &&
-                 x.RequestingShiftAssignmentId == dto.OfferingShiftAssignmentId && 
-                 x.OfferingShiftAssignmentId == dto.RequestingShiftAssignmentId));
+            var exchangeType = ShiftExchangeValidator.ResolveExchangeType(dto.ExchangeType);
+            var userError = ShiftExchangeValidator.ValidateUsersAreDifferent(dto.RequestingUserId, dto.OfferingUserId);
+            if (userError != null)
+            {
+                throw new InvalidOperationException(userError);
+            }
 
-            if (existingExchange != null)
+            var existingResult = await _repository.GetByFilterAsync();
+            if (HasDuplicateExchange(existingResult.Items, dto, exchangeType))
             {
                 throw new InvalidOperationException("درخواست جابجایی قبلاً ثبت شده است");
             }
 
-            // بررسی اینکه آیا شیفت‌ها متعلق به کاربران هستند
             var requestingAssignment = await _shiftAssignmentRepository.GetByIdAsync(dto.RequestingShiftAssignmentId);
-            var offeringAssignment = await _shiftAssignmentRepository.GetByIdAsync(dto.OfferingShiftAssignmentId);
-
-            if (requestingAssignment == null || offeringAssignment == null)
+            if (requestingAssignment == null)
             {
-                throw new InvalidOperationException("شیفت‌های انتخاب شده یافت نشدند");
+                throw new InvalidOperationException("شیفت انتخاب‌شده یافت نشد");
             }
 
-            if (requestingAssignment.UserId != dto.RequestingUserId || offeringAssignment.UserId != dto.OfferingUserId)
+            if (requestingAssignment.UserId != dto.RequestingUserId)
             {
-                throw new InvalidOperationException("شیفت‌های انتخاب شده متعلق به کاربران نیستند");
+                throw new InvalidOperationException("شیفت انتخاب‌شده متعلق به کاربر درخواست‌کننده نیست");
             }
 
-            // پیدا کردن سوپروایزر دپارتمان
+            if (!requestingAssignment.ShiftDateId.HasValue || !requestingAssignment.ShiftId.HasValue)
+            {
+                throw new InvalidOperationException("اطلاعات تاریخ/شیفت انتساب ناقص است");
+            }
+
             var requestingUser = await _userRepository.GetByIdAsync(dto.RequestingUserId, "Department");
             if (requestingUser?.Department?.SupervisorId == null)
             {
                 throw new InvalidOperationException("سوپروایزر دپارتمان تعریف نشده است");
+            }
+
+            var offeringUser = await _userRepository.GetByIdAsync(dto.OfferingUserId, "Department");
+            var departmentError = ShiftExchangeValidator.ValidateSameDepartment(
+                requestingUser.DepartmentId,
+                offeringUser?.DepartmentId);
+            if (departmentError != null)
+            {
+                throw new InvalidOperationException(departmentError);
+            }
+
+            ShiftAssignment? offeringAssignment = null;
+            if (exchangeType == ExchangeType.Swap)
+            {
+                var offeringAssignmentError = ShiftExchangeValidator.ValidateSwapOfferingAssignment(dto.OfferingShiftAssignmentId);
+                if (offeringAssignmentError != null)
+                {
+                    throw new InvalidOperationException(offeringAssignmentError);
+                }
+
+                offeringAssignment = await _shiftAssignmentRepository.GetByIdAsync(dto.OfferingShiftAssignmentId!.Value);
+                if (offeringAssignment == null)
+                {
+                    throw new InvalidOperationException("شیفت کاربر مقابل یافت نشد");
+                }
+
+                if (offeringAssignment.UserId != dto.OfferingUserId)
+                {
+                    throw new InvalidOperationException("شیفت کاربر مقابل متعلق به او نیست");
+                }
+            }
+            else
+            {
+                var transferAssignmentError = ShiftExchangeValidator.ValidateTransferOfferingAssignment(dto.OfferingShiftAssignmentId);
+                if (transferAssignmentError != null)
+                {
+                    throw new InvalidOperationException(transferAssignmentError);
+                }
+
+                if (await HasAssignmentOnSameSlotAsync(
+                        dto.OfferingUserId,
+                        requestingAssignment.ShiftDateId.Value,
+                        requestingAssignment.ShiftId.Value))
+                {
+                    throw new InvalidOperationException(
+                        "کاربر دریافت‌کننده در زمان این شیفت انتساب فعال دارد. برای واگذاری باید در همان زمان آزاد (بدون شیفت) باشد.");
+                }
             }
 
             var exchange = new ShiftExchange
@@ -102,7 +149,10 @@ namespace ShiftYar.Application.Features.ShiftExchangeModel.Services
                 RequestingUserId = dto.RequestingUserId,
                 OfferingUserId = dto.OfferingUserId,
                 RequestingShiftAssignmentId = dto.RequestingShiftAssignmentId,
-                OfferingShiftAssignmentId = dto.OfferingShiftAssignmentId,
+                OfferingShiftAssignmentId = exchangeType == ExchangeType.Swap
+                    ? dto.OfferingShiftAssignmentId
+                    : null,
+                ExchangeType = exchangeType,
                 Status = ExchangeStatus.Pending,
                 RequestDate = DateTime.Now,
                 Reason = dto.Reason,
@@ -174,23 +224,59 @@ namespace ShiftYar.Application.Features.ShiftExchangeModel.Services
                 throw new InvalidOperationException("فقط درخواست‌های تأیید شده قابل اجرا هستند");
             }
 
-            // جابجایی شیفت‌ها
-            var requestingAssignment = await _shiftAssignmentRepository.GetByIdAsync(exchange.RequestingShiftAssignmentId.Value);
-            var offeringAssignment = await _shiftAssignmentRepository.GetByIdAsync(exchange.OfferingShiftAssignmentId.Value);
-
-            if (requestingAssignment == null || offeringAssignment == null)
+            var requestingAssignment = await _shiftAssignmentRepository.GetByIdAsync(exchange.RequestingShiftAssignmentId!.Value);
+            if (requestingAssignment == null)
             {
-                throw new InvalidOperationException("شیفت‌های مورد نظر یافت نشدند");
+                throw new InvalidOperationException("شیفت مورد نظر یافت نشد");
             }
 
-            var requestingUserId = requestingAssignment.UserId;
-            var offeringUserId = offeringAssignment.UserId;
+            if (requestingAssignment.UserId != exchange.RequestingUserId)
+            {
+                throw new InvalidOperationException("شیفت دیگر متعلق به کاربر درخواست‌کننده نیست؛ احتمالاً برنامه تغییر کرده است");
+            }
 
-            requestingAssignment.UserId = offeringUserId;
-            offeringAssignment.UserId = requestingUserId;
+            var exchangeType = ShiftExchangeValidator.ResolveExchangeType(exchange.ExchangeType);
+            if (exchangeType == ExchangeType.Transfer)
+            {
+                if (!requestingAssignment.ShiftDateId.HasValue || !requestingAssignment.ShiftId.HasValue)
+                {
+                    throw new InvalidOperationException("اطلاعات تاریخ/شیفت انتساب ناقص است");
+                }
 
-            _shiftAssignmentRepository.Update(requestingAssignment);
-            _shiftAssignmentRepository.Update(offeringAssignment);
+                if (await HasAssignmentOnSameSlotAsync(
+                        exchange.OfferingUserId!.Value,
+                        requestingAssignment.ShiftDateId.Value,
+                        requestingAssignment.ShiftId.Value))
+                {
+                    throw new InvalidOperationException(
+                        "کاربر دریافت‌کننده اکنون در زمان این شیفت انتساب دارد؛ اجرای واگذاری ممکن نیست.");
+                }
+
+                requestingAssignment.UserId = exchange.OfferingUserId;
+                _shiftAssignmentRepository.Update(requestingAssignment);
+            }
+            else
+            {
+                var offeringAssignment = await _shiftAssignmentRepository.GetByIdAsync(exchange.OfferingShiftAssignmentId!.Value);
+                if (offeringAssignment == null)
+                {
+                    throw new InvalidOperationException("شیفت کاربر مقابل یافت نشد");
+                }
+
+                if (offeringAssignment.UserId != exchange.OfferingUserId)
+                {
+                    throw new InvalidOperationException("شیفت کاربر مقابل دیگر متعلق به او نیست؛ احتمالاً برنامه تغییر کرده است");
+                }
+
+                var requestingUserId = requestingAssignment.UserId;
+                var offeringUserId = offeringAssignment.UserId;
+
+                requestingAssignment.UserId = offeringUserId;
+                offeringAssignment.UserId = requestingUserId;
+
+                _shiftAssignmentRepository.Update(requestingAssignment);
+                _shiftAssignmentRepository.Update(offeringAssignment);
+            }
 
             exchange.Status = ExchangeStatus.Executed;
             exchange.ExecutionDate = DateTime.Now;
@@ -241,6 +327,59 @@ namespace ShiftYar.Application.Features.ShiftExchangeModel.Services
             await _repository.SaveAsync();
 
             return true;
+        }
+
+        private static bool HasDuplicateExchange(
+            IEnumerable<ShiftExchange> existingExchanges,
+            ShiftExchangeDtoAdd dto,
+            ExchangeType exchangeType)
+        {
+            foreach (var existing in existingExchanges)
+            {
+                if (exchangeType == ExchangeType.Transfer &&
+                    ShiftExchangeValidator.IsDuplicateTransfer(
+                        existing.ExchangeType,
+                        existing.Status,
+                        existing.RequestingUserId,
+                        existing.OfferingUserId,
+                        existing.RequestingShiftAssignmentId,
+                        dto.RequestingUserId,
+                        dto.OfferingUserId,
+                        dto.RequestingShiftAssignmentId))
+                {
+                    return true;
+                }
+
+                if (exchangeType == ExchangeType.Swap &&
+                    dto.OfferingShiftAssignmentId.HasValue &&
+                    ShiftExchangeValidator.IsDuplicateSwap(
+                        existing.ExchangeType,
+                        existing.Status,
+                        existing.RequestingUserId,
+                        existing.OfferingUserId,
+                        existing.RequestingShiftAssignmentId,
+                        existing.OfferingShiftAssignmentId,
+                        dto.RequestingUserId,
+                        dto.OfferingUserId,
+                        dto.RequestingShiftAssignmentId,
+                        dto.OfferingShiftAssignmentId.Value))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private async Task<bool> HasAssignmentOnSameSlotAsync(int userId, int shiftDateId, int shiftId)
+        {
+            var (assignments, _) = await _shiftAssignmentRepository.GetByFilterAsync(
+                new SimpleFilter<ShiftAssignment>(a =>
+                    a.UserId == userId &&
+                    a.ShiftDateId == shiftDateId &&
+                    a.ShiftId == shiftId));
+
+            return assignments.Count > 0;
         }
     }
 }
