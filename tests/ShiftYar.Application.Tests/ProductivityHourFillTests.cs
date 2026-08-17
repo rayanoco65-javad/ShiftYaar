@@ -261,6 +261,60 @@ public class ProductivityHourFillTests
             solution.GetUserAllAssignments(userId), lookup, constraints.IsHoliday);
 
     [Fact]
+    public void FillAllRequiredHoursPass_FillsProjectDeficitEvenWhenNonProjectHasSmallDeficit()
+    {
+        var start = new DateTime(2026, 8, 1);
+        var nonProject = MakeUser(9, requiredHours: 156);
+        nonProject.IsProjectPersonnel = false;
+        var project = MakeUser(5, requiredHours: 71);
+        project.IsProjectPersonnel = true;
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(25),
+            UserConstraints = [nonProject, project],
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning),
+                Shift(2, ShiftLabel.Evening),
+                Shift(3, ShiftLabel.Night)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true,
+                EnforceProductivityHours = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 2 }
+        };
+
+        var solution = new ShiftSolution();
+        for (var i = 0; i < 21; i++)
+        {
+            solution.AddAssignment(9, 1, start.AddDays(i), ShiftLabel.Morning, false);
+        }
+
+        solution.AddAssignment(5, 1, start.AddDays(22), ShiftLabel.Morning, false);
+        solution.AddAssignment(5, 2, start.AddDays(22), ShiftLabel.Evening, false);
+
+        var lookup = ShiftYar.Application.Common.Utilities.ProductivityWorkedHoursCalculator
+            .BuildShiftInfoLookup(constraints.ShiftRequirements);
+        var projectBefore = Worked(solution, 5, lookup, constraints);
+
+        ProductivityHourFillGuard.Enforce(solution, constraints);
+
+        var projectAfter = Worked(solution, 5, lookup, constraints);
+        var projectDeficit = 71 - projectAfter;
+
+        Assert.True(projectBefore < 60, $"Setup project deficit expected, got {projectBefore}");
+        Assert.True(
+            projectDeficit <= ProjectPersonnelProductivityPriority.CrossTierToleranceHours + 2,
+            $"Project should reach required hours, deficit={projectDeficit:F1}");
+    }
+
+    [Fact]
     public void StripProjectPersonnelOvertime_CapsProjectPersonnelAtRequiredHours()
     {
         var start = new DateTime(2026, 8, 1);
