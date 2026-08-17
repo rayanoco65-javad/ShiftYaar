@@ -1140,6 +1140,9 @@ namespace ShiftYar.Infrastructure.Migrations
                     b.Property<string>("Address")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int?>("AllowedShiftPermissions")
+                        .HasColumnType("int");
+
                     b.Property<bool?>("CanBeShiftManager")
                         .HasColumnType("bit");
 
@@ -1165,7 +1168,7 @@ namespace ShiftYar.Infrastructure.Migrations
                         .HasColumnType("int");
 
                     b.Property<decimal?>("HardshipPercent")
-                        .HasColumnType("decimal(18,2)");
+                        .HasPrecision(18, 2);
 
                     b.Property<string>("Image")
                         .HasColumnType("nvarchar(max)");
@@ -1186,7 +1189,7 @@ namespace ShiftYar.Infrastructure.Migrations
                         .HasColumnType("bit");
 
                     b.Property<decimal?>("MaxProductivityRequiredHours")
-                        .HasColumnType("decimal(18,2)");
+                        .HasPrecision(18, 2);
 
                     b.Property<string>("Password")
                         .HasColumnType("nvarchar(max)");

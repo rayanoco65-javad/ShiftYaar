@@ -16,7 +16,14 @@ FinalMonthly = (BaseWeekly × Weeks) − (WeeklyReductions × Weeks) − NightHo
 NightHolidayCredit = (NightHolidayHours × 1.5) − NightHolidayHours
 ```
 
-Use `StaffEmploymentInfoDto` (or `StaffEmploymentInfo.FromUser(user)` inside the Application layer) to adapt existing user aggregates without leaking domain types to the API surface. When special policies are needed, populate `WorkingHoursCalculationRequestDto.RuleOverrides` (all properties are optional) instead of instantiating domain configs. Finally call `IWorkingHoursCalculator.CalculateMonthlyHours` to obtain the detailed breakdown (base, deductions, multiplier credit, and final requirement).  
+Use `StaffEmploymentInfoDto` (or `StaffEmploymentInfo.FromUser(user)` inside the Application layer) to adapt existing user aggregates without leaking domain types to the API surface. When special policies are needed, populate `WorkingHoursCalculationRequestDto.RuleOverrides` (all properties are optional) instead of instantiating domain configs. Finally call `IWorkingHoursCalculator.CalculateMonthlyHours` to obtain the detailed breakdown (base, deductions, multiplier credit, and final requirement).
 
-🚧 A quick audit of the three scheduling engines (`SimulatedAnnealingScheduler`, `HybridScheduler`, `OrToolsCPSatScheduler`) shows that they currently consume only the legacy workload inputs and are not yet wired to the productivity calculator. Injecting those deductions requires feeding the calculator’s output into the constraint-building step for each engine.
+## Manual override in scheduling
+
+User entity field **`MaxProductivityRequiredHours`** (`decimal?`):
+
+- `null` or `0` → automatic calculation via `WorkingHoursCalculator` / `ProductivityRequiredHoursResolver`
+- positive value → used as the monthly required hours during shift scheduling (automatic calculation skipped)
+
+See `ShiftYar.Application/Common/Utilities/ProductivityRequiredHoursResolver.cs`.
 

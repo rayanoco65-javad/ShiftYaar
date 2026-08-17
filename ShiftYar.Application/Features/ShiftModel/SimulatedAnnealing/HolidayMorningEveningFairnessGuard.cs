@@ -51,7 +51,7 @@ public static class HolidayMorningEveningFairnessGuard
         ShiftLabel label)
     {
         var eligible = peers
-            .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, label))
+            .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, label))
             .ToList();
         if (eligible.Count < 2)
         {

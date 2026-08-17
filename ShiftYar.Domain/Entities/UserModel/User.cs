@@ -63,6 +63,11 @@ namespace ShiftYar.Domain.Entities.UserModel
         //اگر دو نوبت کاری هست، کدوم زوج شیفت رو قراره بیاد
         public TwoShiftRotationPattern? TwoShiftRotationPattern { get; set; }
 
+        /// <summary>
+        /// مجوزهای صریح نوع شیفت (صبح/عصر/شب/صبح‌عصر/صبح‌شب). null = مشتق از ShiftType/SubType/Pattern.
+        /// </summary>
+        public UserShiftPermission? AllowedShiftPermissions { get; set; }
+
         public List<UserPhoneNumber>? OtherPhoneNumbers { get; set; }
 
         //هر کاربر می تواند یک یا چند نقش داشته باشد
@@ -100,6 +105,7 @@ namespace ShiftYar.Domain.Entities.UserModel
             this.ShiftType = null;
             this.TwoShiftRotationPattern = null;
             this.MaxProductivityRequiredHours = null;
+            this.AllowedShiftPermissions = null;
         }
     }
 }

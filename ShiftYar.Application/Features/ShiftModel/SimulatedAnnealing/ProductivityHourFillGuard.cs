@@ -701,12 +701,11 @@ public static class ProductivityHourFillGuard
             solution,
             constraints.UserConstraints
                 .Where(u => u.IsActive && u.ShiftType != ShiftTypes.FixedShift)
-                .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Morning) &&
-                            ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Evening)));
+                .Where(u => ShiftEligibilityResolver.SupportsMorningEveningCombo(u)));
 
         // اگر کسری زیاد است، شب (ساعت مؤثر بیشتر) را زودتر امتحان کن
         if (deficitHours > 12 &&
-            ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, ShiftLabel.Night) &&
+            ShiftEligibilityResolver.MayEverTakeLabel(user, ShiftLabel.Night) &&
             (!user.HasExactNightQuota || n < user.ExactNightShiftCount))
         {
             return [ShiftLabel.Night, ShiftLabel.Evening, ShiftLabel.Morning];
@@ -816,7 +815,7 @@ public static class ProductivityHourFillGuard
             for (var pass = 0; pass < 24; pass++)
             {
                 var ranked = targetUsers
-                    .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, label))
+                    .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, label))
                     .Select(u => (
                         User: u,
                         Count: solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == label && !a.IsOnCall),
@@ -897,7 +896,7 @@ public static class ProductivityHourFillGuard
             for (var pass = 0; pass < 32; pass++)
             {
                 var snapshot = targetUsers
-                    .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, label))
+                    .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, label))
                     .Select(u => (
                         User: u,
                         Count: solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == label && !a.IsOnCall),
@@ -1002,7 +1001,14 @@ public static class ProductivityHourFillGuard
         DateTime date,
         ShiftLabel label)
     {
-        if (!ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, label))
+        if (!ShiftEligibilityResolver.IsAssignmentAllowed(
+                user,
+                solution.GetUserAssignments(user.UserId, date).Select(a => a.ShiftLabel),
+                label,
+                constraints.HardRules.EnforceMaxShiftsPerDay
+                    ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
+                    : 2,
+                constraints.HardRules.ForbidDuplicateDailyAssignments))
         {
             return false;
         }
@@ -1070,10 +1076,8 @@ public static class ProductivityHourFillGuard
         var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
             ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
             : 2;
-        if (!DailyAssignmentRules.CanAddShift(
-                existingLabels,
-                assignment.ShiftLabel,
-                maxPerDay,
+        if (!ShiftEligibilityResolver.IsAssignmentAllowed(
+                user, existingLabels, assignment.ShiftLabel, maxPerDay,
                 constraints.HardRules.ForbidDuplicateDailyAssignments))
         {
             return false;

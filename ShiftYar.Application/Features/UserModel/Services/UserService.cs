@@ -137,6 +137,12 @@ namespace ShiftYar.Application.Features.UserModel.Services
                     return ApiResponse<UserDtoAdd>.Fail(productivityHoursError);
                 }
 
+                var permissionsError = ValidateAndNormalizeShiftPermissions(dto);
+                if (permissionsError != null)
+                {
+                    return ApiResponse<UserDtoAdd>.Fail(permissionsError);
+                }
+
                 var user = _mapper.Map<User>(dto);
                 // تبدیل تاریخ استخدام از شمسی به میلادی واقعی (مپر DateOfEmployment را Ignore می‌کند)
                 if (!string.IsNullOrWhiteSpace(dto.DateOfEmployment))
@@ -241,6 +247,12 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 if (productivityHoursError != null)
                 {
                     return ApiResponse<UserDtoAdd>.Fail(productivityHoursError);
+                }
+
+                var permissionsError = ValidateAndNormalizeShiftPermissions(dto);
+                if (permissionsError != null)
+                {
+                    return ApiResponse<UserDtoAdd>.Fail(permissionsError);
                 }
 
                 // Handle phone numbers
@@ -431,6 +443,22 @@ namespace ShiftYar.Application.Features.UserModel.Services
 
             if (value.Value > 744)
                 return "حداکثر ساعت موظفی بیش از حد مجاز است.";
+
+            return null;
+        }
+
+        private static string? ValidateAndNormalizeShiftPermissions(UserDtoAdd dto)
+        {
+            var error = ShiftEligibilityResolver.ValidatePermissions(dto.AllowedShiftPermissions);
+            if (error != null)
+            {
+                return error;
+            }
+
+            if (dto.AllowedShiftPermissions.HasValue)
+            {
+                dto.AllowedShiftPermissions = ShiftEligibilityResolver.NormalizePermissions(dto.AllowedShiftPermissions.Value);
+            }
 
             return null;
         }

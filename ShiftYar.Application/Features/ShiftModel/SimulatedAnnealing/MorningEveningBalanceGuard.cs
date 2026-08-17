@@ -194,8 +194,7 @@ public static class MorningEveningBalanceGuard
             .ToList();
 
     private static bool CanBalanceMorningEvening(UserConstraint user) =>
-        ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, ShiftLabel.Morning) &&
-        ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, ShiftLabel.Evening);
+        ShiftEligibilityResolver.SupportsMorningEveningCombo(user);
 
     private static IEnumerable<(UserConstraint MHeavy, UserConstraint EHeavy)> BuildImbalancedPairs(
         ShiftSolution solution,

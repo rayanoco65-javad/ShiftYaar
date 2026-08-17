@@ -89,6 +89,13 @@ namespace ShiftYar.Infrastructure.Persistence.AppDbContext
                 .HasForeignKey(q => q.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            modelBuilder.Entity<User>(entity =>
+            {
+                entity.Property(u => u.HardshipPercent).HasPrecision(18, 2);
+                entity.Property(u => u.MaxProductivityRequiredHours).HasPrecision(18, 2);
+                entity.Property(u => u.AllowedShiftPermissions).HasConversion<int?>();
+            });
+
             modelBuilder.Entity<UserMonthlyNightQuota>()
                 .HasIndex(q => new { q.UserId, q.PersianYear, q.PersianMonth })
                 .IsUnique();

@@ -276,7 +276,7 @@ public static class ShiftCoverageGuard
 
         var candidates = constraints.UserConstraints
             .Where(u => u.IsActive && u.SpecialtyId == specialtyReq.SpecialtyId)
-            .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, shiftReq.ShiftLabel))
+            .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, shiftReq.ShiftLabel))
             .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
             .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
             .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))

@@ -57,7 +57,10 @@
   - Repository: IEfRepository<ShiftRequiredSpecialty>
 
 ### 2.6) تعریف کاربران (User)
-- اطلاعات: نام کامل، کد پرسنلی، جنسیت، DepartmentId، SpecialtyId، IsActive، CanBeShiftManager، نوع/الگوی شیفت.
+- اطلاعات: نام کامل، کد پرسنلی، جنسیت، DepartmentId، SpecialtyId، IsActive، CanBeShiftManager، نوع/الگوی شیفت، `AllowedShiftPermissions` (flags)، `IncludedProductivityPlan`، …
+- **IsProjectPersonnel:** طرحی = فقط تا موظفی؛ غیرطرحی = اولویت پر کردن موظفی.
+- **AllowedShiftPermissions:** flags نوع شیفت (صبح/عصر/شب/صبح‌عصر/صبح‌شب).
+- **MaxProductivityRequiredHours:** موظفی دستی ماهانه (اختیاری؛ null/0 = خودکار).
 - ترتیب اجرای اکشن/سرویس: UserController/UserService/IEfRepository<User>
 
 ## 3) تنظیمات شیفت‌بندی دپارتمان (ذخیره در دیتابیس)
@@ -104,6 +107,12 @@
   - UnavailableDates، PreferredShifts، UnwantedShifts
   - MaxConsecutiveShifts، MinRestDaysBetweenShifts، MaxShiftsPerWeek، MaxNightShiftsPerMonth
 - ورودی این‌ها در درخواست شیفت‌بندی ارسال می‌شود و فقط همان دوره را تحت تأثیر قرار می‌دهد.
+
+## 4.5) درخواست‌های شیفت تأییدشده (ShiftRequest)
+- فقط `Approved` در `LoadConstraintsAsync` اعمال می‌شوند.
+- OFF کل‌روز یا OFF صبح → علاوه بر همان روز/شیفت، **شب روز قبل** هم در `UnavailableShiftSlots` مسدود می‌شود.
+- حضور شیفت‌مشخص → انتساب اجباری (`ApprovedRequestGuard`).
+- تأیید حضور بیش از ظرفیت شیفت/تخصص در `ShiftRequestService` رد می‌شود.
 
 ## 5) اجرای شیفت‌بندی
 

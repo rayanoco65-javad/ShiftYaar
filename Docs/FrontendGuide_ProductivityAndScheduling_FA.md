@@ -93,8 +93,28 @@
 | عصر + شب | ممنوع | متوالی و بیش از ۱۲ ساعت |
 | شب → صبحِ روز بعد | ممنوع | متوالی بدون فاصله |
 | صبح + عصر + شب | ممنوع | شامل عصر+شب |
+| شب (روز D−1) + OFF صبح/کل‌روز (روز D) | ممنوع | OFF تأییدشده صبح یا کل‌روز → شب قبل مسدود |
 
 فرانت نباید ترکیب‌های ممنوع را به‌عنوان گزینهٔ همزمان پیشنهاد دهد؛ بک‌اند هم در الگوریتم و گاردها آن‌ها را رد می‌کند.
+
+### OFF تأییدشده و شب روز قبل (جدید)
+
+اگر درخواست **عدم‌حضور (OFF)** با وضعیت **`Approved`** برای یکی از موارد زیر ثبت شده باشد:
+
+- **کل روز** (`requestType = 0` / `FullDay`)، یا
+- **شیفت صبح** (`requestType = 1` / `SpecificShift` + `shiftLabel = 0` / `Morning`)
+
+در تاریخ `D`، الگوریتم **شیفت شب** روز **`D−1`** را به آن کاربر **نمی‌دهد** (همان قاعده «شب → صبح روز بعد ممنوع»).
+
+| درخواست OFF تأییدشده | شب روز قبل |
+|----------------------|------------|
+| کل‌روز در دوشنبه | یکشنبه شب ❌ |
+| صبح دوشنبه | یکشنبه شب ❌ |
+| عصر یا شب دوشنبه | یکشنبه شب مجاز ✅ |
+
+**زمان اعمال:** هنگام `LoadConstraints` در Optimize؛ در `UnavailableShiftSlots` ثبت می‌شود و `ApprovedRequestGuard` آن را enforce می‌کند.
+
+**اقدام UI (اختیاری):** در جزئیات درخواست OFF صبح/کل‌روز تأییدشده، tooltip: «شب روز قبل به‌صورت خودکار مسدود می‌شود».
 
 ### فیلدهای DTO کاربر (باقی‌مانده)
 
@@ -114,6 +134,41 @@
 **UI پیشنهادی:** فیلد عددی اختیاری در فرم مشخصات کاربر (فقط سوپروایزر/ادمین). placeholder: «خالی = محاسبه خودکار». واحد: **ساعت در ماه**. اعتبارسنجی: `0 ≤ مقدار ≤ 744`؛ منفی مجاز نیست.
 
 **نکته:** در خروجی Optimize، `ProductivityRequiredHoursByUser` برای کاربرانی که این فیلد پر دارند برابر همان مقدار دستی است؛ در `ProductivitySnapshot` یادداشت «اعمال از فیلد دستی» در `Breakdown.Notes` قابل نمایش است.
+
+#### مجوزهای نوع شیفت (`AllowedShiftPermissions`) — جدید
+
+سوپروایزر می‌تواند برای **هر کاربر** مشخص کند چه نوع شیفت‌هایی مجاز است (۵ گزینه مستقل):
+
+| مقدار enum (bit) | نام | معنی |
+|------------------|-----|------|
+| `1` | `Morning` | شیفت **صبح** (تکی) |
+| `2` | `Evening` | شیفت **عصر** (تکی) |
+| `4` | `Night` | شیفت **شب** (تکی) |
+| `8` | `MorningEveningSameDay` | **صبح+عصر** در یک روز |
+| `16` | `MorningNightSameDay` | **صبح+شب** در یک روز |
+
+**ارسال API:** فیلد flags روی `UserDtoAdd` / `UserDtoGet` — `allowedShiftPermissions` (عدد تجمیعی یا آرایهٔ نام‌ها در فرانت).
+
+**مثال — مینا (صبح، عصر، صبح/شب — بدون شب تکی و بدون صبح/عصر):**
+```json
+"allowedShiftPermissions": 19
+```
+(`1 + 2 + 16` = Morning | Evening | MorningNightSameDay)
+
+| سناریو | مجاز برای مینا؟ |
+|--------|------------------|
+| فقط صبح | ✅ |
+| فقط عصر | ✅ |
+| فقط شب | ❌ |
+| صبح+عصر همان روز | ❌ |
+| صبح+شب همان روز | ✅ |
+
+**قواعد:**
+- ترکیب‌های **صبح/عصر** و **صبح/شب** فقط وقتی در شیفت‌بندی ممکن‌اند که `MaxShiftsPerDay ≥ 2` در تنظیمات دپارتمان باشد.
+- اگر `allowedShiftPermissions` **خالی (`null`)** باشد → مثل قبل از `ShiftType` + `ShiftSubType` + `TwoShiftRotationPattern` مشتق می‌شود (سازگاری عقب‌رو).
+- انتخاب «صبح/عصر» هنگام ذخیره، خودکار `Morning` و `Evening` را هم اضافه می‌کند؛ «صبح/شب» → `Morning`.
+
+**UI پیشنهادی:** پنج checkbox مستقل در فرم کاربر؛ checkboxهای ترکیبی فقط وقتی `maxShiftsPerDay >= 2` در تنظیمات دپارتمان فعال/قابل انتخاب باشند.
 
 ## ۱.۵ حذف و ایجاد شیفت‌بندی ماهانه (`ShiftScheduling`)
 
@@ -447,6 +502,8 @@
   - `شب -> صبح` در روز بعد همیشه ممنوع
   - اگر `allowEveningAfterNightShift = false` باشد، روز بعد از شب کاملاً بدون شیفت است (عصر/شب روز بعد هم ممنوع)
   - اگر `allowEveningAfterNightShift = true` باشد، عصر روز بعد از شب در صورت نیاز مجاز است (الزام نیست)
+- **OFF تأییدشده** برای صبح یا کل‌روز → شب روز قبل مسدود (`ApprovedOffNightBeforeRules`)
+- **اولویت پر کردن موظفی:** غیرطرحی (`IsProjectPersonnel = false/null`) قبل از طرحی؛ پرسنل طرحی فقط تا موظفی، بدون اضافه‌کار
 - ظرفیت روزهای تعطیل و غیرتعطیل برای تخصص‌ها جداگانه در نظر گرفته می‌شود.
 
 ### اثر این تغییرات روی فرانت
@@ -518,7 +575,7 @@
 
 ### ۵.۲ `productivityRequiredHoursByUser` — ساعت موظفی (هدف ماهانه)
 
-ساعت موظفی ماهانهٔ محاسبه‌شده برای همان بازه برنامه‌ریزی (بر اساس ۴۴ ساعت هفتگی، سابقه، `HardshipPercent`، گردشی بودن، و تعداد هفته‌های بازه).
+ساعت موظفی ماهانهٔ محاسبه‌شده برای همان بازه برنامه‌ریزی (بر اساس ۴۴ ساعت هفتگی، سابقه، `HardshipPercent`، گردشی بودن، و تعداد هفته‌های بازه). اگر کاربر `MaxProductivityRequiredHours` مثبت داشته باشد، **همان مقدار دستی** جایگزین محاسبه خودکار می‌شود.
 
 این مقدار **هدف/کف موظفی** است، نه لزوماً سقف سخت اضافه‌کاری.
 
@@ -622,6 +679,7 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - `OvertimeConsent`
 - `IsProjectPersonnel` — پرسنل طرحی (`true`) / غیرطرحی (`false` یا خالی)
 - `MaxProductivityRequiredHours` — حداکثر ساعت موظفی (دستی؛ اختیاری)
+- `AllowedShiftPermissions` — مجوزهای نوع شیفت (۵ checkbox؛ `null` = مشتق از ShiftType)
 - `ShiftType`
 - `ShiftSubType`
 - `TwoShiftRotationPattern`
@@ -657,6 +715,9 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 
 - اضافه کردن `HardshipPercent` به فرم و مدل کاربر
 - اضافه کردن `OvertimeConsent` به فرم و مدل کاربر
+- اضافه کردن `IsProjectPersonnel` و `MaxProductivityRequiredHours` به فرم کاربر
+- **پنج checkbox `AllowedShiftPermissions`** (صبح/عصر/شب/صبح‌عصر/صبح‌شب) در فرم کاربر
+- tooltip برای OFF صبح/کل‌روز تأییدشده: «شب روز قبل مسدود می‌شود»
 - **حذف** سهمیه شب از فرم کاربر؛ ساخت UI ماهانه با `UserMonthlyNightQuota` APIها
 - قبل از Optimize، تنظیم سهمیه شب برای ماه شمسی موردنظر
 - دکمه حذف شیفت‌بندی ماه (`DeleteMonthlySchedule`) + قفل Optimize وقتی برنامه قبلی هست یا ماه شروع شده (با درنظرگرفتن فلگ‌های `allowCurrentMonthScheduling` و `allowMonthlyRescheduleWithAutoDelete`)
@@ -703,6 +764,11 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - `ShiftYar.Application/Common/Utilities/NightQuotaRequestLinker.cs`
 - `ShiftYar.Application/Common/Utilities/DailyAssignmentRules.cs`
 - `ShiftYar.Application/Common/Utilities/AdjacentShiftRestRules.cs`
+- `ShiftYar.Application/Common/Utilities/ShiftEligibilityResolver.cs`
+- `ShiftYar.Domain/Enums/ShiftModel/ShiftEnums.cs` (`UserShiftPermission`)
+- `ShiftYar.Application/Common/Utilities/ProductivityRequiredHoursResolver.cs`
+- `ShiftYar.Application/Features/ShiftModel/SimulatedAnnealing/ProjectPersonnelProductivityPriority.cs`
+- `ShiftYar.Application/Features/ShiftModel/SimulatedAnnealing/ProductivityHourFillGuard.cs`
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftRequiredSpecialtyModel/ShiftRequiredSpecialtyDtoAdd.cs`
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftRequiredSpecialtyModel/ShiftRequiredSpecialtyDtoGet.cs`
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftSchedulingModel/ShiftSchedulingResultDto.cs`

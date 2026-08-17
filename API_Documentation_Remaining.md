@@ -219,7 +219,11 @@
 | PersonnelCode | string | خیر | کد پرسنلی | - |
 | Gender | UserGender? | خیر | جنسیت کاربر | Enum: UserGender |
 | DateOfEmployment | string | خیر | تاریخ استخدام (شمسی) | - |
-| IsProjectPersonnel | bool? | خیر | آیا پرسنل پروژه است | - |
+| IsProjectPersonnel | bool? | خیر | پرسنل طرحی: فقط تا موظفی در شیفت‌بندی؛ غیرطرحی اولویت پر کردن موظفی | - |
+| AllowedShiftPermissions | int? (flags) | خیر | مجوز نوع شیفت: Morning=1, Evening=2, Night=4, MorningEveningSameDay=8, MorningNightSameDay=16؛ null=مشتق از ShiftType | - |
+| MaxProductivityRequiredHours | decimal? | خیر | ساعت موظفی ماهانه دستی؛ null/0 = محاسبه خودکار | 0 تا 744 |
+| HardshipPercent | decimal? | خیر | ضریب سختی کار برای کاهش موظفی | - |
+| OvertimeConsent | bool? | خیر | رضایت اضافه‌کار | - |
 | Email | string | خیر | ایمیل | [EmailAddress] با پیام "ایمیل نامعتبر است." |
 | Password | string | خیر | رمز عبور | اختیاری: برای ست کردن پسورد هنگام ایجاد کاربر |
 | Province | string | خیر | استان | - |

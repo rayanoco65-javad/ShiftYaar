@@ -45,6 +45,9 @@ namespace ShiftYar.Application.DTOs.UserModel
         //اگر دو نوبت کاری هست، کدوم شیفت ها رو قراره بیاد
         public TwoShiftRotationPattern? TwoShiftRotationPattern { get; set; }
 
+        /// <summary>مجوزهای صریح نوع شیفت (flags). null = مشتق از ShiftType.</summary>
+        public UserShiftPermission? AllowedShiftPermissions { get; set; }
+
         public List<UserPhoneNumber>? OtherPhoneNumbers { get; set; }
         public List<UserRole>? UserRoles { get; set; }
     }

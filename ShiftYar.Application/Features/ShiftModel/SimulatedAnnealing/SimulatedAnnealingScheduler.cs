@@ -533,7 +533,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var nightEligible = _constraints.UserConstraints
                 .Where(u => u.ShiftType != ShiftTypes.FixedShift)
                 .Where(u => !u.HasExactNightQuota) // سهمیه دقیق از تعادل نرم خارج است
-                .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Night))
+                .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, ShiftLabel.Night))
                 .ToList();
             if (nightEligible.Count < 2) return 0;
 
@@ -581,8 +581,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         {
             var balanceableUsers = _constraints.UserConstraints
                 .Where(u => u.IsActive && u.ShiftType != ShiftTypes.FixedShift)
-                .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Morning) &&
-                            ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Evening))
+                .Where(u => ShiftEligibilityResolver.SupportsMorningEveningCombo(u))
                 .ToList();
             var limits = MorningEveningBalanceGuard.GetDepartmentSpreadLimits(solution, balanceableUsers);
 
@@ -625,7 +624,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             {
                 var eligible = _constraints.UserConstraints
                     .Where(u => u.IsActive && u.ShiftType != ShiftTypes.FixedShift)
-                    .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, label))
+                    .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, label))
                     .ToList();
                 if (eligible.Count < 2)
                 {
@@ -689,7 +688,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 foreach (var label in new[] { ShiftLabel.Morning, ShiftLabel.Evening })
                 {
                     var eligible = specialtyGroup
-                        .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, label))
+                        .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, label))
                         .ToList();
                     if (eligible.Count < 2)
                     {
@@ -787,7 +786,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var eligible = _constraints.UserConstraints
                 .Where(u => u.ShiftType != ShiftTypes.FixedShift)
                 .Where(u => !u.HasExactNightQuota)
-                .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, ShiftLabel.Night))
+                .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, ShiftLabel.Night))
                 .ToList();
             if (eligible.Count < 2)
             {
@@ -1096,7 +1095,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     return false;
                 }
 
-                if (!ShiftEligibilityResolver.IsLabelAllowed(userConstraint.AllowedShiftLabels, assignment.ShiftLabel))
+                if (!ShiftEligibilityResolver.MayEverTakeLabel(userConstraint, assignment.ShiftLabel))
                 {
                     return false;
                 }
@@ -1756,13 +1755,27 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return false;
             }
 
-            if (!ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, shiftLabel))
+            if (user.UnavailableShiftSlots.Any(s =>
+                    s.Date.Date == date.Date && s.ShiftLabel == shiftLabel))
             {
                 return false;
             }
 
-            if (user.UnavailableShiftSlots.Any(s =>
-                    s.Date.Date == date.Date && s.ShiftLabel == shiftLabel))
+            if (solution != null)
+            {
+                var maxPerDay = _constraints.HardRules.EnforceMaxShiftsPerDay
+                    ? Math.Max(1, _constraints.GlobalConstraints.MaxShiftsPerDay)
+                    : 2;
+                var existingLabels = solution.GetUserAssignments(user.UserId, date)
+                    .Select(a => a.ShiftLabel);
+                if (!ShiftEligibilityResolver.IsAssignmentAllowed(
+                        user, existingLabels, shiftLabel, maxPerDay,
+                        _constraints.HardRules.ForbidDuplicateDailyAssignments))
+                {
+                    return false;
+                }
+            }
+            else if (!ShiftEligibilityResolver.MayEverTakeLabel(user, shiftLabel))
             {
                 return false;
             }
@@ -1770,12 +1783,6 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             if (solution != null &&
                 AdjacentShiftRestRules.WouldConflict(
                     solution.GetUserAllAssignments(user.UserId), date, shiftLabel, _constraints))
-            {
-                return false;
-            }
-
-            if (solution != null &&
-                HasDailyConflict(solution, user.UserId, date, shiftLabel))
             {
                 return false;
             }
@@ -2456,7 +2463,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var label = _random.Next(2) == 0 ? ShiftLabel.Morning : ShiftLabel.Evening;
             var eligible = _constraints.UserConstraints
                 .Where(u => u.IsActive && u.ShiftType != ShiftTypes.FixedShift)
-                .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, label))
+                .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, label))
                 .ToList();
             if (eligible.Count < 2)
             {

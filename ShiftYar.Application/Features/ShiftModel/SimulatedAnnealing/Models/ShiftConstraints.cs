@@ -79,9 +79,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public ShiftSubTypes ShiftSubType { get; set; }
         public TwoShiftRotationPattern? TwoShiftRotationPattern { get; set; }
         /// <summary>
-        /// شیفت‌های مجاز بر اساس نوع شیفت کاربر. خالی = همه مجاز (سازگاری عقب‌رو).
+        /// شیفت‌های مجاز تکی (مشتق از AllowedShiftPermissions). خالی = همه مجاز (سازگاری عقب‌رو).
         /// </summary>
         public List<ShiftLabel> AllowedShiftLabels { get; set; } = new List<ShiftLabel>();
+        /// <summary>مجوزهای صریح نوع شیفت (تکی + ترکیب روزانه).</summary>
+        public UserShiftPermission AllowedShiftPermissions { get; set; } = UserShiftPermission.None;
         public bool IncludedInProductivityPlan { get; set; }
         public decimal? ProductivityRequiredHours { get; set; }
         public WorkingHoursCalculationResultDto? ProductivitySnapshot { get; set; }

@@ -1725,11 +1725,14 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                             userConstraint.ExactNightShiftCount.Value);
                     }
 
-                    userConstraint.AllowedShiftLabels = ShiftEligibilityResolver
-                        .GetAllowedLabels(
+                    userConstraint.AllowedShiftPermissions = ShiftEligibilityResolver
+                        .ResolvePermissions(
+                            user.AllowedShiftPermissions,
                             userConstraint.ShiftType,
                             userConstraint.ShiftSubType,
-                            userConstraint.TwoShiftRotationPattern)
+                            userConstraint.TwoShiftRotationPattern);
+                    userConstraint.AllowedShiftLabels = ShiftEligibilityResolver
+                        .GetStandaloneLabels(userConstraint.AllowedShiftPermissions)
                         .ToList();
 
                     userConstraint.MaxConsecutiveShifts = 3; // پیش‌فرض

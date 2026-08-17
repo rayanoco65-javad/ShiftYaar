@@ -46,6 +46,17 @@
 - موظفی ماهانه نهایی:  
   `FinalMonthly = max(0, MonthlyBase - WeeklyDeductionsMonthly - NightHolidayCredit)`
 
+### ۳.۱ override دستی ساعت موظفی (`MaxProductivityRequiredHours`)
+
+در فرم کاربر (`UserDtoAdd` / `UserDtoGet`) فیلد **`MaxProductivityRequiredHours`** اضافه شده:
+
+| حالت | رفتار |
+|------|--------|
+| `null` یا `0` | محاسبه خودکار طبق آیین‌نامه (سابقه، `HardshipPercent`، شیفت گردشی و …) |
+| مقدار **مثبت** | همان عدد به‌عنوان **ساعت موظفی ماهانه** در شیفت‌بندی اعمال می‌شود |
+
+Resolver مربوط: `ProductivityRequiredHoursResolver` — در `ShiftSchedulingService.LoadConstraints` فراخوانی می‌شود.
+
 جدول کاهش سابقه:
 
 | سابقه (سال) | کاهش هفتگی |
@@ -71,6 +82,9 @@
 | `ShiftYar.Application/Features/ProductivityModel/Services/WorkingHoursCalculator.cs` | پیاده‌سازی منطق محاسبه. |
 | `ShiftYar.Application/ApplicationDependencyInjection.cs` | ثبت `IWorkingHoursCalculator` در DI Container. |
 | `ShiftYar.Application/Features/ProductivityModel/README.md` | مستند انگلیسی کوتاه. |
+| `ShiftYar.Application/Common/Utilities/ProductivityRequiredHoursResolver.cs` | تعیین موظفی ماهانه (خودکار یا `MaxProductivityRequiredHours` دستی). |
+| `ShiftYar.Application/Common/Utilities/ApprovedOffNightBeforeRules.cs` | OFF تأییدشده صبح/کل‌روز → مسدود کردن شب روز قبل. |
+| `ShiftYar.Application/Features/ShiftModel/SimulatedAnnealing/ProjectPersonnelProductivityPriority.cs` | اولویت غیرطرحی/طرحی در پر کردن موظفی. |
 | `README_FA.md` | این مستند فارسی. |
 
 ---

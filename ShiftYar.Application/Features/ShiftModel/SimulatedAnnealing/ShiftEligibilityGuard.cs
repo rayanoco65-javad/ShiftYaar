@@ -2,11 +2,12 @@ using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
 using System.Collections.Generic;
 using System.Linq;
+using static ShiftYar.Domain.Enums.ShiftModel.ShiftEnums;
 
 namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 
 /// <summary>
-/// حذف انتساب‌هایی که با نوع شیفت کاربر (فیکس/گردشی) سازگار نیستند.
+/// حذف انتساب‌هایی که با مجوز نوع شیفت کاربر سازگار نیستند.
 /// </summary>
 public static class ShiftEligibilityGuard
 {
@@ -14,13 +15,7 @@ public static class ShiftEligibilityGuard
     {
         foreach (var assignment in solution.Assignments.Values.ToList())
         {
-            var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == assignment.UserId);
-            if (user == null)
-            {
-                continue;
-            }
-
-            if (!ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, assignment.ShiftLabel))
+            if (!IsAssignmentEligible(solution, constraints, assignment))
             {
                 solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
             }
@@ -39,7 +34,7 @@ public static class ShiftEligibilityGuard
                 continue;
             }
 
-            if (!ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, assignment.ShiftLabel))
+            if (!IsAssignmentEligible(solution, constraints, assignment))
             {
                 violations.Add(
                     $"نوع شیفت نقض شد: کاربر {user.UserId} ({user.UserName}) نوع شیفتش اجازهٔ {assignment.ShiftLabel} در {assignment.Date:yyyy-MM-dd} را نمی‌دهد.");
@@ -47,5 +42,31 @@ public static class ShiftEligibilityGuard
         }
 
         return violations;
+    }
+
+    private static bool IsAssignmentEligible(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        SaShiftAssignment assignment)
+    {
+        var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == assignment.UserId);
+        if (user == null)
+        {
+            return true;
+        }
+
+        var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
+            ? System.Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
+            : 2;
+        var existing = solution.GetUserAssignments(assignment.UserId, assignment.Date)
+            .Where(a => a.ShiftId != assignment.ShiftId || a.ShiftLabel != assignment.ShiftLabel)
+            .Select(a => a.ShiftLabel);
+
+        return ShiftEligibilityResolver.IsAssignmentAllowed(
+            user,
+            existing,
+            assignment.ShiftLabel,
+            maxPerDay,
+            constraints.HardRules.ForbidDuplicateDailyAssignments);
     }
 }

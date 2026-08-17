@@ -781,7 +781,7 @@ public static class ExactNightQuotaGuard
 
             if (user.UnavailableDates.Any(d => d.Date == target)
                 || user.UnavailableShiftSlots.Any(s => s.Date.Date == target && s.ShiftLabel == ShiftLabel.Night)
-                || !ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, ShiftLabel.Night))
+                || !ShiftEligibilityResolver.MayEverTakeLabel(user, ShiftLabel.Night))
             {
                 continue;
             }
@@ -821,7 +821,7 @@ public static class ExactNightQuotaGuard
     {
         if (user.UnavailableDates.Any(d => d.Date == takeDate.Date)
             || user.UnavailableShiftSlots.Any(s => s.Date.Date == takeDate.Date && s.ShiftLabel == ShiftLabel.Night)
-            || !ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, ShiftLabel.Night)
+            || !ShiftEligibilityResolver.MayEverTakeLabel(user, ShiftLabel.Night)
             || solution.HasAssignment(user.UserId, nightShift.ShiftId, takeDate))
         {
             return false;
@@ -1077,7 +1077,7 @@ public static class ExactNightQuotaGuard
             return false;
         }
 
-        return ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, ShiftLabel.Night)
+        return ShiftEligibilityResolver.MayEverTakeLabel(user, ShiftLabel.Night)
                && !user.UnavailableDates.Any(d => d.Date == date.Date)
                && !user.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == ShiftLabel.Night)
                && !solution.HasAssignment(user.UserId, nightShift.ShiftId, date);
@@ -1269,8 +1269,8 @@ public static class ExactNightQuotaGuard
             return false;
         }
 
-        return ShiftEligibilityResolver.IsLabelAllowed(other.AllowedShiftLabels, ShiftLabel.Night)
-               && ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, ShiftLabel.Night);
+        return ShiftEligibilityResolver.MayEverTakeLabel(other, ShiftLabel.Night)
+               && ShiftEligibilityResolver.MayEverTakeLabel(user, ShiftLabel.Night);
     }
 
     public static List<DateTime> PickSpreadDates(
@@ -1408,7 +1408,7 @@ public static class ExactNightQuotaGuard
             return false;
         }
 
-        return ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, ShiftLabel.Night);
+        return ShiftEligibilityResolver.MayEverTakeLabel(user, ShiftLabel.Night);
     }
 
     private static bool HasSpecialtyCapacity(

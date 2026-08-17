@@ -210,8 +210,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             foreach (var (user, required) in requiredEntries)
             {
                 if (!IsOffConflictFree(user, required.Date, required.ShiftLabel) ||
-                    !Common.Utilities.ShiftEligibilityResolver.IsLabelAllowed(
-                        user.AllowedShiftLabels, required.ShiftLabel))
+                    !Common.Utilities.ShiftEligibilityResolver.MayEverTakeLabel(user, required.ShiftLabel))
                 {
                     continue;
                 }
@@ -292,10 +291,19 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     var onCallOnly = solution.GetUserAssignments(user.UserId, presenceDate)
                         .FirstOrDefault(a => a.IsOnCall);
 
+                    var existingLabels = solution.GetUserAssignments(user.UserId, presenceDate)
+                        .Where(a => !a.IsOnCall)
+                        .Select(a => a.ShiftLabel)
+                        .ToList();
+                    var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
+                        ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
+                        : 2;
+
                     var candidates = constraints.ShiftRequirements
                         .Where(s => IsOffConflictFree(user, presenceDate, s.ShiftLabel))
-                        .Where(s => Common.Utilities.ShiftEligibilityResolver.IsLabelAllowed(
-                            user.AllowedShiftLabels, s.ShiftLabel))
+                        .Where(s => Common.Utilities.ShiftEligibilityResolver.IsAssignmentAllowed(
+                            user, existingLabels, s.ShiftLabel, maxPerDay,
+                            constraints.HardRules.ForbidDuplicateDailyAssignments))
                         .OrderByDescending(s => onCallOnly != null && s.ShiftId == onCallOnly.ShiftId ? 1_000_000 : 0)
                         .ThenByDescending(s =>
                         {
@@ -588,7 +596,21 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return false;
             }
 
-            if (!Common.Utilities.ShiftEligibilityResolver.IsLabelAllowed(user.AllowedShiftLabels, shiftLabel))
+            if (solution != null && constraints != null)
+            {
+                var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
+                    ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
+                    : 2;
+                var existing = solution.GetUserAssignments(user.UserId, date)
+                    .Where(a => a.ShiftLabel != shiftLabel)
+                    .Select(a => a.ShiftLabel);
+                if (!Common.Utilities.ShiftEligibilityResolver.IsAssignmentAllowed(
+                        user, existing, shiftLabel, maxPerDay, constraints.HardRules.ForbidDuplicateDailyAssignments))
+                {
+                    return false;
+                }
+            }
+            else if (!Common.Utilities.ShiftEligibilityResolver.MayEverTakeLabel(user, shiftLabel))
             {
                 return false;
             }
@@ -601,24 +623,6 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     allowEveningAfterNightShift: constraints?.HardRules.AllowEveningAfterNightShift ?? true))
             {
                 return false;
-            }
-
-            if (solution != null && constraints != null)
-            {
-                var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
-                    ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
-                    : 2;
-                var existing = solution.GetUserAssignments(user.UserId, date)
-                    .Where(a => a.ShiftLabel != shiftLabel)
-                    .Select(a => a.ShiftLabel);
-                if (!Common.Utilities.DailyAssignmentRules.CanAddShift(
-                        existing,
-                        shiftLabel,
-                        maxPerDay,
-                        constraints.HardRules.ForbidDuplicateDailyAssignments))
-                {
-                    return false;
-                }
             }
 
             return true;

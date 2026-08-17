@@ -39,6 +39,21 @@ namespace ShiftYar.Domain.Enums.ShiftModel
             Night = 2     //شیفت شب
         }
 
+        /// <summary>
+        /// انواع مجاز شیفت برای هر کاربر (تکی + ترکیب همان روز).
+        /// ترکیب‌ها فقط وقتی معنا دارند که MaxShiftsPerDay ≥ 2 باشد.
+        /// </summary>
+        [Flags]
+        public enum UserShiftPermission
+        {
+            None = 0,
+            Morning = 1,
+            Evening = 2,
+            Night = 4,
+            MorningEveningSameDay = 8,
+            MorningNightSameDay = 16
+        }
+
         public enum ShiftStatus
         {
             Planned = 0,     // برنامه‌ریزی‌شده
