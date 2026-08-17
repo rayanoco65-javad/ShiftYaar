@@ -31,6 +31,8 @@ namespace ShiftYar.Application.DTOs.UserModel
         public bool? IncludedProductivityPlan { get; set; }
         public decimal? HardshipPercent { get; set; }
         public bool? OvertimeConsent { get; set; }
+        /// <summary>حداکثر ساعت موظفی دستی (ساعت). null = محاسبه خودکار.</summary>
+        public decimal? MaxProductivityRequiredHours { get; set; }
         public string? Image { get; set; }
         public int? DepartmentId { get; set; }
         public Department? Department { get; set; }

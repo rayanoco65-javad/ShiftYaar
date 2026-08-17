@@ -1185,6 +1185,9 @@ namespace ShiftYar.Infrastructure.Migrations
                     b.Property<bool?>("OvertimeConsent")
                         .HasColumnType("bit");
 
+                    b.Property<decimal?>("MaxProductivityRequiredHours")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<string>("Password")
                         .HasColumnType("nvarchar(max)");
 

@@ -1864,12 +1864,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     }
 
                     var productivitySnapshot = CalculateProductivitySnapshot(userEntity, userConstraint, constraints, deptSettingEarly, nightShiftDuration);
-                    if (productivitySnapshot != null)
-                    {
-                        userConstraint.IncludedInProductivityPlan = true;
-                        userConstraint.ProductivitySnapshot = productivitySnapshot;
-                        userConstraint.ProductivityRequiredHours = productivitySnapshot.FinalMonthlyRequiredHours;
-                    }
+                    ProductivityRequiredHoursResolver.ApplyToUserConstraint(userEntity, userConstraint, productivitySnapshot);
                 }
 
                 // اعمال درخواست‌های شیفت تأییدشده (ShiftRequest) به قیود کاربر

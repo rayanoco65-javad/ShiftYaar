@@ -131,6 +131,12 @@ namespace ShiftYar.Application.Features.UserModel.Services
                     return ApiResponse<UserDtoAdd>.Fail("کاربری با شماره موبایل وجود دارد.");
                 }
 
+                var productivityHoursError = ValidateMaxProductivityRequiredHours(dto.MaxProductivityRequiredHours);
+                if (productivityHoursError != null)
+                {
+                    return ApiResponse<UserDtoAdd>.Fail(productivityHoursError);
+                }
+
                 var user = _mapper.Map<User>(dto);
                 // تبدیل تاریخ استخدام از شمسی به میلادی واقعی (مپر DateOfEmployment را Ignore می‌کند)
                 if (!string.IsNullOrWhiteSpace(dto.DateOfEmployment))
@@ -229,6 +235,12 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 {
                     _logger.LogWarning("User update failed - User with ID {Id} not found", id);
                     return ApiResponse<UserDtoAdd>.Fail("کاربر یافت نشد.");
+                }
+
+                var productivityHoursError = ValidateMaxProductivityRequiredHours(dto.MaxProductivityRequiredHours);
+                if (productivityHoursError != null)
+                {
+                    return ApiResponse<UserDtoAdd>.Fail(productivityHoursError);
                 }
 
                 // Handle phone numbers
@@ -407,6 +419,20 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 _logger.LogInformation("Failed Delete user with ID: {Id}", id);
                 throw new Exception("سرویس حذف کاربر با خطا مواجه شد : " + ex.Message);
             }
+        }
+
+        private static string? ValidateMaxProductivityRequiredHours(decimal? value)
+        {
+            if (!value.HasValue)
+                return null;
+
+            if (value.Value < 0)
+                return "حداکثر ساعت موظفی نمی‌تواند منفی باشد.";
+
+            if (value.Value > 744)
+                return "حداکثر ساعت موظفی بیش از حد مجاز است.";
+
+            return null;
         }
     }
 }

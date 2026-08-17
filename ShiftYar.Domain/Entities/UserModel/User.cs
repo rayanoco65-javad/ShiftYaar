@@ -38,6 +38,12 @@ namespace ShiftYar.Domain.Entities.UserModel
         public decimal? HardshipPercent { get; set; }   //درصد صعوبت (سختی) کار (۰–۱۰۰) برای کاهش ساعت موظفی هفتگی
         public bool? OvertimeConsent { get; set; }  //رضایت پرسنل به اضافه‌کاری (حداکثر ۸۰ ساعت در ماه) ر
 
+        /// <summary>
+        /// حداکثر/دستی ساعت موظفی ماهانه (ساعت). اگر مقدار داشته باشد، در شیفت‌بندی
+        /// به‌جای محاسبهٔ خودکار (سابقه، صعوبت، …) همین عدد اعمال می‌شود.
+        /// </summary>
+        public decimal? MaxProductivityRequiredHours { get; set; }
+
         public string? Image { get; set; }
 
         /// <summary>سهمیه‌های حداقل شب به‌تفکیک ماه شمسی</summary>
@@ -93,6 +99,7 @@ namespace ShiftYar.Domain.Entities.UserModel
             this.ShiftSubType = null;
             this.ShiftType = null;
             this.TwoShiftRotationPattern = null;
+            this.MaxProductivityRequiredHours = null;
         }
     }
 }
