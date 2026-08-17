@@ -187,7 +187,12 @@ public static class ProductivityHourFillGuard
             .Select(u =>
             {
                 var required = (double)u.ProductivityRequiredHours!.Value;
-                return required > 0 ? hours[u.UserId] / required : 0;
+                if (!hours.TryGetValue(u.UserId, out var worked))
+                {
+                    return 0d;
+                }
+
+                return required > 0 ? worked / required : 0;
             })
             .ToList();
 
@@ -202,7 +207,7 @@ public static class ProductivityHourFillGuard
 
     private static bool WouldImproveRatioBalance(
         Dictionary<int, double> hours,
-        List<UserConstraint> productivityUsers,
+        List<UserConstraint> ratioCohort,
         UserConstraint donor,
         UserConstraint receiver,
         SaShiftAssignment assignment,
@@ -210,9 +215,9 @@ public static class ProductivityHourFillGuard
         ShiftConstraints constraints)
     {
         var shiftHours = EstimateShiftHours(assignment, lookup, constraints);
-        var before = CalculateRatioSpread(hours, productivityUsers);
+        var before = CalculateRatioSpread(hours, ratioCohort);
 
-        var beforeImbalance = CalculateTotalImbalance(hours, productivityUsers);
+        var beforeImbalance = CalculateTotalImbalance(hours, ratioCohort);
 
         var donorAfter = hours[donor.UserId] - shiftHours;
         if (donor.ProductivityRequiredHours.HasValue &&
@@ -235,16 +240,23 @@ public static class ProductivityHourFillGuard
             return false;
         }
 
-        var after = CalculateRatioSpread(afterHours, productivityUsers);
-        var afterImbalance = CalculateTotalImbalance(afterHours, productivityUsers);
+        var after = CalculateRatioSpread(afterHours, ratioCohort);
+        var afterImbalance = CalculateTotalImbalance(afterHours, ratioCohort);
         return after < before - 0.001 || afterImbalance < beforeImbalance - 0.25;
     }
 
     private static double CalculateTotalImbalance(
         IReadOnlyDictionary<int, double> hours,
-        IEnumerable<UserConstraint> productivityUsers) =>
-        productivityUsers.Sum(u =>
-            GetDeficit(u, hours[u.UserId]) + GetSurplusHours(u, hours[u.UserId]));
+        IEnumerable<UserConstraint> ratioCohort) =>
+        ratioCohort.Sum(u =>
+        {
+            if (!hours.TryGetValue(u.UserId, out var worked))
+            {
+                return 0d;
+            }
+
+            return GetDeficit(u, worked) + GetSurplusHours(u, worked);
+        });
 
     private static void FillUnderstaffedSlots(
         ShiftSolution solution,
@@ -582,9 +594,11 @@ public static class ProductivityHourFillGuard
                         continue;
                     }
 
-                    var hours = snapshot.ToDictionary(x => x.User.UserId, x => x.Worked);
+                    var hours = productivityUsers.ToDictionary(
+                        u => u.UserId,
+                        u => CalculateWorked(solution, u.UserId, lookup, constraints));
                     if (!WouldImproveRatioBalance(
-                            hours, productivityUsers, donorEntry.User, receiverEntry.User, assignment, lookup, constraints))
+                            hours, targetUsers, donorEntry.User, receiverEntry.User, assignment, lookup, constraints))
                     {
                         continue;
                     }

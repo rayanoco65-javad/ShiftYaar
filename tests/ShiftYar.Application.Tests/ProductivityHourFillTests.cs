@@ -261,6 +261,47 @@ public class ProductivityHourFillTests
             solution.GetUserAllAssignments(userId), lookup, constraints.IsHoliday);
 
     [Fact]
+    public void ProductivityHourFillGuard_DoesNotThrowWhenMixedProjectAndNonProjectPersonnel()
+    {
+        var start = new DateTime(2026, 8, 1);
+        var users = new List<UserConstraint>
+        {
+            MakeUser(11, requiredHours: 120),
+            MakeUser(12, requiredHours: 120)
+        };
+        users[0].IsProjectPersonnel = false;
+        users[1].IsProjectPersonnel = true;
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(20),
+            UserConstraints = users,
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning),
+                Shift(2, ShiftLabel.Evening),
+                Shift(3, ShiftLabel.Night)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true,
+                EnforceProductivityHours = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 2 }
+        };
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(11, 1, start.AddDays(1), ShiftLabel.Morning, false);
+        solution.AddAssignment(12, 1, start.AddDays(2), ShiftLabel.Morning, false);
+
+        var exception = Record.Exception(() => ProductivityHourFillGuard.Enforce(solution, constraints));
+        Assert.Null(exception);
+    }
+
+    [Fact]
     public void ProductivityHourFillGuard_PrefersNonProjectPersonnelBeforeProjectPersonnel()
     {
         var start = new DateTime(2026, 8, 1);
