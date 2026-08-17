@@ -17,6 +17,7 @@ public static class ProductivityHourFillGuard
     private const double DeficitToleranceHours = 2.0;
     private const int ReassignmentPasses = 96;
     private const int FinalBalancePasses = 3;
+    private const int CrossTierReassignmentPasses = 128;
 
     public static void Enforce(ShiftSolution solution, ShiftConstraints constraints)
     {
@@ -28,6 +29,9 @@ public static class ProductivityHourFillGuard
         }
 
         RunProductivityFillPhases(solution, constraints, lookup, productivityUsers);
+        EnforceCrossTierPriorityBalance(solution, constraints, lookup, productivityUsers);
+        StripProjectPersonnelOvertime(solution, constraints, lookup, productivityUsers);
+        EnforceCrossTierPriorityBalance(solution, constraints, lookup, productivityUsers);
     }
 
     /// <summary>
@@ -45,6 +49,9 @@ public static class ProductivityHourFillGuard
         for (var pass = 0; pass < FinalBalancePasses; pass++)
         {
             RunProductivityFillPhases(solution, constraints, lookup, productivityUsers);
+            EnforceCrossTierPriorityBalance(solution, constraints, lookup, productivityUsers);
+            StripProjectPersonnelOvertime(solution, constraints, lookup, productivityUsers);
+            EnforceCrossTierPriorityBalance(solution, constraints, lookup, productivityUsers);
         }
 
         ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
@@ -72,13 +79,251 @@ public static class ProductivityHourFillGuard
 
         if (nonProject.Count > 0)
         {
-            RunBalanceCycle(solution, constraints, lookup, nonProject, productivityUsers);
+            RunBalanceCycle(
+                solution,
+                constraints,
+                lookup,
+                nonProject,
+                productivityUsers,
+                ProjectPersonnelProductivityPriority.CrossTierToleranceHours);
+            EnforceCrossTierPriorityBalance(solution, constraints, lookup, productivityUsers);
         }
 
-        if (project.Count > 0)
+        if (project.Count > 0 && !HasNonProjectDeficit(solution, lookup, constraints, nonProject))
         {
-            RunBalanceCycle(solution, constraints, lookup, project, productivityUsers);
+            RunBalanceCycle(
+                solution,
+                constraints,
+                lookup,
+                project,
+                productivityUsers,
+                DeficitToleranceHours);
         }
+    }
+
+    /// <summary>
+    /// تا وقتی غیرطرحی کسری دارد: از مازاد پرسنل طرحی به آن‌ها شیفت بدهید یا جای خالی پر کنید.
+    /// </summary>
+    private static void EnforceCrossTierPriorityBalance(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        List<UserConstraint> productivityUsers)
+    {
+        var nonProject = productivityUsers
+            .Where(u => !ProjectPersonnelProductivityPriority.IsProjectPersonnel(u))
+            .ToList();
+        var project = productivityUsers
+            .Where(u => ProjectPersonnelProductivityPriority.IsProjectPersonnel(u))
+            .ToList();
+        if (nonProject.Count == 0 || project.Count == 0)
+        {
+            return;
+        }
+
+        var crossTier = ProjectPersonnelProductivityPriority.CrossTierToleranceHours;
+        for (var pass = 0; pass < CrossTierReassignmentPasses; pass++)
+        {
+            if (!HasNonProjectDeficit(solution, lookup, constraints, nonProject, crossTier))
+            {
+                return;
+            }
+
+            var hours = productivityUsers.ToDictionary(
+                u => u.UserId,
+                u => CalculateWorked(solution, u.UserId, lookup, constraints));
+
+            var receiver = nonProject
+                .Where(u => GetDeficit(u, hours[u.UserId]) > crossTier)
+                .OrderByDescending(u => GetDeficit(u, hours[u.UserId]))
+                .FirstOrDefault();
+            if (receiver == null)
+            {
+                return;
+            }
+
+            FillUnderstaffedSlots(
+                solution,
+                constraints,
+                lookup,
+                [receiver],
+                crossTier);
+
+            hours = productivityUsers.ToDictionary(
+                u => u.UserId,
+                u => CalculateWorked(solution, u.UserId, lookup, constraints));
+
+            if (GetDeficit(receiver, hours[receiver.UserId]) <= crossTier)
+            {
+                continue;
+            }
+
+            var donor = project
+                .Where(u => hours[u.UserId] > (double)u.ProductivityRequiredHours!.Value + crossTier)
+                .OrderByDescending(u => hours[u.UserId] - (double)u.ProductivityRequiredHours!.Value)
+                .ThenByDescending(u => hours[u.UserId])
+                .FirstOrDefault();
+            if (donor == null)
+            {
+                return;
+            }
+
+            var moved = false;
+            foreach (var assignment in solution.GetUserAllAssignments(donor.UserId)
+                         .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, a))
+                         .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, donor, a))
+                         .OrderBy(a => DonationPriority(a))
+                         .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints)))
+            {
+                if (!CanUserTakeShift(solution, constraints, lookup, receiver, assignment, ignoreShiftId: null))
+                {
+                    continue;
+                }
+
+                var shiftHours = EstimateShiftHours(assignment, lookup, constraints);
+                if (!IsBeneficialCrossTierMove(
+                        donor,
+                        receiver,
+                        hours[donor.UserId],
+                        hours[receiver.UserId],
+                        shiftHours,
+                        crossTier))
+                {
+                    continue;
+                }
+
+                solution.RemoveAssignment(donor.UserId, assignment.ShiftId, assignment.Date);
+                solution.AddAssignment(
+                    receiver.UserId,
+                    assignment.ShiftId,
+                    assignment.Date,
+                    assignment.ShiftLabel,
+                    assignment.IsOnCall);
+                moved = true;
+                break;
+            }
+
+            if (!moved)
+            {
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// پرسنل طرحی نباید بالاتر از ساعت موظفی بمانند؛ مازاد به غیرطرحی منتقل یا حذف می‌شود.
+    /// </summary>
+    private static void StripProjectPersonnelOvertime(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        List<UserConstraint> productivityUsers)
+    {
+        var project = productivityUsers
+            .Where(ProjectPersonnelProductivityPriority.IsProjectPersonnel)
+            .ToList();
+        if (project.Count == 0)
+        {
+            return;
+        }
+
+        var nonProject = productivityUsers
+            .Where(u => !ProjectPersonnelProductivityPriority.IsProjectPersonnel(u))
+            .ToList();
+        var crossTier = ProjectPersonnelProductivityPriority.CrossTierToleranceHours;
+
+        for (var pass = 0; pass < CrossTierReassignmentPasses; pass++)
+        {
+            var changed = false;
+            foreach (var user in project.OrderByDescending(u =>
+                         CalculateWorked(solution, u.UserId, lookup, constraints) -
+                         (double)u.ProductivityRequiredHours!.Value))
+            {
+                var worked = CalculateWorked(solution, user.UserId, lookup, constraints);
+                var required = (double)user.ProductivityRequiredHours!.Value;
+                if (worked <= required + crossTier)
+                {
+                    continue;
+                }
+
+                foreach (var assignment in solution.GetUserAllAssignments(user.UserId)
+                             .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, a))
+                             .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, user, a))
+                             .OrderBy(a => DonationPriority(a))
+                             .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints)))
+                {
+                    var receiver = nonProject
+                        .Where(u => GetDeficit(u, CalculateWorked(solution, u.UserId, lookup, constraints)) > crossTier)
+                        .OrderByDescending(u => GetDeficit(u, CalculateWorked(solution, u.UserId, lookup, constraints)))
+                        .FirstOrDefault(u =>
+                            CanUserTakeShift(solution, constraints, lookup, u, assignment, ignoreShiftId: null));
+
+                    if (receiver != null)
+                    {
+                        solution.RemoveAssignment(user.UserId, assignment.ShiftId, assignment.Date);
+                        solution.AddAssignment(
+                            receiver.UserId,
+                            assignment.ShiftId,
+                            assignment.Date,
+                            assignment.ShiftLabel,
+                            assignment.IsOnCall);
+                    }
+                    else
+                    {
+                        solution.RemoveAssignment(user.UserId, assignment.ShiftId, assignment.Date);
+                    }
+
+                    changed = true;
+                    break;
+                }
+            }
+
+            if (!changed)
+            {
+                return;
+            }
+        }
+    }
+
+    private static bool HasNonProjectDeficit(
+        ShiftSolution solution,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        ShiftConstraints constraints,
+        List<UserConstraint> nonProject,
+        double tolerance = ProjectPersonnelProductivityPriority.CrossTierToleranceHours) =>
+        nonProject.Any(u =>
+            GetDeficit(u, CalculateWorked(solution, u.UserId, lookup, constraints)) > tolerance);
+
+    private static bool IsBeneficialCrossTierMove(
+        UserConstraint donor,
+        UserConstraint receiver,
+        double donorWorked,
+        double receiverWorked,
+        double shiftHours,
+        double crossTierTolerance)
+    {
+        if (!ProjectPersonnelProductivityPriority.IsProjectPersonnel(donor) ||
+            ProjectPersonnelProductivityPriority.IsProjectPersonnel(receiver))
+        {
+            return false;
+        }
+
+        if (!donor.ProductivityRequiredHours.HasValue || !receiver.ProductivityRequiredHours.HasValue)
+        {
+            return false;
+        }
+
+        var donorRequired = (double)donor.ProductivityRequiredHours.Value;
+        var receiverRequired = (double)receiver.ProductivityRequiredHours.Value;
+        var donorAfter = donorWorked - shiftHours;
+        if (donorAfter < donorRequired - crossTierTolerance)
+        {
+            return false;
+        }
+
+        var deficitBefore = Math.Max(0, receiverRequired - receiverWorked);
+        var deficitAfter = Math.Max(0, receiverRequired - (receiverWorked + shiftHours));
+        return deficitAfter + 0.01 < deficitBefore;
     }
 
     private static void RunBalanceCycle(
@@ -86,10 +331,11 @@ public static class ProductivityHourFillGuard
         ShiftConstraints constraints,
         IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
         List<UserConstraint> targetUsers,
-        List<UserConstraint> productivityUsers)
+        List<UserConstraint> productivityUsers,
+        double fillDeficitStopTolerance)
     {
         BalanceByReassignment(solution, constraints, lookup, targetUsers, productivityUsers);
-        FillUnderstaffedSlots(solution, constraints, lookup, targetUsers);
+        FillUnderstaffedSlots(solution, constraints, lookup, targetUsers, fillDeficitStopTolerance);
         BalanceMorningEveningPeers(solution, constraints, lookup, targetUsers);
         BalanceShiftLabelOverload(solution, constraints, lookup, targetUsers, productivityUsers);
         BalanceByReassignment(solution, constraints, lookup, targetUsers, productivityUsers);
@@ -262,7 +508,8 @@ public static class ProductivityHourFillGuard
         ShiftSolution solution,
         ShiftConstraints constraints,
         IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
-        List<UserConstraint> targetUsers)
+        List<UserConstraint> targetUsers,
+        double deficitStopTolerance = DeficitToleranceHours)
     {
         var allDates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
             .Select(i => constraints.StartDate.Date.AddDays(i))
@@ -275,7 +522,7 @@ public static class ProductivityHourFillGuard
             for (var attempt = 0; attempt < allDates.Count * 2; attempt++)
             {
                 var deficit = GetDeficit(user, CalculateWorked(solution, user.UserId, lookup, constraints));
-                if (deficit <= DeficitToleranceHours)
+                if (deficit <= deficitStopTolerance)
                 {
                     break;
                 }
@@ -745,11 +992,7 @@ public static class ProductivityHourFillGuard
         projected.Add(assignment);
         var worked = ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
             projected, lookup, constraints.IsHoliday);
-        var maxAllowed = ProductivityWorkedHoursCalculator.GetMaxAllowedHours(
-            user.ProductivityRequiredHours,
-            user.OvertimeConsent,
-            user.MaxMonthlyOvertimeHours);
-        return worked <= maxAllowed + 0.25;
+        return !ProjectPersonnelProductivityPriority.WouldExceedSchedulingCap(user, worked);
     }
 
     private static bool SameWeek(DateTime a, DateTime b)

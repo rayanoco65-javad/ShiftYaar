@@ -261,6 +261,132 @@ public class ProductivityHourFillTests
             solution.GetUserAllAssignments(userId), lookup, constraints.IsHoliday);
 
     [Fact]
+    public void StripProjectPersonnelOvertime_CapsProjectPersonnelAtRequiredHours()
+    {
+        var start = new DateTime(2026, 8, 1);
+        var project = MakeUser(5, requiredHours: 70);
+        project.IsProjectPersonnel = true;
+        var nonProject = MakeUser(9, requiredHours: 156);
+        nonProject.IsProjectPersonnel = false;
+        nonProject.OvertimeConsent = true;
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(25),
+            UserConstraints = [project, nonProject],
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning),
+                Shift(2, ShiftLabel.Evening),
+                Shift(3, ShiftLabel.Night)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true,
+                EnforceProductivityHours = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 2 }
+        };
+
+        var solution = new ShiftSolution();
+        for (var i = 0; i < 6; i++)
+        {
+            var day = start.AddDays(22 + i * 2);
+            solution.AddAssignment(5, 1, day, ShiftLabel.Morning, false);
+            solution.AddAssignment(5, 2, day, ShiftLabel.Evening, false);
+        }
+
+        for (var i = 0; i < 21; i++)
+        {
+            solution.AddAssignment(9, 1, start.AddDays(i), ShiftLabel.Morning, false);
+        }
+
+        var lookup = ShiftYar.Application.Common.Utilities.ProductivityWorkedHoursCalculator
+            .BuildShiftInfoLookup(constraints.ShiftRequirements);
+        var projectBefore = Worked(solution, 5, lookup, constraints);
+
+        ProductivityHourFillGuard.Enforce(solution, constraints);
+
+        var projectAfter = Worked(solution, 5, lookup, constraints);
+        Assert.True(projectBefore > 70 + 5, $"Setup should have project overtime, got {projectBefore}");
+        Assert.True(
+            projectAfter <= 70 + ProjectPersonnelProductivityPriority.CrossTierToleranceHours + 1,
+            $"Project personnel should be capped near required hours, got {projectAfter} (required 70)");
+    }
+
+    [Fact]
+    public void EnforceCrossTierPriorityBalance_FillsSmallNonProjectDeficitBeforeProjectOvertime()
+    {
+        var start = new DateTime(2026, 8, 1);
+        var nonProject = MakeUser(9, requiredHours: 156);
+        nonProject.IsProjectPersonnel = false;
+        var projectDonor = MakeUser(5, requiredHours: 70);
+        projectDonor.IsProjectPersonnel = true;
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(25),
+            UserConstraints = [nonProject, projectDonor],
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning),
+                Shift(2, ShiftLabel.Evening),
+                Shift(3, ShiftLabel.Night)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true,
+                EnforceProductivityHours = true,
+                AllowEveningAfterNightShift = false
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 2 }
+        };
+
+        var solution = new ShiftSolution();
+        // طرحی: مازاد روی روزهایی که غیرطرحی در آن‌ها شیفت ندارد
+        for (var i = 0; i < 6; i++)
+        {
+            var day = start.AddDays(22 + i * 2);
+            solution.AddAssignment(5, 1, day, ShiftLabel.Morning, false);
+            solution.AddAssignment(5, 2, day, ShiftLabel.Evening, false);
+        }
+
+        // غیرطرحی: ۲۱ شیفت صبح → کسری موظفی
+        for (var i = 0; i < 21; i++)
+        {
+            solution.AddAssignment(9, 1, start.AddDays(i), ShiftLabel.Morning, false);
+        }
+
+        var lookup = ShiftYar.Application.Common.Utilities.ProductivityWorkedHoursCalculator
+            .BuildShiftInfoLookup(constraints.ShiftRequirements);
+        var nonProjectBefore = Worked(solution, 9, lookup, constraints);
+        var projectBefore = Worked(solution, 5, lookup, constraints);
+
+        ProductivityHourFillGuard.Enforce(solution, constraints);
+
+        var nonProjectAfter = Worked(solution, 9, lookup, constraints);
+        var projectAfter = Worked(solution, 5, lookup, constraints);
+
+        Assert.True(
+            nonProjectAfter > nonProjectBefore + 0.5 || projectAfter < projectBefore - 0.5,
+            $"Expected transfer toward non-project. nonProject {nonProjectBefore}->{nonProjectAfter}, project {projectBefore}->{projectAfter}");
+
+        var deficitBefore = 156 - nonProjectBefore;
+        var deficitAfter = 156 - nonProjectAfter;
+        var excessBefore = projectBefore - 70;
+        var excessAfter = projectAfter - 70;
+        Assert.True(
+            deficitAfter + 0.01 < deficitBefore || excessAfter + 0.01 < excessBefore,
+            $"Cross-tier balance should reduce non-project deficit or project excess. deficit {deficitBefore:F1}->{deficitAfter:F1}, excess {excessBefore:F1}->{excessAfter:F1}");
+    }
+
+    [Fact]
     public void ProductivityHourFillGuard_DoesNotThrowWhenMixedProjectAndNonProjectPersonnel()
     {
         var start = new DateTime(2026, 8, 1);

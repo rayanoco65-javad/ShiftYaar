@@ -547,11 +547,7 @@ public static class MorningEveningBalanceGuard
         {
             var worked = ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
                 projected, lookup, constraints.IsHoliday);
-            var maxAllowed = ProductivityWorkedHoursCalculator.GetMaxAllowedHours(
-                user.ProductivityRequiredHours,
-                user.OvertimeConsent,
-                user.MaxMonthlyOvertimeHours);
-            if (worked > maxAllowed + 0.25)
+            if (ProjectPersonnelProductivityPriority.WouldExceedSchedulingCap(user, worked))
             {
                 return false;
             }

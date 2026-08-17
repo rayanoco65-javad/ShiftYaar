@@ -427,7 +427,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private double CalculateProductivityShortfallPenalty(ShiftSolution solution)
         {
-            const double tolerance = 2.0;
+            const double peerTolerance = 2.0;
+            const double nonProjectTolerance = ProjectPersonnelProductivityPriority.CrossTierToleranceHours;
             double penalty = 0;
             foreach (var user in _constraints.UserConstraints)
             {
@@ -444,6 +445,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(user.UserId));
                 var required = (double)user.ProductivityRequiredHours.Value;
                 var shortfall = required - worked;
+                var tolerance = ProjectPersonnelProductivityPriority.IsProjectPersonnel(user)
+                    ? peerTolerance
+                    : nonProjectTolerance;
                 if (shortfall <= tolerance)
                 {
                     continue;
@@ -467,7 +471,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private double CalculateProductivityOvertimePenalty(ShiftSolution solution)
         {
-            const double tolerance = 2.0;
+            const double peerTolerance = 2.0;
+            const double crossTierTolerance = ProjectPersonnelProductivityPriority.CrossTierToleranceHours;
+
             double penalty = 0;
             foreach (var user in _constraints.UserConstraints)
             {
@@ -484,6 +490,24 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(user.UserId));
                 var required = (double)user.ProductivityRequiredHours.Value;
                 var excess = worked - required;
+                var tolerance = peerTolerance;
+
+                if (ProjectPersonnelProductivityPriority.IsProjectPersonnel(user))
+                {
+                    if (excess <= crossTierTolerance)
+                    {
+                        continue;
+                    }
+
+                    penalty += excess * excess * 40;
+                    if (excess > 5)
+                    {
+                        penalty += excess * 20;
+                    }
+
+                    continue;
+                }
+
                 if (excess <= tolerance)
                 {
                     continue;
@@ -1212,10 +1236,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     !isDailyFixedStaff)
                 {
                     var workedHours = CalculateUserWorkedHours(userAssignments);
-                    var maxAllowed = ProductivityWorkedHoursCalculator.GetMaxAllowedHours(
-                        userConstraint.ProductivityRequiredHours,
-                        userConstraint.OvertimeConsent,
-                        userConstraint.MaxMonthlyOvertimeHours);
+                    var maxAllowed = ProjectPersonnelProductivityPriority.GetMaxAllowedSchedulingHours(userConstraint);
                     if (workedHours > maxAllowed + 0.25)
                     {
                         return false;
@@ -1799,6 +1820,31 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
             }
 
+            if (solution != null &&
+                _constraints.HardRules.EnforceProductivityHours &&
+                user.IncludedInProductivityPlan &&
+                user.ProductivityRequiredHours.HasValue)
+            {
+                var shiftReq = GetShiftRequirement(shiftLabel, user.SpecialtyId);
+                if (shiftReq != null)
+                {
+                    var projected = solution.GetUserAllAssignments(user.UserId).ToList();
+                    projected.Add(new SaShiftAssignment
+                    {
+                        UserId = user.UserId,
+                        ShiftId = shiftReq.ShiftId,
+                        Date = date,
+                        ShiftLabel = shiftLabel,
+                        IsOnCall = false
+                    });
+                    var worked = CalculateUserWorkedHours(projected);
+                    if (ProjectPersonnelProductivityPriority.WouldExceedSchedulingCap(user, worked))
+                    {
+                        return false;
+                    }
+                }
+            }
+
             return true;
         }
 
@@ -1907,6 +1953,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     ? HolidayMorningEveningFairnessGuard.CountHolidayLabel(solution, _constraints, u.UserId, shiftLabel)
                     : CountUserLabelShifts(solution, u.UserId, shiftLabel))
                 .ThenBy(u => CountUserLabelShifts(solution, u.UserId, shiftLabel))
+                .ThenBy(u => ProjectPersonnelProductivityPriority.FillTier(u))
+                .ThenBy(u => ProjectPersonnelAtRequiredCapPriority(solution, u))
                 .ThenBy(u => CountConsecutiveWorkdaysEndingAt(solution, u.UserId, date.Date.AddDays(-1)))
                 .ThenBy(u => CountWorkdaysInWeek(solution, u.UserId, date))
                 .ThenBy(u => CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)))
@@ -2160,10 +2208,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             var workedHours = CalculateUserWorkedHours(assignments);
-            var maxAllowed = ProductivityWorkedHoursCalculator.GetMaxAllowedHours(
-                userConstraint.ProductivityRequiredHours,
-                userConstraint.OvertimeConsent,
-                userConstraint.MaxMonthlyOvertimeHours);
+            var maxAllowed = ProjectPersonnelProductivityPriority.GetMaxAllowedSchedulingHours(userConstraint);
             if (workedHours <= maxAllowed + 0.25)
             {
                 return 0;
@@ -2300,6 +2345,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => !solution.HasAssignment(u.UserId, slot.ShiftId, slot.Date))
                 .Where(u => !slot.RequireMale || u.Gender == UserGender.Male)
                 .Where(u => !slot.RequireFemale || u.Gender == UserGender.Female)
+                .Where(u => !ProjectPersonnelAtRequiredCap(u, solution))
                 .OrderBy(u => ProjectPersonnelProductivityPriority.FillTier(u))
                 .ThenByDescending(u => GetProductivityHourDeficit(u, solution))
                 .ThenBy(u => CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)))
@@ -2342,8 +2388,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return;
             }
 
+            var crossTier = ProjectPersonnelProductivityPriority.CrossTierToleranceHours;
             var receiver = productivityUsers
-                .Where(u => GetProductivityHourDeficit(u, solution) > 2)
+                .Where(u => GetProductivityHourDeficit(u, solution) > crossTier)
                 .OrderBy(u => ProjectPersonnelProductivityPriority.FillTier(u))
                 .ThenByDescending(u => GetProductivityHourDeficit(u, solution))
                 .FirstOrDefault();
@@ -2352,10 +2399,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return;
             }
 
+            var surplusTolerance = ProjectPersonnelProductivityPriority.IsProjectPersonnel(receiver)
+                ? 2.0
+                : crossTier;
             var donor = productivityUsers
                 .Where(u => u.UserId != receiver.UserId)
-                .Where(u => GetProductivityHourSurplus(u, solution) > 2)
-                .OrderByDescending(u => GetProductivityHourSurplus(u, solution))
+                .Where(u => GetProductivityHourSurplus(u, solution, surplusTolerance) > crossTier)
+                .OrderByDescending(u => GetProductivityHourSurplus(u, solution, surplusTolerance))
                 .ThenByDescending(u => ProjectPersonnelProductivityPriority.FillTier(u))
                 .FirstOrDefault();
             if (donor == null)
@@ -2536,9 +2586,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             return Math.Max(0, (double)user.ProductivityRequiredHours.Value - worked);
         }
 
-        private double GetProductivityHourSurplus(UserConstraint user, ShiftSolution solution)
+        private double GetProductivityHourSurplus(
+            UserConstraint user,
+            ShiftSolution solution,
+            double tolerance = 2.0)
         {
-            const double tolerance = 2.0;
             if (!user.IncludedInProductivityPlan || !user.ProductivityRequiredHours.HasValue)
             {
                 return CalculateUserWorkedHours(solution.GetUserAllAssignments(user.UserId));
@@ -2552,6 +2604,28 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             user.IncludedInProductivityPlan && user.ProductivityRequiredHours.HasValue && user.ProductivityRequiredHours > 0
                 ? (double)user.ProductivityRequiredHours.Value
                 : 1.0;
+
+        private int ProjectPersonnelAtRequiredCapPriority(ShiftSolution solution, UserConstraint user)
+        {
+            if (!ProjectPersonnelProductivityPriority.IsProjectPersonnel(user))
+            {
+                return 0;
+            }
+
+            var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(user.UserId));
+            return ProjectPersonnelProductivityPriority.IsAtOrAboveRequiredHours(user, worked) ? 1 : 0;
+        }
+
+        private bool ProjectPersonnelAtRequiredCap(UserConstraint user, ShiftSolution solution)
+        {
+            if (!ProjectPersonnelProductivityPriority.IsProjectPersonnel(user))
+            {
+                return false;
+            }
+
+            var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(user.UserId));
+            return ProjectPersonnelProductivityPriority.IsAtOrAboveRequiredHours(user, worked);
+        }
 
         private double GetShiftEffectiveHours(SaShiftAssignment assignment)
         {
