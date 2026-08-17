@@ -87,6 +87,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public WorkingHoursCalculationResultDto? ProductivitySnapshot { get; set; }
         public decimal HardshipPercent { get; set; }
         public bool OvertimeConsent { get; set; }
+        /// <summary>پرسنل طرحی؛ در پر کردن موظفی بعد از غیرطرحی اولویت دارد.</summary>
+        public bool? IsProjectPersonnel { get; set; }
         public double MaxMonthlyOvertimeHours { get; set; } = ProductivityWorkedHoursCalculator.DefaultMaxMonthlyOvertimeHours;
         public double MaxConsecutiveWorkHours { get; set; } = ProductivityWorkedHoursCalculator.DefaultMaxConsecutiveWorkHours;
 

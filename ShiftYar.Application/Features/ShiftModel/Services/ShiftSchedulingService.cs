@@ -1704,6 +1704,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         TwoShiftRotationPattern = user.TwoShiftRotationPattern,
                         HardshipPercent = user.HardshipPercent ?? 0m,
                         OvertimeConsent = user.OvertimeConsent ?? false,
+                        IsProjectPersonnel = user.IsProjectPersonnel,
                         DateOfEmployment = DateConverter.NormalizeEmploymentDate(user.DateOfEmployment),
                         ExperienceYears = ResolveExperienceYears(user, constraints.StartDate),
                         ExactNightShiftCount = monthQuota?.ExactNightShiftCount,

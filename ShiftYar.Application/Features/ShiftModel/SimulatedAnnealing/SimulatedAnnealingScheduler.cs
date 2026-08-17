@@ -449,15 +449,16 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     continue;
                 }
 
-                penalty += shortfall * shortfall;
+                var tierWeight = ProjectPersonnelProductivityPriority.IsProjectPersonnel(user) ? 1.0 : 2.5;
+                penalty += shortfall * shortfall * tierWeight;
                 if (shortfall > 10)
                 {
-                    penalty += shortfall * 8;
+                    penalty += shortfall * 8 * tierWeight;
                 }
 
                 if (shortfall > 15)
                 {
-                    penalty += shortfall * 12;
+                    penalty += shortfall * 12 * tierWeight;
                 }
             }
 
@@ -2299,7 +2300,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => !solution.HasAssignment(u.UserId, slot.ShiftId, slot.Date))
                 .Where(u => !slot.RequireMale || u.Gender == UserGender.Male)
                 .Where(u => !slot.RequireFemale || u.Gender == UserGender.Female)
-                .OrderBy(u => GetProductivityHourDeficit(u, solution))
+                .OrderBy(u => ProjectPersonnelProductivityPriority.FillTier(u))
+                .ThenByDescending(u => GetProductivityHourDeficit(u, solution))
                 .ThenBy(u => CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)))
                 .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
                 .ThenBy(_ => _random.Next())
@@ -2341,8 +2343,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             var receiver = productivityUsers
-                .OrderByDescending(u => GetProductivityHourDeficit(u, solution))
-                .FirstOrDefault(u => GetProductivityHourDeficit(u, solution) > 2);
+                .Where(u => GetProductivityHourDeficit(u, solution) > 2)
+                .OrderBy(u => ProjectPersonnelProductivityPriority.FillTier(u))
+                .ThenByDescending(u => GetProductivityHourDeficit(u, solution))
+                .FirstOrDefault();
             if (receiver == null)
             {
                 return;
@@ -2350,8 +2354,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             var donor = productivityUsers
                 .Where(u => u.UserId != receiver.UserId)
+                .Where(u => GetProductivityHourSurplus(u, solution) > 2)
                 .OrderByDescending(u => GetProductivityHourSurplus(u, solution))
-                .FirstOrDefault(u => GetProductivityHourSurplus(u, solution) > 2);
+                .ThenByDescending(u => ProjectPersonnelProductivityPriority.FillTier(u))
+                .FirstOrDefault();
             if (donor == null)
             {
                 return;

@@ -604,6 +604,8 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - `ProductivityRequiredHoursByUser` را «سقف مطلق» برچسب نزنید؛ برچسب درست: **ساعت موظفی / هدف ماهانه**.
 - برای تفسیر overtime، `OvertimeConsent` کاربر را هم در نظر بگیرید (در صورت نمایش جزئیات).
 
+**اولویت پر کردن موظفی در شیفت‌بندی:** کاربران با `IsProjectPersonnel = false` (یا `null`) **قبل از** پرسنل طرحی (`IsProjectPersonnel = true`) به ساعت موظفی می‌رسند. اگر ظرفیت ماه محدود باشد، در گزارش Optimize ممکن است غیرطرحی‌ها نسبت تحقق بالاتری داشته باشند.
+
 ## 6. پیشنهاد UI برای فرم کاربر
 
 در فرم ایجاد/ویرایش کاربر این فیلدها بهتر است کنار هم نمایش داده شوند:
@@ -611,6 +613,8 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - `IncludedProductivityPlan`
 - `HardshipPercent`
 - `OvertimeConsent`
+- `IsProjectPersonnel` — پرسنل طرحی (`true`) / غیرطرحی (`false` یا خالی)
+- `MaxProductivityRequiredHours` — حداکثر ساعت موظفی (دستی؛ اختیاری)
 - `ShiftType`
 - `ShiftSubType`
 - `TwoShiftRotationPattern`

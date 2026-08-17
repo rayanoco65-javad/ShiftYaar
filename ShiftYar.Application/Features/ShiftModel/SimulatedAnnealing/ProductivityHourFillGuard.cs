@@ -27,7 +27,7 @@ public static class ProductivityHourFillGuard
             return;
         }
 
-        RunBalanceCycle(solution, constraints, lookup, productivityUsers);
+        RunProductivityFillPhases(solution, constraints, lookup, productivityUsers);
     }
 
     /// <summary>
@@ -44,7 +44,7 @@ public static class ProductivityHourFillGuard
 
         for (var pass = 0; pass < FinalBalancePasses; pass++)
         {
-            RunBalanceCycle(solution, constraints, lookup, productivityUsers);
+            RunProductivityFillPhases(solution, constraints, lookup, productivityUsers);
         }
 
         ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
@@ -57,23 +57,49 @@ public static class ProductivityHourFillGuard
             .Where(u => u.IncludedInProductivityPlan && u.ProductivityRequiredHours.HasValue)
             .ToList();
 
-    private static void RunBalanceCycle(
+    private static void RunProductivityFillPhases(
         ShiftSolution solution,
         ShiftConstraints constraints,
         IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
         List<UserConstraint> productivityUsers)
     {
-        BalanceByReassignment(solution, constraints, lookup, productivityUsers);
-        FillUnderstaffedSlots(solution, constraints, lookup, productivityUsers);
-        BalanceMorningEveningPeers(solution, constraints, lookup, productivityUsers);
-        BalanceShiftLabelOverload(solution, constraints, lookup, productivityUsers);
-        BalanceByReassignment(solution, constraints, lookup, productivityUsers);
+        var nonProject = productivityUsers
+            .Where(u => !ProjectPersonnelProductivityPriority.IsProjectPersonnel(u))
+            .ToList();
+        var project = productivityUsers
+            .Where(u => ProjectPersonnelProductivityPriority.IsProjectPersonnel(u))
+            .ToList();
+
+        if (nonProject.Count > 0)
+        {
+            RunBalanceCycle(solution, constraints, lookup, nonProject, productivityUsers);
+        }
+
+        if (project.Count > 0)
+        {
+            RunBalanceCycle(solution, constraints, lookup, project, productivityUsers);
+        }
+    }
+
+    private static void RunBalanceCycle(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        List<UserConstraint> targetUsers,
+        List<UserConstraint> productivityUsers)
+    {
+        BalanceByReassignment(solution, constraints, lookup, targetUsers, productivityUsers);
+        FillUnderstaffedSlots(solution, constraints, lookup, targetUsers);
+        BalanceMorningEveningPeers(solution, constraints, lookup, targetUsers);
+        BalanceShiftLabelOverload(solution, constraints, lookup, targetUsers, productivityUsers);
+        BalanceByReassignment(solution, constraints, lookup, targetUsers, productivityUsers);
     }
 
     private static void BalanceByReassignment(
         ShiftSolution solution,
         ShiftConstraints constraints,
         IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        List<UserConstraint> targetUsers,
         List<UserConstraint> productivityUsers)
     {
         for (var pass = 0; pass < ReassignmentPasses; pass++)
@@ -85,12 +111,14 @@ public static class ProductivityHourFillGuard
             var donor = productivityUsers
                 .Where(u => GetSurplusHours(u, hours[u.UserId]) > 0)
                 .OrderByDescending(u => GetSurplusHours(u, hours[u.UserId]))
+                .ThenByDescending(u => ProjectPersonnelProductivityPriority.FillTier(u))
                 .ThenByDescending(u => hours[u.UserId])
                 .FirstOrDefault();
 
-            var receiver = productivityUsers
+            var receiver = targetUsers
                 .Where(u => GetDeficit(u, hours[u.UserId]) > DeficitToleranceHours)
-                .OrderByDescending(u => GetDeficit(u, hours[u.UserId]))
+                .OrderBy(u => ProjectPersonnelProductivityPriority.FillTier(u))
+                .ThenByDescending(u => GetDeficit(u, hours[u.UserId]))
                 .FirstOrDefault();
 
             if (donor == null || receiver == null)
@@ -222,14 +250,15 @@ public static class ProductivityHourFillGuard
         ShiftSolution solution,
         ShiftConstraints constraints,
         IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
-        List<UserConstraint> productivityUsers)
+        List<UserConstraint> targetUsers)
     {
         var allDates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
             .Select(i => constraints.StartDate.Date.AddDays(i))
             .ToList();
 
-        foreach (var user in productivityUsers.OrderByDescending(u =>
-                     GetDeficit(u, CalculateWorked(solution, u.UserId, lookup, constraints))))
+        foreach (var user in targetUsers
+                     .OrderBy(u => ProjectPersonnelProductivityPriority.FillTier(u))
+                     .ThenByDescending(u => GetDeficit(u, CalculateWorked(solution, u.UserId, lookup, constraints))))
         {
             for (var attempt = 0; attempt < allDates.Count * 2; attempt++)
             {
@@ -396,13 +425,13 @@ public static class ProductivityHourFillGuard
         ShiftSolution solution,
         ShiftConstraints constraints,
         IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
-        List<UserConstraint> productivityUsers)
+        List<UserConstraint> targetUsers)
     {
         foreach (var label in new[] { ShiftLabel.Morning, ShiftLabel.Evening })
         {
             for (var pass = 0; pass < 24; pass++)
             {
-                var ranked = productivityUsers
+                var ranked = targetUsers
                     .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, label))
                     .Select(u => (
                         User: u,
@@ -476,13 +505,14 @@ public static class ProductivityHourFillGuard
         ShiftSolution solution,
         ShiftConstraints constraints,
         IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        List<UserConstraint> targetUsers,
         List<UserConstraint> productivityUsers)
     {
         foreach (var label in new[] { ShiftLabel.Evening, ShiftLabel.Morning })
         {
             for (var pass = 0; pass < 32; pass++)
             {
-                var snapshot = productivityUsers
+                var snapshot = targetUsers
                     .Where(u => ShiftEligibilityResolver.IsLabelAllowed(u.AllowedShiftLabels, label))
                     .Select(u => (
                         User: u,
@@ -525,10 +555,12 @@ public static class ProductivityHourFillGuard
                     .Where(x => x.surplus > 0 || x.Count > x.fair + 1.5)
                     .OrderByDescending(x => x.Count - x.fair)
                     .ThenByDescending(x => x.surplus)
+                    .ThenByDescending(x => ProjectPersonnelProductivityPriority.FillTier(x.User))
                     .FirstOrDefault();
                 var receiverEntry = scored
                     .Where(x => x.deficit > DeficitToleranceHours || x.Count < x.fair - 1)
-                    .OrderByDescending(x => x.deficit)
+                    .OrderBy(x => ProjectPersonnelProductivityPriority.FillTier(x.User))
+                    .ThenByDescending(x => x.deficit)
                     .ThenBy(x => x.Count)
                     .FirstOrDefault();
 

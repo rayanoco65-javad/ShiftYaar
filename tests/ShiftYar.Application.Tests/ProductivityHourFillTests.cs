@@ -260,6 +260,67 @@ public class ProductivityHourFillTests
         ShiftYar.Application.Common.Utilities.ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
             solution.GetUserAllAssignments(userId), lookup, constraints.IsHoliday);
 
+    [Fact]
+    public void ProductivityHourFillGuard_PrefersNonProjectPersonnelBeforeProjectPersonnel()
+    {
+        var start = new DateTime(2026, 8, 1);
+        var nonProject = MakeUser(1, requiredHours: 120);
+        nonProject.IsProjectPersonnel = false;
+        var projectReceiver = MakeUser(2, requiredHours: 120);
+        projectReceiver.IsProjectPersonnel = true;
+        var projectDonor = MakeUser(3, requiredHours: 120);
+        projectDonor.IsProjectPersonnel = true;
+
+        var users = new List<UserConstraint> { nonProject, projectReceiver, projectDonor };
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(20),
+            UserConstraints = users,
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning),
+                Shift(2, ShiftLabel.Evening),
+                Shift(3, ShiftLabel.Night)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true,
+                EnforceProductivityHours = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 2 }
+        };
+
+        var solution = new ShiftSolution();
+        for (var i = 0; i < 10; i++)
+        {
+            solution.AddAssignment(3, 3, start.AddDays(i * 2), ShiftLabel.Night, false);
+            solution.AddAssignment(3, 1, start.AddDays(i * 2 + 1), ShiftLabel.Morning, false);
+        }
+
+        solution.AddAssignment(1, 1, start.AddDays(1), ShiftLabel.Morning, false);
+        solution.AddAssignment(2, 1, start.AddDays(2), ShiftLabel.Morning, false);
+
+        var lookup = ShiftYar.Application.Common.Utilities.ProductivityWorkedHoursCalculator
+            .BuildShiftInfoLookup(constraints.ShiftRequirements);
+
+        ProductivityHourFillGuard.Enforce(solution, constraints);
+
+        var nonProjectWorked = Worked(solution, 1, lookup, constraints);
+        var projectWorked = Worked(solution, 2, lookup, constraints);
+        var nonProjectRatio = nonProjectWorked / 120.0;
+        var projectRatio = projectWorked / 120.0;
+
+        Assert.True(
+            nonProjectRatio >= projectRatio - 0.05,
+            $"Non-project ratio ({nonProjectRatio:P0}) should be at least project ratio ({projectRatio:P0}).");
+        Assert.True(
+            nonProjectWorked > projectWorked || nonProjectRatio > 0.5,
+            "Non-project personnel should receive priority when filling required hours.");
+    }
+
     private static UserConstraint MakeUser(int id, decimal requiredHours, int? exactNights = null) => new()
     {
         UserId = id,
