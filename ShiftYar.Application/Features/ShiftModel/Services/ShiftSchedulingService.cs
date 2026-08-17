@@ -1936,6 +1936,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                             {
                                 uc.UnavailableDates.Add(date);
                                 appliedOffFull++;
+                                ApprovedOffNightBeforeRules.ApplyNightBeforeOffConstraint(
+                                    uc, date, departmentShifts, ResolveDepartmentShiftLabel);
                                 _logger.LogInformation(
                                     "LoadConstraints: OFF-FullDay UserId={UserId} Date={Date:yyyy-MM-dd} RequestId={RequestId}",
                                     uc.UserId, date, req.Id);
@@ -1984,6 +1986,13 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                             {
                                 uc.UnavailableShiftSlots.Add(slot);
                                 appliedOffSlot++;
+                                if (ApprovedOffNightBeforeRules.RequiresNightBeforeBlock(
+                                        req.RequestType.Value, resolvedLabel))
+                                {
+                                    ApprovedOffNightBeforeRules.ApplyNightBeforeOffConstraint(
+                                        uc, date, departmentShifts, ResolveDepartmentShiftLabel);
+                                }
+
                                 _logger.LogInformation(
                                     "LoadConstraints: OFF-Slot UserId={UserId} Date={Date:yyyy-MM-dd} Label={Label} ShiftId={ShiftId} RequestId={RequestId}",
                                     uc.UserId, date, slot.ShiftLabel, slot.ShiftId, req.Id);
