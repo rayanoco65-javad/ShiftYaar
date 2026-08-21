@@ -7,6 +7,7 @@ using ShiftYar.Application.Features.UserModel.Filters;
 using ShiftYar.Application.Interfaces.Persistence;
 using ShiftYar.Application.Interfaces.UserModel;
 using ShiftYar.Domain.Entities.ShiftDateModel;
+using ShiftYar.Domain.Entities.ShiftModel;
 using ShiftYar.Domain.Entities.ShiftRequestModel;
 using ShiftYar.Domain.Entities.UserModel;
 using ShiftYar.Domain.Enums.ShiftRequestModel;
@@ -25,6 +26,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
         private readonly IEfRepository<UserMonthlyNightQuota> _repository;
         private readonly IEfRepository<User> _userRepository;
         private readonly IEfRepository<ShiftDate> _shiftDateRepository;
+        private readonly IEfRepository<Shift> _shiftRepository;
         private readonly IEfRepository<ShiftRequest> _shiftRequestRepository;
         private readonly ILogger<UserMonthlyNightQuotaService> _logger;
         private readonly IHttpContextAccessor _httpContextAccessor;
@@ -33,6 +35,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
             IEfRepository<UserMonthlyNightQuota> repository,
             IEfRepository<User> userRepository,
             IEfRepository<ShiftDate> shiftDateRepository,
+            IEfRepository<Shift> shiftRepository,
             IEfRepository<ShiftRequest> shiftRequestRepository,
             ILogger<UserMonthlyNightQuotaService> logger,
             IHttpContextAccessor httpContextAccessor)
@@ -40,6 +43,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
             _repository = repository;
             _userRepository = userRepository;
             _shiftDateRepository = shiftDateRepository;
+            _shiftRepository = shiftRepository;
             _shiftRequestRepository = shiftRequestRepository;
             _logger = logger;
             _httpContextAccessor = httpContextAccessor;
@@ -343,7 +347,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
             int persianMonth,
             IReadOnlyDictionary<int, (int? Night, int? Holiday)> overrides)
         {
-            var capacity = await TryGetMonthNightCapacityAsync(persianYear, persianMonth);
+            var capacity = await TryGetMonthNightCapacityAsync(departmentId, persianYear, persianMonth);
             if (capacity.Error != null)
             {
                 return capacity.Error;
@@ -408,19 +412,21 @@ namespace ShiftYar.Application.Features.UserModel.Services
             var totalNightQuota = projectedNight.Values.Sum();
             var totalHolidayQuota = projectedHoliday.Values.Sum();
 
-            if (totalNightQuota > capacity.NightDays)
+            if (totalNightQuota > capacity.TotalNightSlots)
             {
                 return
-                    $"مجموع سهمیه شیفت شب کاربران ({totalNightQuota}) از تعداد شب‌های ماه {persianYear}/{persianMonth:00} " +
-                    $"({capacity.NightDays} شب بر اساس ShiftDates) بیشتر است. لطفاً مقادیر را کاهش دهید.";
+                    $"مجموع سهمیه شیفت شب کاربران ({totalNightQuota}) از ظرفیت ماه {persianYear}/{persianMonth:00} " +
+                    $"({capacity.TotalNightSlots} شیفت شب = {capacity.NightDays} شب × {capacity.HeadcountPerRegularNight} نفر " +
+                    $"بر اساس نیازمندی تخصص شیفت شب) بیشتر است. لطفاً مقادیر را کاهش دهید.";
             }
 
-            if (totalHolidayQuota > capacity.HolidayWeekendNightDays)
+            if (totalHolidayQuota > capacity.HolidayWeekendNightSlots)
             {
                 return
-                    $"مجموع سهمیه شب تعطیل/آخرهفته کاربران ({totalHolidayQuota}) از تعداد شب‌های تعطیل و آخر هفته " +
-                    $"ماه {persianYear}/{persianMonth:00} ({capacity.HolidayWeekendNightDays} شب بر اساس ShiftDates) بیشتر است. " +
-                    "لطفاً مقادیر را کاهش دهید.";
+                    $"مجموع سهمیه شب تعطیل/آخرهفته کاربران ({totalHolidayQuota}) از ظرفیت شب‌های تعطیل و آخر هفته " +
+                    $"ماه {persianYear}/{persianMonth:00} ({capacity.HolidayWeekendNightSlots} شیفت شب = " +
+                    $"{capacity.HolidayWeekendNightDays} شب × {capacity.HeadcountPerHolidayNight} نفر " +
+                    $"بر اساس نیازمندی تخصص شیفت شب) بیشتر است. لطفاً مقادیر را کاهش دهید.";
             }
 
             return null;
@@ -489,7 +495,15 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 persianMonth);
         }
 
-        private async Task<(int NightDays, int HolidayWeekendNightDays, string? Error)> TryGetMonthNightCapacityAsync(
+        private async Task<(
+            int TotalNightSlots,
+            int HolidayWeekendNightSlots,
+            int NightDays,
+            int HolidayWeekendNightDays,
+            int HeadcountPerRegularNight,
+            int HeadcountPerHolidayNight,
+            string? Error)> TryGetMonthNightCapacityAsync(
+            int departmentId,
             int persianYear,
             int persianMonth)
         {
@@ -511,14 +525,14 @@ namespace ShiftYar.Application.Features.UserModel.Services
 
             if (monthDates.Count == 0)
             {
-                return (0, 0,
+                return (0, 0, 0, 0, 0, 0,
                     $"در ShiftDates برای ماه شمسی {persianYear}/{persianMonth:00} هیچ روزی ثبت نشده است. " +
                     "ابتدا تقویم را تکمیل کنید.");
             }
 
             if (monthDates.Count < daysInMonth)
             {
-                return (0, 0,
+                return (0, 0, 0, 0, 0, 0,
                     $"تقویم ShiftDates برای ماه {persianYear}/{persianMonth:00} ناقص است " +
                     $"({monthDates.Count} از {daysInMonth} روز). ابتدا تقویم را تکمیل کنید.");
             }
@@ -531,7 +545,21 @@ namespace ShiftYar.Application.Features.UserModel.Services
             var (nightDays, holidayWeekendNights) =
                 PersianMonthNightCalendar.CountNightCapacities(monthDates, holidayDates);
 
-            return (nightDays, holidayWeekendNights, null);
+            var (departmentShifts, _) = await _shiftRepository.GetByFilterAsync(
+                new SimpleFilter<Shift>(s => s.DepartmentId == departmentId),
+                "RequiredSpecialties");
+
+            var (totalNightSlots, holidayWeekendNightSlots, headcountPerRegularNight, headcountPerHolidayNight) =
+                DepartmentNightQuotaCapacityCalculator.Calculate(departmentShifts, monthDates, holidayDates);
+
+            return (
+                totalNightSlots,
+                holidayWeekendNightSlots,
+                nightDays,
+                holidayWeekendNights,
+                headcountPerRegularNight,
+                headcountPerHolidayNight,
+                null);
         }
 
         private static UserMonthlyNightQuotaDtoGet MapToDto(UserMonthlyNightQuota entity) => new()
