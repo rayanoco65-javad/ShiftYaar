@@ -34,5 +34,9 @@ namespace ShiftYar.Application.DTOs.UserModel
 
         [Range(0, 31)]
         public int? ExactHolidayWeekendNightShiftCount { get; set; }
+
+        public bool? NightFallbackParticipation { get; set; }
+
+        public bool? HolidayWeekendNightFallbackParticipation { get; set; }
     }
 }

@@ -185,6 +185,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             // سهمیه دقیق شب را قبل از پر کردن ظرفیت روزانه قفل کن
             ExactNightQuotaGuard.Enforce(solution, _constraints);
+            ExactDayShiftQuotaGuard.EnforceAll(solution, _constraints);
 
             // تولید انتساب‌های تصادفی اولیه
             var availableUsers = _constraints.UserConstraints.ToList();
@@ -201,7 +202,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                             .Where(u => u.SpecialtyId == specialtyReq.SpecialtyId)
                             .Where(u => IsUserAvailableForShift(u, date, shiftReq.ShiftLabel, solution))
                             .Where(u => u.IsActive)
+                            .Where(u => NightQuotaEligibility.CanAssignInCoverageFill(
+                                solution, _constraints, u, date))
                             .ToList();
+
                         AssignRequiredPersonnel(solution, eligibleUsers, shiftReq, date, specialtyReq);
                     }
                 }
@@ -216,22 +220,19 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         var eligibleUsers = availableUsers
                             .Where(u => u.SpecialtyId == specialtyReq.SpecialtyId)
                             .Where(u => IsUserAvailableForShift(u, date, shiftReq.ShiftLabel, solution))
-                            .Where(u => u.IsActive) // فقط کاربران فعال
+                            .Where(u => u.IsActive)
+                            .Where(u => DayShiftQuotaEligibility.CanAssignInCoverageFill(
+                                solution, _constraints, u, shiftReq.ShiftLabel, date))
                             .ToList();
 
-                        // انتساب نیروهای مورد نیاز
                         AssignRequiredPersonnel(solution, eligibleUsers, shiftReq, date, specialtyReq);
                     }
                 }
             }
 
             ExactNightQuotaGuard.Enforce(solution, _constraints);
-            ShiftCoverageGuard.Enforce(solution, _constraints);
-            ProductivityHourFillGuard.Enforce(solution, _constraints);
-            HolidayMorningEveningFairnessGuard.Enforce(solution, _constraints);
-            ShiftCoverageGuard.Enforce(solution, _constraints);
+            ExactDayShiftQuotaGuard.EnforceAll(solution, _constraints);
 
-            // محاسبه امتیاز راه‌حل
             solution.Score = CalculateSolutionScore(solution);
 
             return solution;
@@ -1467,10 +1468,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftEligibilityGuard.StripIneligibleAssignments(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
+            ExactDayShiftQuotaGuard.EnforceAll(solution, _constraints);
             // پوشش ظرفیت اجباری اولویت مطلق دارد (عدالت نرم نباید جای خالی بسازد)
             ShiftCoverageGuard.Enforce(solution, _constraints);
             ProductivityHourFillGuard.Enforce(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
+            ExactDayShiftQuotaGuard.EnforceAll(solution, _constraints);
             HolidayMorningEveningFairnessGuard.Enforce(solution, _constraints);
             MorningEveningBalanceGuard.Enforce(solution, _constraints);
             ShiftCoverageGuard.Enforce(solution, _constraints);
@@ -1480,11 +1483,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ProductivityHourFillGuard.Enforce(solution, _constraints);
             MorningEveningBalanceGuard.Enforce(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
+            ExactDayShiftQuotaGuard.EnforceAll(solution, _constraints);
             ShiftCoverageGuard.Enforce(solution, _constraints);
 
             // پس از Coverage/Fairness: سهمیه شب، سپس تعادل ظرفیت و ForceApply نهایی (ON مطلق).
             ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
+            ExactDayShiftQuotaGuard.EnforceAll(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             ShiftCoverageGuard.EnforceCapacityCeiling(solution, _constraints);
@@ -1502,6 +1507,22 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             solution.Violations.AddRange(AdjacentShiftRestGuard.GetViolations(solution, _constraints));
             solution.Violations.AddRange(DailyDuplicateAssignmentGuard.GetViolations(solution, _constraints));
             solution.Violations.AddRange(GetExactNightQuotaViolations(solution));
+            solution.Violations.AddRange(GetExactDayShiftQuotaViolations(solution));
+            solution.Violations.AddRange(ExactDayShiftQuotaGuard.GetFallbackPoolWarnings(solution, _constraints));
+        }
+
+        public bool AreExactDayShiftQuotasSatisfied(ShiftSolution solution, out List<string> unmet)
+        {
+            unmet = GetExactDayShiftQuotaViolations(solution);
+            return unmet.Count == 0;
+        }
+
+        private List<string> GetExactDayShiftQuotaViolations(ShiftSolution solution)
+        {
+            var violations = new List<string>();
+            violations.AddRange(ExactDayShiftQuotaGuard.GetViolations(solution, _constraints, ShiftLabel.Morning));
+            violations.AddRange(ExactDayShiftQuotaGuard.GetViolations(solution, _constraints, ShiftLabel.Evening));
+            return violations;
         }
 
         public bool AreExactNightQuotasSatisfied(ShiftSolution solution, out List<string> unmet)

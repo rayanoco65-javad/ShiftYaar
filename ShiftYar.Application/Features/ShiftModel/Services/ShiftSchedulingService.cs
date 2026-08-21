@@ -37,6 +37,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
     {
         private readonly IEfRepository<User> _userRepository;
         private readonly IEfRepository<UserMonthlyNightQuota> _monthlyNightQuotaRepository;
+        private readonly IEfRepository<UserMonthlyDayShiftQuota> _monthlyDayShiftQuotaRepository;
         private readonly IEfRepository<Shift> _shiftRepository;
         private readonly IEfRepository<Department> _departmentRepository;
         private readonly IEfRepository<DepartmentSchedulingSettings> _deptSettingsRepository;
@@ -55,6 +56,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         public ShiftSchedulingService(
             IEfRepository<User> userRepository,
             IEfRepository<UserMonthlyNightQuota> monthlyNightQuotaRepository,
+            IEfRepository<UserMonthlyDayShiftQuota> monthlyDayShiftQuotaRepository,
             IEfRepository<Shift> shiftRepository,
             IEfRepository<Department> departmentRepository,
             IEfRepository<DepartmentSchedulingSettings> deptSettingsRepository,
@@ -72,6 +74,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         {
             _userRepository = userRepository;
             _monthlyNightQuotaRepository = monthlyNightQuotaRepository;
+            _monthlyDayShiftQuotaRepository = monthlyDayShiftQuotaRepository;
             _shiftRepository = shiftRepository;
             _departmentRepository = departmentRepository;
             _deptSettingsRepository = deptSettingsRepository;
@@ -852,6 +855,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             scheduler.ApplyMandatoryConstraints(solution);
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
+            EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
             EnsureHardDailyRulesOrThrow(solution, constraints);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
 
@@ -1237,6 +1241,17 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             {
                 throw new InvalidOperationException(
                     "سهمیه حداقل شیفت شب برای همه کاربران اعمال نشد:\n" + string.Join("\n", unmet));
+            }
+        }
+
+        private static void EnsureExactDayShiftQuotasOrThrow(
+            SimulatedAnnealingScheduler scheduler,
+            ShiftSolution solution)
+        {
+            if (!scheduler.AreExactDayShiftQuotasSatisfied(solution, out var unmet))
+            {
+                throw new InvalidOperationException(
+                    "سهمیه حداقل شیفت صبح/عصر برای همه کاربران اعمال نشد:\n" + string.Join("\n", unmet));
             }
         }
 
@@ -1669,6 +1684,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     .ToList();
 
                 var monthlyQuotasByUserId = new Dictionary<int, UserMonthlyNightQuota>();
+                var monthlyDayShiftQuotasByUserId = new Dictionary<int, UserMonthlyDayShiftQuota>();
                 if (quotaUserIds.Count > 0)
                 {
                     var (monthlyQuotas, _) = await _monthlyNightQuotaRepository.GetByFilterAsync(
@@ -1681,14 +1697,25 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         .GroupBy(q => q.UserId)
                         .ToDictionary(g => g.Key, g => g.First());
 
+                    var (monthlyDayShiftQuotas, _) = await _monthlyDayShiftQuotaRepository.GetByFilterAsync(
+                        new Application.Common.Filters.SimpleFilter<UserMonthlyDayShiftQuota>(q =>
+                            q.PersianYear == quotaPersianYear &&
+                            q.PersianMonth == quotaPersianMonth &&
+                            quotaUserIds.Contains(q.UserId)));
+
+                    monthlyDayShiftQuotasByUserId = monthlyDayShiftQuotas
+                        .GroupBy(q => q.UserId)
+                        .ToDictionary(g => g.Key, g => g.First());
+
                     _logger.LogInformation(
-                        "LoadConstraints: Loaded {QuotaCount} monthly night quota(s) for Persian {Year}/{Month}",
-                        monthlyQuotasByUserId.Count, quotaPersianYear, quotaPersianMonth);
+                        "LoadConstraints: Loaded {NightQuotaCount} night and {DayShiftQuotaCount} day-shift quota(s) for Persian {Year}/{Month}",
+                        monthlyQuotasByUserId.Count, monthlyDayShiftQuotasByUserId.Count, quotaPersianYear, quotaPersianMonth);
                 }
 
                 foreach (var user in departmentUsers)
                 {
                     monthlyQuotasByUserId.TryGetValue(user.Id ?? 0, out var monthQuota);
+                    monthlyDayShiftQuotasByUserId.TryGetValue(user.Id ?? 0, out var dayShiftQuota);
 
                     var userConstraint = new UserConstraint
                     {
@@ -1708,8 +1735,32 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         DateOfEmployment = DateConverter.NormalizeEmploymentDate(user.DateOfEmployment),
                         ExperienceYears = ResolveExperienceYears(user, constraints.StartDate),
                         ExactNightShiftCount = monthQuota?.ExactNightShiftCount,
-                        ExactHolidayWeekendNightShiftCount = monthQuota?.ExactHolidayWeekendNightShiftCount
+                        ExactHolidayWeekendNightShiftCount = monthQuota?.ExactHolidayWeekendNightShiftCount,
+                        NightFallbackParticipation = monthQuota?.NightFallbackParticipation,
+                        HolidayWeekendNightFallbackParticipation = monthQuota?.HolidayWeekendNightFallbackParticipation,
+                        ExactMorningShiftCount = dayShiftQuota?.ExactMorningShiftCount,
+                        ExactHolidayMorningShiftCount = dayShiftQuota?.ExactHolidayMorningShiftCount,
+                        MorningFallbackParticipation = dayShiftQuota?.MorningFallbackParticipation,
+                        MorningHolidayFallbackParticipation = dayShiftQuota?.MorningHolidayFallbackParticipation,
+                        ExactEveningShiftCount = dayShiftQuota?.ExactEveningShiftCount,
+                        ExactHolidayEveningShiftCount = dayShiftQuota?.ExactHolidayEveningShiftCount,
+                        EveningFallbackParticipation = dayShiftQuota?.EveningFallbackParticipation,
+                        EveningHolidayFallbackParticipation = dayShiftQuota?.EveningHolidayFallbackParticipation
                     };
+
+                    if (userConstraint.ExactMorningShiftCount.HasValue &&
+                        userConstraint.ExactHolidayMorningShiftCount.HasValue &&
+                        userConstraint.ExactHolidayMorningShiftCount.Value > userConstraint.ExactMorningShiftCount.Value)
+                    {
+                        userConstraint.ExactHolidayMorningShiftCount = userConstraint.ExactMorningShiftCount;
+                    }
+
+                    if (userConstraint.ExactEveningShiftCount.HasValue &&
+                        userConstraint.ExactHolidayEveningShiftCount.HasValue &&
+                        userConstraint.ExactHolidayEveningShiftCount.Value > userConstraint.ExactEveningShiftCount.Value)
+                    {
+                        userConstraint.ExactHolidayEveningShiftCount = userConstraint.ExactEveningShiftCount;
+                    }
 
                     if (userConstraint.ExactNightShiftCount.HasValue &&
                         userConstraint.ExactHolidayWeekendNightShiftCount.HasValue &&
@@ -2652,6 +2703,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             scheduler.ApplyMandatoryConstraints(solution);
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
+            EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
             EnsureHardDailyRulesOrThrow(solution, constraints);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
         }
@@ -2706,6 +2758,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             scheduler.ApplyMandatoryConstraints(solution);
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
+            EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
             EnsureHardDailyRulesOrThrow(solution, constraints);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
 

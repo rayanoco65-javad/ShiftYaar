@@ -155,15 +155,15 @@ public static class ExactNightQuotaGuard
         ShiftConstraints constraints,
         UserConstraint user)
     {
-        if (!user.ExactNightShiftCount.HasValue)
+        var maxTotal = NightQuotaEligibility.GetMaxAllowedTotal(user);
+        if (maxTotal == int.MaxValue)
         {
             return;
         }
 
-        var target = user.ExactNightShiftCount.Value;
         var targetHoliday = user.ExactHolidayWeekendNightShiftCount ?? 0;
 
-        while (CountNights(solution, user.UserId) > target)
+        while (CountNights(solution, user.UserId) > maxTotal)
         {
             var nights = GetNights(solution, user.UserId);
             var holidayCount = nights.Count(a => constraints.IsHolidayWeekendNight(a.Date));

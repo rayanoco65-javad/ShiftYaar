@@ -199,15 +199,30 @@ public static class ShiftCoverageGuard
                         .Count(x => x.ShiftLabel == a.ShiftLabel && !x.IsOnCall);
                 var nightSurplus = 0;
                 if (user != null &&
-                    a.ShiftLabel == ShiftLabel.Night &&
-                    user.ExactNightShiftCount.HasValue)
+                    a.ShiftLabel == ShiftLabel.Night)
                 {
-                    nightSurplus = labelCount - user.ExactNightShiftCount.Value;
+                    var maxAllowed = NightQuotaEligibility.GetMaxAllowedTotal(user);
+                    if (maxAllowed != int.MaxValue)
+                    {
+                        nightSurplus = labelCount - maxAllowed;
+                    }
                 }
 
-                return (Assignment: a, NightSurplus: nightSurplus, LabelCount: labelCount, Protected: IsProtectedAssignment(constraints, a));
+                var dayShiftSurplus = 0;
+                if (user != null &&
+                    (a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening))
+                {
+                    var maxAllowed = DayShiftQuotaEligibility.GetMaxAllowedTotal(user, a.ShiftLabel);
+                    if (maxAllowed != int.MaxValue)
+                    {
+                        dayShiftSurplus = labelCount - maxAllowed;
+                    }
+                }
+
+                return (Assignment: a, NightSurplus: nightSurplus, DayShiftSurplus: dayShiftSurplus, LabelCount: labelCount, Protected: IsProtectedAssignment(constraints, a));
             })
-            .OrderByDescending(x => x.NightSurplus)
+            .OrderByDescending(x => x.DayShiftSurplus)
+            .ThenByDescending(x => x.NightSurplus)
             .ThenByDescending(x => x.LabelCount)
             .ThenBy(x => x.Protected ? 1 : 0)
             .ThenByDescending(x => x.Assignment.Date)
@@ -277,6 +292,7 @@ public static class ShiftCoverageGuard
         var candidates = constraints.UserConstraints
             .Where(u => u.IsActive && u.SpecialtyId == specialtyReq.SpecialtyId)
             .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, shiftReq.ShiftLabel))
+            .Where(u => IsEligibleForCoverageFill(solution, constraints, u, shiftReq.ShiftLabel, date))
             .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
             .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
             .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
@@ -335,9 +351,32 @@ public static class ShiftCoverageGuard
         }
         else
         {
-            // تعادل peer برای صبح/عصر — فقط به‌عنوان اولویت نرم داخل پوشش اجباری
+            // کسری سهمیه صبح/عصر
             var totalLabel = solution.GetUserAllAssignments(user.UserId)
                 .Count(a => a.ShiftLabel == label && !a.IsOnCall);
+            var exact = label == ShiftLabel.Morning ? user.ExactMorningShiftCount : user.ExactEveningShiftCount;
+            if (exact.HasValue && totalLabel < exact.Value)
+            {
+                score -= 5000 + (exact.Value - totalLabel) * 100;
+            }
+
+            if (constraints.IsHoliday(date))
+            {
+                var holidayExact = label == ShiftLabel.Morning
+                    ? user.ExactHolidayMorningShiftCount
+                    : user.ExactHolidayEveningShiftCount;
+                if (holidayExact.HasValue)
+                {
+                    var holidayCount = DayShiftQuotaEligibility.CountHolidayLabel(
+                        solution, constraints, user.UserId, label);
+                    if (holidayCount < holidayExact.Value)
+                    {
+                        score -= 8000;
+                    }
+                }
+            }
+
+            // تعادل peer برای صبح/عصر — فقط به‌عنوان اولویت نرم داخل پوشش اجباری
             score += totalLabel * 10;
 
             if (constraints.IsHoliday(date))
@@ -419,5 +458,22 @@ public static class ShiftCoverageGuard
         }
 
         return true;
+    }
+
+    private static bool IsEligibleForCoverageFill(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user,
+        ShiftLabel label,
+        DateTime date)
+    {
+        return label switch
+        {
+            ShiftLabel.Night => NightQuotaEligibility.CanAssignInCoverageFill(
+                solution, constraints, user, date),
+            ShiftLabel.Morning or ShiftLabel.Evening => DayShiftQuotaEligibility.CanAssignInCoverageFill(
+                solution, constraints, user, label, date),
+            _ => true
+        };
     }
 }

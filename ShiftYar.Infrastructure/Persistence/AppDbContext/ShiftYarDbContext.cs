@@ -37,6 +37,7 @@ namespace ShiftYar.Infrastructure.Persistence.AppDbContext
         public DbSet<DepartmentSchedulingSettings> DepartmentSchedulingSettings { get; set; }
         public DbSet<User> Users { get; set; }
         public DbSet<UserMonthlyNightQuota> UserMonthlyNightQuotas { get; set; }
+        public DbSet<UserMonthlyDayShiftQuota> UserMonthlyDayShiftQuotas { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
         public DbSet<LoginHistory> LoginHistories { get; set; }
         public DbSet<Role> Roles { get; set; }
@@ -97,6 +98,10 @@ namespace ShiftYar.Infrastructure.Persistence.AppDbContext
             });
 
             modelBuilder.Entity<UserMonthlyNightQuota>()
+                .HasIndex(q => new { q.UserId, q.PersianYear, q.PersianMonth })
+                .IsUnique();
+
+            modelBuilder.Entity<UserMonthlyDayShiftQuota>()
                 .HasIndex(q => new { q.UserId, q.PersianYear, q.PersianMonth })
                 .IsUnique();
 

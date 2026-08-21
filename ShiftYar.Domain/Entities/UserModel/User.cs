@@ -49,6 +49,9 @@ namespace ShiftYar.Domain.Entities.UserModel
         /// <summary>سهمیه‌های حداقل شب به‌تفکیک ماه شمسی</summary>
         public ICollection<UserMonthlyNightQuota>? MonthlyNightQuotas { get; set; }
 
+        /// <summary>سهمیه‌های صبح/عصر و ترجیح توزیع مازاد به‌تفکیک ماه شمسی</summary>
+        public ICollection<UserMonthlyDayShiftQuota>? MonthlyDayShiftQuotas { get; set; }
+
         [ForeignKey("Department")]
         public int? DepartmentId { get; set; } // Foreign key to Department table
         public Department? Department { get; set; } // Navigation property to Department table

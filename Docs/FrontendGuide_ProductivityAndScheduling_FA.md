@@ -34,7 +34,9 @@
   "persianYear": 1405,
   "persianMonth": 4,
   "exactNightShiftCount": 2,
-  "exactHolidayWeekendNightShiftCount": 1
+  "exactHolidayWeekendNightShiftCount": 1,
+  "nightFallbackParticipation": null,
+  "holidayWeekendNightFallbackParticipation": false
 }
 ```
 
@@ -46,19 +48,48 @@
   "persianYear": 1405,
   "persianMonth": 4,
   "items": [
-    { "userId": 3, "exactNightShiftCount": 5, "exactHolidayWeekendNightShiftCount": 2 },
-    { "userId": 10, "exactNightShiftCount": 2, "exactHolidayWeekendNightShiftCount": 1 },
-    { "userId": 13, "exactNightShiftCount": null, "exactHolidayWeekendNightShiftCount": null }
+    {
+      "userId": 3,
+      "exactNightShiftCount": 5,
+      "exactHolidayWeekendNightShiftCount": 2,
+      "nightFallbackParticipation": null,
+      "holidayWeekendNightFallbackParticipation": null
+    },
+    {
+      "userId": 10,
+      "exactNightShiftCount": 2,
+      "exactHolidayWeekendNightShiftCount": 1,
+      "nightFallbackParticipation": false,
+      "holidayWeekendNightFallbackParticipation": null
+    },
+    {
+      "userId": 13,
+      "exactNightShiftCount": null,
+      "exactHolidayWeekendNightShiftCount": null,
+      "nightFallbackParticipation": null,
+      "holidayWeekendNightFallbackParticipation": null
+    }
   ]
 }
 ```
 
-- برای کاربرانی که **سهمیه قطعی نمی‌خواهید**، هر دو فیلد را `null` بفرستید (یا در UI خالی بگذارید). API خطا نمی‌دهد؛ رکوردی ذخیره نمی‌شود و آن کاربر در شیفت‌بندی **بدون کف/سقف اجباری** می‌ماند. اگر بعد از تخصیص سهمیه‌های قطعی، ظرفیت شب ماه هنوز باقی باشد، بین کاربران با `null` طبق قوانین عادی برنامه‌ریزی می‌شود؛ اگر ظرفیت تمام شده باشد، به آن‌ها شب تعلق نمی‌گیرد.
+- برای کاربرانی که **سهمیه قطعی نمی‌خواهید**، هر چهار فیلد را `null` بفرستید (یا در UI خالی بگذارید). API خطا نمی‌دهد؛ رکوردی ذخیره نمی‌شود و آن کاربر در شیفت‌بندی **بدون کف/سقف اجباری** می‌ماند و در **توزیع مازاد شب** مشارکت می‌کند. فقط `nightFallbackParticipation: false` (یا `holidayWeekendNightFallbackParticipation: false`) بدون سهمیه قطعی = انصراف از مازاد همان نوع.
 
 #### معنی فیلدها
 
-- `exactNightShiftCount`: حداقل تعداد شیفت شب در آن ماه شمسی. `null` = بدون حداقل اجباری.
-- `exactHolidayWeekendNightShiftCount`: حداقل شبِ تعطیل/آخر هفته. باید ≤ تعداد کل شب باشد.
+- `exactNightShiftCount`: حداقل تعداد شیفت شب در آن ماه شمسی. `null` = بدون حداقل اجباری. **حداکثر** = تعداد شب‌های همان ماه در `ShiftDates`.
+- `exactHolidayWeekendNightShiftCount`: حداقل شبِ تعطیل/آخر هفته. باید ≤ تعداد کل شب باشد. **حداکثر** = تعداد شب‌های تعطیل/آخرهفته همان ماه.
+- `nightFallbackParticipation`: `null` = مشارکت در مازاد شب (پیش‌فرض)؛ `false` = فقط سهمیه قطعی بدون مازاد؛ `true` = مشارکت صریح.
+- `holidayWeekendNightFallbackParticipation`: همان منطق برای **شب تعطیل/آخرهفته** (نه فقط روز تعطیل تقویم).
+
+| ترکیب | رفتار |
+|--------|--------|
+| سهمیه `null` + fallback `null` | مشارکت در توزیع مازاد |
+| سهمیه `null` + fallback `false` | بدون توزیع خودکار همان نوع |
+| سهمیه مشخص + fallback `null` | ابتدا سهمیه قطعی، سپس مشارکت در مازاد |
+| سهمیه مشخص + fallback `false` | فقط همان تعداد قطعی |
+| بدون رکورد سهمیه | مشارکت در مازاد (پیش‌فرض) |
+
 - تعریف شب تعطیل/آخر هفته: شب همان روز تعطیل، یا شب روز قبل از تعطیل (مثلاً پنجشنبه قبل از جمعه).
 
 #### اقدام لازم در فرانت
@@ -66,7 +97,9 @@
 - فیلدهای `ExactNightShiftCount` / `ExactHolidayWeekendNightShiftCount` را از فرم کاربر حذف کنید.
 - صفحه/مدال جدا برای «سهمیه شب ماهانه» بسازید: انتخاب سال و ماه شمسی + جدول کاربران دپارتمان.
 - قبل از دکمه Optimize، اگر برای ماه شروع بازه سهمیه ثبت نشده، هشدار دهید.
-- Validation سمت کلاینت: شب تعطیل ≤ کل شب؛ مقادیر ≥ 0.
+- Validation سمت کلاینت: شب تعطیل ≤ کل شب؛ مقادیر ≥ 0؛ **تعداد شب هر کاربر ≤ تعداد شب‌های همان ماه** (از تقویم `ShiftDates`، نه عدد ثابت ۳۱).
+- ستون‌های fallback در جدول سهمیه شب: سه حالت «پیش‌فرض (مازاد)» / «بدون مازاد» / «مشارکت صریح» — معادل `null` / `false` / `true`.
+- **اعتبارسنجی مجوز:** اگر کاربر مجوز شیفت شب ندارد، ثبت سهمیه یا `fallback=true` **رد** می‌شود.
 - **اعتبارسنجی سمت سرور قبل از ذخیره:** مجموع سهمیه‌های دپارتمان با تقویم `ShiftDates` و **نیازمندی تخصص شیفت شب** چک می‌شود:
   - مجموع `exactNightShiftCount` همه کاربران ≤ **تعداد شب‌های ماه × نفر موردنیاز در هر شیفت شب** (جمع `RequiredTottalCount` ردیف‌های «نیازمندی تخصص شیفت» برای شیفت شب دپارتمان؛ مثلاً ۳۱ شب × ۴ متخصص = ۱۲۴)
   - مجموع `exactHolidayWeekendNightShiftCount` ≤ **تعداد شب‌های تعطیل/آخرهفته × نفر موردنیاز در شب تعطیل** (در صورت تعریف `HolidayRequiredTottalCount`؛ وگرنه همان ظرفیت روز عادی)
@@ -79,11 +112,50 @@
   - هنگام **تعیین/ویرایش/حذف سهمیه کل شب**: نمی‌توان سهمیه کل را کمتر از تعداد کل درخواست‌های شب تأییدشده گذاشت یا در حضور آن‌ها حذف کرد؛ ترکیب سهمیه نباید با شب‌های غیرتعطیل تأییدشده تناقض داشته باشد. حداقل تعطیل می‌تواند کمتر از تعداد درخواست‌های شب تعطیل تأییدشده باشد.
   - در Optimize، رسیدن به سهمیه حداقل شب **اجباری** است؛ در غیر این صورت شیفت‌بندی با خطا متوقف می‌شود.
 
+### سهمیه صبح/عصر — مدل ماهانه (جدید)
+
+سوپروایزر می‌تواند برای هر کاربر و هر ماه شمسی، سهمیه دقیق صبح/عصر و ترجیح مشارکت در **توزیع مازاد** را تنظیم کند.
+
+#### APIها (`UserMonthlyDayShiftQuotaController`)
+
+| اکشن | روش | توضیح |
+|------|------|--------|
+| `GetDepartmentMonthlyDayShiftQuotas` | GET | لیست سهمیه دپارتمان |
+| `UpsertUserMonthlyDayShiftQuota` | POST | یک کاربر |
+| `UpsertDepartmentMonthlyDayShiftQuotas` | POST | یک‌جا برای دپارتمان |
+| `DeleteUserMonthlyDayShiftQuota` | DELETE | حذف |
+
+#### فیلدها
+
+| فیلد | معنی |
+|------|------|
+| `exactMorningShiftCount` | حداقل/هدف تعداد شیفت صبح (`null` = بدون سقف/کف اجباری) |
+| `morningFallbackParticipation` | `null` = مشارکت در مازاد (پیش‌فرض)؛ `false` = فقط سهمیه قطعی بدون مازاد؛ `true` = مشارکت صریح |
+| `exactHolidayMorningShiftCount` | حداقل شیفت صبح در **روزهای تعطیل** تقویم |
+| `morningHolidayFallbackParticipation` | همان منطق `morningFallbackParticipation` برای روز تعطیل |
+| `exactEveningShiftCount` / `eveningFallbackParticipation` / `exactHolidayEveningShiftCount` / `eveningHolidayFallbackParticipation` | همان منطق برای عصر |
+
+| ترکیب | رفتار |
+|--------|--------|
+| سهمیه `null` + fallback `null` | مشارکت در توزیع مازاد |
+| سهمیه `null` + fallback `false` | بدون توزیع خودکار |
+| سهمیه مشخص + fallback `null` | ابتدا سهمیه قطعی، سپس مشارکت در مازاد |
+| سهمیه مشخص + fallback `false` | فقط همان تعداد قطعی |
+| بدون رکورد سهمیه | مشارکت در مازاد (پیش‌فرض) |
+
+#### قوانین مهم
+
+- **اعتبارسنجی مجوز:** اگر کاربر مجوز شیفت صبح/عصر ندارد (مثلاً فیکس صبح)، ثبت سهمیه همان نوع **رد** می‌شود با پیام فارسی.
+- **تخصیص اختیاری:** همه فیلدها `null` → رکورد ذخیره نمی‌شود (پیش‌فرض: مشارکت در مازاد). `fallback=false` صریح = انصراف از مازاد.
+- **سقف هر کاربر:** تعداد صبح/عصر ≤ روزهای ماه؛ تعداد تعطیل ≤ روزهای تعطیل ماه.
+- **سقف دپارتمان:** مجموع سهمیه‌های قطعی ≤ ظرفیت ماه (روزها × نفر موردنیاز شیفت).
+- **الگوریتم:** ۱) برآورده کردن سهمیه‌های قطعی ۲) پر کردن مازاد بین کاربرانی که `fallback` برابر `null` یا `true` است ۳) `fallback=false` = بدون مازاد.
+
 #### ترتیب پیشنهادی کار سوپروایزر
 
 1. تکمیل `ShiftDates` ماه موردنظر  
-2. تنظیم سهمیه شب ماهانه (`UserMonthlyNightQuota`) طوری که مجموع ≤ **ظرفیت ماه** باشد (شب‌های ماه × نفر در هر شیفت شب)  
-3. ثبت/تأیید درخواست‌ها (درخواست شب فقط داخل سهمیه؛ **تأیید حضور فقط تا ظرفیت شیفت/تخصص**)  
+2. تنظیم سهمیه شب (`UserMonthlyNightQuota`) و سهمیه صبح/عصر (`UserMonthlyDayShiftQuota`)  
+3. ثبت/تأیید درخواست‌ها  
 4. در صورت نیاز حذف برنامه قبلی (`DeleteMonthlySchedule`) یا فعال بودن `allowMonthlyRescheduleWithAutoDelete`  
 5. `optimize-and-save` / `optimize-and-save-async`
 

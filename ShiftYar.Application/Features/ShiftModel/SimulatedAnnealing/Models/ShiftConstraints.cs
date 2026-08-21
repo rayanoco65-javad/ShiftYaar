@@ -70,9 +70,31 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public int? ExactNightShiftCount { get; set; }
         /// <summary>حداقل تعداد شیفت شب روی روزهای تعطیل/آخرهفته.</summary>
         public int? ExactHolidayWeekendNightShiftCount { get; set; }
+        /// <summary>null = مشارکت در مازاد شب (پیش‌فرض)؛ false = بدون مازاد.</summary>
+        public bool? NightFallbackParticipation { get; set; }
+        /// <summary>null = مشارکت در مازاد شب تعطیل/آخرهفته (پیش‌فرض)؛ false = بدون مازاد.</summary>
+        public bool? HolidayWeekendNightFallbackParticipation { get; set; }
         /// <summary>حداقل فاصله روزهای تقویمی بین دو شیفت شب (۱ = بدون شب متوالی).</summary>
         public int MinDaysBetweenNightShifts { get; set; } = 2;
         public bool HasExactNightQuota => ExactNightShiftCount.HasValue;
+        /// <summary>حداقل تعداد شیفت صبح در بازه.</summary>
+        public int? ExactMorningShiftCount { get; set; }
+        /// <summary>حداقل تعداد شیفت صبح در روزهای تعطیل.</summary>
+        public int? ExactHolidayMorningShiftCount { get; set; }
+        /// <summary>null = مشارکت در مازاد (پیش‌فرض)؛ false = بدون مازاد؛ true = مشارکت صریح.</summary>
+        public bool? MorningFallbackParticipation { get; set; }
+        /// <summary>مشارکت در توزیع مازاد شیفت صبح در روزهای تعطیل.</summary>
+        public bool? MorningHolidayFallbackParticipation { get; set; }
+        public bool HasExactMorningQuota => ExactMorningShiftCount.HasValue;
+        /// <summary>حداقل تعداد شیفت عصر در بازه.</summary>
+        public int? ExactEveningShiftCount { get; set; }
+        /// <summary>حداقل تعداد شیفت عصر در روزهای تعطیل.</summary>
+        public int? ExactHolidayEveningShiftCount { get; set; }
+        /// <summary>null = مشارکت در مازاد (پیش‌فرض)؛ false = بدون مازاد؛ true = مشارکت صریح.</summary>
+        public bool? EveningFallbackParticipation { get; set; }
+        /// <summary>مشارکت در توزیع مازاد شیفت عصر در روزهای تعطیل.</summary>
+        public bool? EveningHolidayFallbackParticipation { get; set; }
+        public bool HasExactEveningQuota => ExactEveningShiftCount.HasValue;
         public bool CanBeShiftManager { get; set; }
         public bool IsActive { get; set; } = true; // وضعیت فعال بودن کاربر
         public ShiftTypes ShiftType { get; set; }

@@ -1244,6 +1244,12 @@ namespace ShiftYar.Infrastructure.Migrations
                     b.Property<int?>("ExactHolidayWeekendNightShiftCount")
                         .HasColumnType("int");
 
+                    b.Property<bool?>("HolidayWeekendNightFallbackParticipation")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("NightFallbackParticipation")
+                        .HasColumnType("bit");
+
                     b.Property<int?>("ExactNightShiftCount")
                         .HasColumnType("int");
 
@@ -1268,6 +1274,64 @@ namespace ShiftYar.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("UserMonthlyNightQuotas");
+                });
+
+            modelBuilder.Entity("ShiftYar.Domain.Entities.UserModel.UserMonthlyDayShiftQuota", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("CreateDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("ExactEveningShiftCount")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ExactHolidayEveningShiftCount")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ExactHolidayMorningShiftCount")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ExactMorningShiftCount")
+                        .HasColumnType("int");
+
+                    b.Property<bool?>("EveningFallbackParticipation")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("EveningHolidayFallbackParticipation")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("MorningFallbackParticipation")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("MorningHolidayFallbackParticipation")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("PersianMonth")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PersianYear")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TheUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdateDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "PersianYear", "PersianMonth")
+                        .IsUnique();
+
+                    b.ToTable("UserMonthlyDayShiftQuotas");
                 });
 
             modelBuilder.Entity("ShiftYar.Domain.Entities.UserModel.UserPhoneNumber", b =>
@@ -1566,6 +1630,17 @@ namespace ShiftYar.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("ShiftYar.Domain.Entities.UserModel.UserMonthlyDayShiftQuota", b =>
+                {
+                    b.HasOne("ShiftYar.Domain.Entities.UserModel.User", "User")
+                        .WithMany("MonthlyDayShiftQuotas")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("ShiftYar.Domain.Entities.UserModel.UserPhoneNumber", b =>
                 {
                     b.HasOne("ShiftYar.Domain.Entities.UserModel.User", "User")
@@ -1629,6 +1704,8 @@ namespace ShiftYar.Infrastructure.Migrations
                     b.Navigation("LoginHistories");
 
                     b.Navigation("MonthlyNightQuotas");
+
+                    b.Navigation("MonthlyDayShiftQuotas");
 
                     b.Navigation("OtherPhoneNumbers");
 

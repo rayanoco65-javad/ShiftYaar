@@ -22,5 +22,11 @@ namespace ShiftYar.Application.DTOs.UserModel
         /// <summary>حداقل تعداد شب تعطیل/آخرهفته؛ باید ≤ تعداد کل شب باشد</summary>
         [Range(0, 31)]
         public int? ExactHolidayWeekendNightShiftCount { get; set; }
+
+        /// <summary>null = مشارکت در مازاد (پیش‌فرض)؛ false = بدون مازاد؛ true = مشارکت صریح</summary>
+        public bool? NightFallbackParticipation { get; set; }
+
+        /// <summary>null = مشارکت در مازاد شب تعطیل/آخرهفته (پیش‌فرض)؛ false = بدون مازاد</summary>
+        public bool? HolidayWeekendNightFallbackParticipation { get; set; }
     }
 }

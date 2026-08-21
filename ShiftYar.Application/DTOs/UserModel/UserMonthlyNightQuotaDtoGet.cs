@@ -10,5 +10,7 @@ namespace ShiftYar.Application.DTOs.UserModel
         public int PersianMonth { get; set; }
         public int? ExactNightShiftCount { get; set; }
         public int? ExactHolidayWeekendNightShiftCount { get; set; }
+        public bool? NightFallbackParticipation { get; set; }
+        public bool? HolidayWeekendNightFallbackParticipation { get; set; }
     }
 }
