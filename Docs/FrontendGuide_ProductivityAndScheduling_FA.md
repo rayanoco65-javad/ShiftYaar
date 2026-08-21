@@ -47,10 +47,13 @@
   "persianMonth": 4,
   "items": [
     { "userId": 3, "exactNightShiftCount": 5, "exactHolidayWeekendNightShiftCount": 2 },
-    { "userId": 10, "exactNightShiftCount": 2, "exactHolidayWeekendNightShiftCount": 1 }
+    { "userId": 10, "exactNightShiftCount": 2, "exactHolidayWeekendNightShiftCount": 1 },
+    { "userId": 13, "exactNightShiftCount": null, "exactHolidayWeekendNightShiftCount": null }
   ]
 }
 ```
+
+- برای کاربرانی که **سهمیه قطعی نمی‌خواهید**، هر دو فیلد را `null` بفرستید (یا در UI خالی بگذارید). API خطا نمی‌دهد؛ رکوردی ذخیره نمی‌شود و آن کاربر در شیفت‌بندی **بدون کف/سقف اجباری** می‌ماند. اگر بعد از تخصیص سهمیه‌های قطعی، ظرفیت شب ماه هنوز باقی باشد، بین کاربران با `null` طبق قوانین عادی برنامه‌ریزی می‌شود؛ اگر ظرفیت تمام شده باشد، به آن‌ها شب تعلق نمی‌گیرد.
 
 #### معنی فیلدها
 

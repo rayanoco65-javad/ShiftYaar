@@ -291,7 +291,15 @@ namespace ShiftYar.Application.Features.UserModel.Services
             {
                 if (!night.HasValue && !holiday.HasValue)
                 {
-                    return ApiResponse<UserMonthlyNightQuotaDtoGet>.Fail("حداقل یکی از مقادیر سهمیه شب باید مشخص شود.");
+                    // سهمیه قطعی اختیاری است؛ نبود رکورد = بدون کف/سقف اجباری در شیفت‌بندی
+                    return ApiResponse<UserMonthlyNightQuotaDtoGet>.Success(
+                        new UserMonthlyNightQuotaDtoGet
+                        {
+                            UserId = dto.UserId,
+                            PersianYear = dto.PersianYear,
+                            PersianMonth = dto.PersianMonth
+                        },
+                        "سهمیه شب برای این کاربر تنظیم نشده است.");
                 }
 
                 entity = new UserMonthlyNightQuota
