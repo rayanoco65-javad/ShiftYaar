@@ -38,6 +38,7 @@ namespace ShiftYar.Infrastructure.Persistence.AppDbContext
         public DbSet<User> Users { get; set; }
         public DbSet<UserMonthlyNightQuota> UserMonthlyNightQuotas { get; set; }
         public DbSet<UserMonthlyDayShiftQuota> UserMonthlyDayShiftQuotas { get; set; }
+        public DbSet<UserMonthlyComboShiftQuota> UserMonthlyComboShiftQuotas { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
         public DbSet<LoginHistory> LoginHistories { get; set; }
         public DbSet<Role> Roles { get; set; }
@@ -102,6 +103,16 @@ namespace ShiftYar.Infrastructure.Persistence.AppDbContext
                 .IsUnique();
 
             modelBuilder.Entity<UserMonthlyDayShiftQuota>()
+                .HasIndex(q => new { q.UserId, q.PersianYear, q.PersianMonth })
+                .IsUnique();
+
+            modelBuilder.Entity<User>()
+                .HasMany(u => u.MonthlyComboShiftQuotas)
+                .WithOne(q => q.User)
+                .HasForeignKey(q => q.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<UserMonthlyComboShiftQuota>()
                 .HasIndex(q => new { q.UserId, q.PersianYear, q.PersianMonth })
                 .IsUnique();
 

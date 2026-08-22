@@ -470,10 +470,15 @@ public static class ShiftCoverageGuard
         return label switch
         {
             ShiftLabel.Night => NightQuotaEligibility.CanAssignInCoverageFill(
-                solution, constraints, user, date),
+                solution, constraints, user, date)
+                && ComboShiftQuotaEligibility.CanAssignInCoverageFill(
+                    solution, constraints, user, ShiftLabel.Night, date),
             ShiftLabel.Morning or ShiftLabel.Evening => DayShiftQuotaEligibility.CanAssignInCoverageFill(
-                solution, constraints, user, label, date),
-            _ => true
+                solution, constraints, user, label, date)
+                && ComboShiftQuotaEligibility.CanAssignInCoverageFill(
+                    solution, constraints, user, label, date),
+            _ => ComboShiftQuotaEligibility.CanAssignInCoverageFill(
+                solution, constraints, user, label, date)
         };
     }
 }

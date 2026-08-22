@@ -26,6 +26,7 @@ namespace ShiftYar.Application.DTOs.DepartmentModel
         public int? MaxConsecutiveShifts { get; set; }  //حداکثر شیفت‌های متوالی
         public int? MaxShiftsPerWeek { get; set; }  //حداکثر شیفت در هفته
         public int? MaxNightShiftsPerMonth { get; set; }    //حداکثر شیفت شب در ماه
+        [Range(1, 2, ErrorMessage = "حداکثر شیفت در روز فقط می‌تواند ۱ یا ۲ باشد.")]
         public int? MaxShiftsPerDay { get; set; }   //حداکثر شیفت در روز
         public int? MaxConsecutiveNightShifts { get; set; } //حداکثر شیفت شب متوالی
 

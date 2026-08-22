@@ -186,6 +186,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             // سهمیه دقیق شب را قبل از پر کردن ظرفیت روزانه قفل کن
             ExactNightQuotaGuard.Enforce(solution, _constraints);
             ExactDayShiftQuotaGuard.EnforceAll(solution, _constraints);
+            ExactComboShiftQuotaGuard.Enforce(solution, _constraints);
 
             // تولید انتساب‌های تصادفی اولیه
             var availableUsers = _constraints.UserConstraints.ToList();
@@ -232,6 +233,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             ExactNightQuotaGuard.Enforce(solution, _constraints);
             ExactDayShiftQuotaGuard.EnforceAll(solution, _constraints);
+            ExactComboShiftQuotaGuard.Enforce(solution, _constraints);
 
             solution.Score = CalculateSolutionScore(solution);
 

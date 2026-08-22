@@ -28,28 +28,45 @@ public static class DayShiftQuotaPermissionValidator
                                 || exactHolidayMorningShiftCount.HasValue
                                 || morningFallbackParticipation == true
                                 || morningHolidayFallbackParticipation == true;
-        if (morningConfigured &&
-            !ShiftEligibilityResolver.GetStandaloneLabels(permissions).Contains(ShiftLabel.Morning))
+        if (morningConfigured
+            && !GetStandaloneLabels(permissions).Contains(ShiftLabel.Morning))
         {
             return
                 $"{displayName} مجوز شیفت صبح ندارد؛ امکان ثبت سهمیه یا ترجیح توزیع صبح وجود ندارد. " +
                 "ابتدا مجوز نوع شیفت کاربر را اصلاح کنید.";
         }
 
+        if (morningConfigured
+            && user.ShiftType == ShiftTypes.FixedShift
+            && user.ShiftSubType == ShiftSubTypes.FixedEvening)
+        {
+            return $"{displayName} نوع شیفت ثابت عصر دارد؛ امکان ثبت سهمیه صبح وجود ندارد.";
+        }
+
         var eveningConfigured = exactEveningShiftCount.HasValue
                                 || exactHolidayEveningShiftCount.HasValue
                                 || eveningFallbackParticipation == true
                                 || eveningHolidayFallbackParticipation == true;
-        if (eveningConfigured &&
-            !ShiftEligibilityResolver.GetStandaloneLabels(permissions).Contains(ShiftLabel.Evening))
+        if (eveningConfigured
+            && !GetStandaloneLabels(permissions).Contains(ShiftLabel.Evening))
         {
             return
                 $"{displayName} مجوز شیفت عصر ندارد؛ امکان ثبت سهمیه یا ترجیح توزیع عصر وجود ندارد. " +
                 "ابتدا مجوز نوع شیفت کاربر را اصلاح کنید.";
         }
 
+        if (eveningConfigured
+            && user.ShiftType == ShiftTypes.FixedShift
+            && user.ShiftSubType == ShiftSubTypes.FixedMorning)
+        {
+            return $"{displayName} نوع شیفت ثابت صبح دارد؛ امکان ثبت سهمیه عصر وجود ندارد.";
+        }
+
         return null;
     }
+
+    private static IReadOnlyList<ShiftLabel> GetStandaloneLabels(UserShiftPermission permissions) =>
+        ShiftEligibilityResolver.GetStandaloneLabels(permissions);
 
     public static bool HasAnyConfiguredValue(
         int? exactMorningShiftCount,

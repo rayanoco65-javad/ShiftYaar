@@ -1,5 +1,6 @@
 using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using static ShiftYar.Domain.Enums.ShiftModel.ShiftEnums;
@@ -31,6 +32,18 @@ public static class ShiftEligibilityGuard
             var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == assignment.UserId);
             if (user == null)
             {
+                continue;
+            }
+
+            var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
+                ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
+                : 2;
+            var dayAssignments = solution.GetUserAssignments(user.UserId, assignment.Date).ToList();
+            if (MaxShiftsPerDayRules.WouldExceedDailyLimit(dayAssignments.Count - 1, maxPerDay, constraints.HardRules.EnforceMaxShiftsPerDay)
+                && dayAssignments.Count > maxPerDay)
+            {
+                violations.Add(
+                    $"سقف شیفت روزانه: کاربر {user.UserId} ({user.UserName}) در {assignment.Date:yyyy-MM-dd} بیش از {maxPerDay} شیفت دارد. {MaxShiftsPerDayRules.SecondShiftBlockedMessage}");
                 continue;
             }
 

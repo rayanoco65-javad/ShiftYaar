@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using ShiftYar.Application.Common.Models.ResponseModel;
+using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.DTOs.DepartmentModel;
 using ShiftYar.Application.Features.DepartmentModel.Filters;
 using ShiftYar.Application.Interfaces.DepartmentModel;
@@ -72,6 +73,7 @@ namespace ShiftYar.Application.Features.DepartmentModel.Services
 
             // اعمال تنظیمات پیش‌فرض برای توزیع شیفت‌های شب
             ApplyDefaultNightShiftDistributionSettings(dto);
+            NormalizeMaxShiftsPerDay(dto);
 
             var entity = _mapper.Map<DepartmentSchedulingSettings>(dto);
             entity.CreateDate = DateTime.Now;
@@ -103,6 +105,8 @@ namespace ShiftYar.Application.Features.DepartmentModel.Services
             {
                 return ApiResponse<DepartmentSchedulingSettingsDtoGet>.Fail(validationMessage);
             }
+
+            NormalizeMaxShiftsPerDay(dto);
 
             _mapper.Map(dto, entity);
             entity.CreateDate = DateTime.Now;
@@ -138,6 +142,18 @@ namespace ShiftYar.Application.Features.DepartmentModel.Services
             if (!okInt(dto.MinNightShiftsForThreeShiftRotation)) { message = "حداقل شیفت شب برای گردشی سه نوبت باید نامنفی باشد."; return false; }
             if (!okInt(dto.MinFirstShiftForTwoShiftRotation)) { message = "حداقل شیفت اول برای گردشی دو نوبت باید نامنفی باشد."; return false; }
             if (!okInt(dto.MinSecondShiftForTwoShiftRotation)) { message = "حداقل شیفت دوم برای گردشی دو نوبت باید نامنفی باشد."; return false; }
+
+            if (!MaxShiftsPerDayRules.IsValidSetting(dto.MaxShiftsPerDay))
+            {
+                message = MaxShiftsPerDayRules.InvalidSettingMessage;
+                return false;
+            }
+
+            if (dto.EnforceMaxShiftsPerDay == true && !MaxShiftsPerDayRules.IsValidSetting(dto.MaxShiftsPerDay ?? 2))
+            {
+                message = MaxShiftsPerDayRules.InvalidSettingMessage;
+                return false;
+            }
 
             // اعتبارسنجی تنظیمات شب‌دوست/شب‌گریز
             if (dto.NightShiftPreferenceType.HasValue && (dto.NightShiftPreferenceType < 0 || dto.NightShiftPreferenceType > 2))
@@ -178,6 +194,14 @@ namespace ShiftYar.Application.Features.DepartmentModel.Services
 
             if (!dto.SeniorityDistributionSlope.HasValue)
                 dto.SeniorityDistributionSlope = 1.0; // شیب پیش‌فرض
+        }
+
+        private static void NormalizeMaxShiftsPerDay(DepartmentSchedulingSettingsDtoAdd dto)
+        {
+            if (dto.MaxShiftsPerDay.HasValue)
+            {
+                dto.MaxShiftsPerDay = Math.Clamp(dto.MaxShiftsPerDay.Value, MaxShiftsPerDayRules.MinAllowed, MaxShiftsPerDayRules.MaxAllowed);
+            }
         }
 
         public async Task<ApiResponse<string>> DeleteSettingAsync(int id)

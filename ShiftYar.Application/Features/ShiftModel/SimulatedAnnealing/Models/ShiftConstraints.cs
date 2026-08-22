@@ -95,6 +95,18 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         /// <summary>مشارکت در توزیع مازاد شیفت عصر در روزهای تعطیل.</summary>
         public bool? EveningHolidayFallbackParticipation { get; set; }
         public bool HasExactEveningQuota => ExactEveningShiftCount.HasValue;
+
+        /// <summary>حداقل/هدف تعداد کل انتساب صبح+عصر (سهمیه ترکیبی).</summary>
+        public int? MorningEveningShiftCount { get; set; }
+        public bool? MorningEveningFallbackParticipation { get; set; }
+        public int? MorningEveningHolidayCount { get; set; }
+        public bool? MorningEveningHolidayFallback { get; set; }
+        /// <summary>حداقل/هدف تعداد کل انتساب صبح+شب (سهمیه ترکیبی).</summary>
+        public int? MorningNightShiftCount { get; set; }
+        public bool? MorningNightFallbackParticipation { get; set; }
+        public int? MorningNightHolidayCount { get; set; }
+        public bool? MorningNightHolidayFallback { get; set; }
+
         public bool CanBeShiftManager { get; set; }
         public bool IsActive { get; set; } = true; // وضعیت فعال بودن کاربر
         public ShiftTypes ShiftType { get; set; }

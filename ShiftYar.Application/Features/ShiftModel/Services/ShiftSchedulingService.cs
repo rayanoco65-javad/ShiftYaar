@@ -38,6 +38,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         private readonly IEfRepository<User> _userRepository;
         private readonly IEfRepository<UserMonthlyNightQuota> _monthlyNightQuotaRepository;
         private readonly IEfRepository<UserMonthlyDayShiftQuota> _monthlyDayShiftQuotaRepository;
+        private readonly IEfRepository<UserMonthlyComboShiftQuota> _monthlyComboShiftQuotaRepository;
         private readonly IEfRepository<Shift> _shiftRepository;
         private readonly IEfRepository<Department> _departmentRepository;
         private readonly IEfRepository<DepartmentSchedulingSettings> _deptSettingsRepository;
@@ -57,6 +58,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             IEfRepository<User> userRepository,
             IEfRepository<UserMonthlyNightQuota> monthlyNightQuotaRepository,
             IEfRepository<UserMonthlyDayShiftQuota> monthlyDayShiftQuotaRepository,
+            IEfRepository<UserMonthlyComboShiftQuota> monthlyComboShiftQuotaRepository,
             IEfRepository<Shift> shiftRepository,
             IEfRepository<Department> departmentRepository,
             IEfRepository<DepartmentSchedulingSettings> deptSettingsRepository,
@@ -75,6 +77,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             _userRepository = userRepository;
             _monthlyNightQuotaRepository = monthlyNightQuotaRepository;
             _monthlyDayShiftQuotaRepository = monthlyDayShiftQuotaRepository;
+            _monthlyComboShiftQuotaRepository = monthlyComboShiftQuotaRepository;
             _shiftRepository = shiftRepository;
             _departmentRepository = departmentRepository;
             _deptSettingsRepository = deptSettingsRepository;
@@ -1685,6 +1688,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                 var monthlyQuotasByUserId = new Dictionary<int, UserMonthlyNightQuota>();
                 var monthlyDayShiftQuotasByUserId = new Dictionary<int, UserMonthlyDayShiftQuota>();
+                var monthlyComboShiftQuotasByUserId = new Dictionary<int, UserMonthlyComboShiftQuota>();
                 if (quotaUserIds.Count > 0)
                 {
                     var (monthlyQuotas, _) = await _monthlyNightQuotaRepository.GetByFilterAsync(
@@ -1707,15 +1711,26 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         .GroupBy(q => q.UserId)
                         .ToDictionary(g => g.Key, g => g.First());
 
+                    var (monthlyComboShiftQuotas, _) = await _monthlyComboShiftQuotaRepository.GetByFilterAsync(
+                        new Application.Common.Filters.SimpleFilter<UserMonthlyComboShiftQuota>(q =>
+                            q.PersianYear == quotaPersianYear &&
+                            q.PersianMonth == quotaPersianMonth &&
+                            quotaUserIds.Contains(q.UserId)));
+
+                    monthlyComboShiftQuotasByUserId = monthlyComboShiftQuotas
+                        .GroupBy(q => q.UserId)
+                        .ToDictionary(g => g.Key, g => g.First());
+
                     _logger.LogInformation(
-                        "LoadConstraints: Loaded {NightQuotaCount} night and {DayShiftQuotaCount} day-shift quota(s) for Persian {Year}/{Month}",
-                        monthlyQuotasByUserId.Count, monthlyDayShiftQuotasByUserId.Count, quotaPersianYear, quotaPersianMonth);
+                        "LoadConstraints: Loaded {NightQuotaCount} night, {DayShiftQuotaCount} day-shift, {ComboQuotaCount} combo quota(s) for Persian {Year}/{Month}",
+                        monthlyQuotasByUserId.Count, monthlyDayShiftQuotasByUserId.Count, monthlyComboShiftQuotasByUserId.Count, quotaPersianYear, quotaPersianMonth);
                 }
 
                 foreach (var user in departmentUsers)
                 {
                     monthlyQuotasByUserId.TryGetValue(user.Id ?? 0, out var monthQuota);
                     monthlyDayShiftQuotasByUserId.TryGetValue(user.Id ?? 0, out var dayShiftQuota);
+                    monthlyComboShiftQuotasByUserId.TryGetValue(user.Id ?? 0, out var comboShiftQuota);
 
                     var userConstraint = new UserConstraint
                     {
@@ -1745,8 +1760,30 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         ExactEveningShiftCount = dayShiftQuota?.ExactEveningShiftCount,
                         ExactHolidayEveningShiftCount = dayShiftQuota?.ExactHolidayEveningShiftCount,
                         EveningFallbackParticipation = dayShiftQuota?.EveningFallbackParticipation,
-                        EveningHolidayFallbackParticipation = dayShiftQuota?.EveningHolidayFallbackParticipation
+                        EveningHolidayFallbackParticipation = dayShiftQuota?.EveningHolidayFallbackParticipation,
+                        MorningEveningShiftCount = comboShiftQuota?.MorningEveningShiftCount,
+                        MorningEveningFallbackParticipation = comboShiftQuota?.MorningEveningFallbackParticipation,
+                        MorningEveningHolidayCount = comboShiftQuota?.MorningEveningHolidayCount,
+                        MorningEveningHolidayFallback = comboShiftQuota?.MorningEveningHolidayFallback,
+                        MorningNightShiftCount = comboShiftQuota?.MorningNightShiftCount,
+                        MorningNightFallbackParticipation = comboShiftQuota?.MorningNightFallbackParticipation,
+                        MorningNightHolidayCount = comboShiftQuota?.MorningNightHolidayCount,
+                        MorningNightHolidayFallback = comboShiftQuota?.MorningNightHolidayFallback
                     };
+
+                    if (userConstraint.MorningEveningShiftCount.HasValue &&
+                        userConstraint.MorningEveningHolidayCount.HasValue &&
+                        userConstraint.MorningEveningHolidayCount.Value > userConstraint.MorningEveningShiftCount.Value)
+                    {
+                        userConstraint.MorningEveningHolidayCount = userConstraint.MorningEveningShiftCount;
+                    }
+
+                    if (userConstraint.MorningNightShiftCount.HasValue &&
+                        userConstraint.MorningNightHolidayCount.HasValue &&
+                        userConstraint.MorningNightHolidayCount.Value > userConstraint.MorningNightShiftCount.Value)
+                    {
+                        userConstraint.MorningNightHolidayCount = userConstraint.MorningNightShiftCount;
+                    }
 
                     if (userConstraint.ExactMorningShiftCount.HasValue &&
                         userConstraint.ExactHolidayMorningShiftCount.HasValue &&

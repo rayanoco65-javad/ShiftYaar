@@ -159,6 +159,49 @@
 4. در صورت نیاز حذف برنامه قبلی (`DeleteMonthlySchedule`) یا فعال بودن `allowMonthlyRescheduleWithAutoDelete`  
 5. `optimize-and-save` / `optimize-and-save-async`
 
+### سهمیه ترکیبی صبح/عصر و صبح/شب — `UserMonthlyComboShiftQuota` (جدید)
+
+برای **پرسنل گردشی** (دو‌نوبته یا **سه‌نوبته**) از این API استفاده کنید. **فقط پرسنل شیفت ثابت** (ثابت صبح/عصر) نمی‌توانند سهمیه ترکیبی داشته باشند؛ پرسنل سه‌نوبته می‌توانند علاوه بر سهمیه‌های جداگانه، سهمیه ترکیبی صبح/عصر و صبح/شب هم داشته باشند.
+
+#### APIها (`UserMonthlyComboShiftQuotaController`)
+
+| اکشن | روش | توضیح |
+|------|------|--------|
+| `GetDepartmentMonthlyComboShiftQuotas` | GET | لیست سهمیه ترکیبی دپارتمان |
+| `GetUserMonthlyComboShiftQuotaByUserMonth` | GET | سهمیه یک کاربر در یک ماه |
+| `UpsertUserMonthlyComboShiftQuota` | POST | ایجاد/به‌روزرسانی یک کاربر |
+| `UpsertDepartmentMonthlyComboShiftQuotas` | POST | تنظیم یک‌جای دپارتمان |
+
+#### فیلدها (JSON camelCase)
+
+| فیلد | معنی |
+|------|------|
+| `morningEveningShiftCount` | حداقل/هدف **مجموع** انتساب‌های صبح+عصر در ماه |
+| `morningEveningFallbackParticipation` | `null`=مازاد (پیش‌فرض)؛ `false`=بدون مازاد؛ `true`=مشارکت صریح |
+| `morningEveningHolidayCount` | حداقل صبح+عصر در روزهای تعطیل |
+| `morningEveningHolidayFallback` | fallback مازاد تعطیل صبح/عصر |
+| `morningNightShiftCount` | حداقل/هدف **مجموع** انتساب‌های صبح+شب در ماه |
+| `morningNightFallbackParticipation` | fallback مازاد صبح/شب |
+| `morningNightHolidayCount` | حداقل صبح+شب در روزهای تعطیل |
+| `morningNightHolidayFallback` | fallback مازاد تعطیل صبح/شب |
+
+#### اعتبارسنجی نوع شیفت
+
+- ثبت سهمیه **صبح/عصر** برای پرسنل **گردشی** (دو‌نوبته صبح/عصر یا **سه‌نوبته**) با مجوز صبح+عصر.
+- ثبت سهمیه **صبح/شب** برای پرسنل **گردشی** (دو‌نوبته صبح/شب یا **سه‌نوبته**) با مجوز صبح+شب.
+- پرسنل **شیفت ثابت** (ثابت صبح یا ثابت عصر): درخواست **رد** می‌شود.
+- الگوریتم: ۱) سهمیه قطعی ۲) مازاد فقط بین کاربران با `fallback` برابر `null` یا `true`.
+
+### تنظیمات دپارتمان — سقف شیفت روزانه
+
+| فیلد API | معادل درخواست شما |
+|----------|-------------------|
+| `enforceMaxShiftsPerDay` | `apply_max_shifts_per_day` |
+| `maxShiftsPerDay` | فقط **۱** یا **۲** (اعتبارسنجی سخت در API) |
+
+- اگر `enforceMaxShiftsPerDay=true` و `maxShiftsPerDay=1`: هیچ کاربری بیش از یک شیفت در یک روز نمی‌گیرد.
+- تلاش برای تخصیص دوم (مثلاً صبح+عصر) با سقف ۱ **مسدود** می‌شود؛ پیام خطا راهنمای تغییر سقف به ۲ را نشان می‌دهد.
+
 ## ۱.۶ قوانین ترکیب شیفت در یک روز
 
 | ترکیب | وضعیت | دلیل |
