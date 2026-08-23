@@ -38,6 +38,7 @@ namespace ShiftYar.Domain.Entities.UserModel
         public decimal? HardshipPercent { get; set; }   //درصد صعوبت (سختی) کار (۰–۱۰۰) برای کاهش ساعت موظفی هفتگی
         public bool? OvertimeConsent { get; set; }  //رضایت پرسنل به اضافه‌کاری (حداکثر ۸۰ ساعت در ماه) ر
 
+
         /// <summary>
         /// حداکثر/دستی ساعت موظفی ماهانه (ساعت). اگر مقدار داشته باشد، در شیفت‌بندی
         /// به‌جای محاسبهٔ خودکار (سابقه، صعوبت، …) همین عدد اعمال می‌شود.
