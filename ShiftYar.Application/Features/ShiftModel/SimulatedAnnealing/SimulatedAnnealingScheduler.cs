@@ -1496,7 +1496,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             ShiftCoverageGuard.EnforceCapacityCeiling(solution, _constraints);
             ProductivityHourFillGuard.EnforceFinalBalance(solution, _constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             MorningEveningBalanceGuard.Enforce(solution, _constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             // پر کردن موظفی ممکن است صبح/عصر اضافه کند یا شب جابه‌جا کند — سهمیه شب را دوباره قفل کن
             ExactNightQuotaGuard.Enforce(solution, _constraints);
             ExactDayShiftQuotaGuard.EnforceAll(solution, _constraints);
@@ -1584,6 +1586,16 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                             msg +=
                                 $" سقف سهمیه ترکیبی صبح/شب ({comboTotal}/{user.MorningNightShiftCount.Value}) ممکن است مانع باشد.";
                         }
+                    }
+
+                    if (!_constraints.HardRules.AllowEveningAfterNightShift)
+                    {
+                        msg += " (تنظیم «روز بعد از شب باید off باشد» فعال است؛ درخواست/شیفت صبح یا عصر روز بعد ممکن است مانع باشد.)";
+                    }
+                    else if (_constraints.HardRules.EnforceMaxShiftsPerDay
+                             && _constraints.GlobalConstraints.MaxShiftsPerDay <= 1)
+                    {
+                        msg += " (حداکثر ۱ شیفت در روز فعال است؛ شیفت صبح/عصر همان روز ممکن است مانع شب شود.)";
                     }
 
                     violations.Add(msg);

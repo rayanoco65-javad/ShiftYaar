@@ -49,11 +49,16 @@ public static class AdjacentShiftRestGuard
                          solution.GetUserAllAssignments(user.UserId),
                          constraints.HardRules.AllowEveningAfterNightShift))
             {
-                var detail = earlier.ShiftLabel == ShiftLabel.Night &&
-                             later.Date.Date == earlier.Date.Date.AddDays(1) &&
-                             !constraints.HardRules.AllowEveningAfterNightShift
-                    ? "روز بعد از شب باید بدون شیفت باشد"
-                    : "حداقل یک نوبت فاصله لازم است";
+                var detail =
+                    earlier.ShiftLabel == ShiftLabel.Night &&
+                    later.ShiftLabel == ShiftLabel.Morning &&
+                    later.Date.Date == earlier.Date.Date.AddDays(1)
+                        ? "شیفت شب (۱۲ ساعت) با شیفت صبح روز بعد قابل ترکیب نیست — بیش از ۱۲ ساعت کار متوالی"
+                        : earlier.ShiftLabel == ShiftLabel.Night &&
+                          later.Date.Date == earlier.Date.Date.AddDays(1) &&
+                          !constraints.HardRules.AllowEveningAfterNightShift
+                            ? "روز بعد از شب باید بدون شیفت باشد"
+                            : "حداقل یک نوبت فاصله لازم است";
                 violations.Add(
                     $"توالی ممنوع شیفت: کاربر {user.UserId} ({user.UserName}) " +
                     $"{earlier.ShiftLabel} در {earlier.Date:yyyy-MM-dd} بلافاصله با " +

@@ -736,6 +736,79 @@ public class ExactNightQuotaTests
         Assert.True(HolidayWeekendNightRules.IsHolidayWeekendNight(nights[0], holidays));
     }
 
+    [Fact]
+    public void ExactNightQuotaGuard_ClearsNextDayShiftsWhenEveningAfterNightDisabled()
+    {
+        var start = new DateTime(2026, 8, 1);
+        var user = MakeUser(22, exactNights: 7, exactHolidayNights: null);
+
+        var constraints = new ShiftConstraints
+        {
+            DepartmentId = 1,
+            StartDate = start,
+            EndDate = start.AddDays(30),
+            UserConstraints = [user],
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning),
+                Shift(2, ShiftLabel.Evening),
+                Shift(3, ShiftLabel.Night)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true,
+                AllowEveningAfterNightShift = false
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 }
+        };
+
+        var solution = new ShiftSolution();
+        var nightShift = constraints.ShiftRequirements.First(s => s.ShiftLabel == ShiftLabel.Night);
+
+        foreach (var dayOffset in new[] { 0, 4, 8, 12, 16, 20 })
+        {
+            var nightDate = start.AddDays(dayOffset);
+            solution.AddAssignment(22, nightShift.ShiftId, nightDate, ShiftLabel.Night, false);
+            // صبح روز بعد (شبیه‌سازی ProductivityHourFill)
+            solution.AddAssignment(22, 1, nightDate.AddDays(1), ShiftLabel.Morning, false);
+        }
+
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+
+        var nights = solution.GetUserAllAssignments(22)
+            .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall)
+            .Count();
+        Assert.True(nights >= 7, $"Expected at least 7 nights, got {nights}");
+    }
+
+    [Fact]
+    public void ExactNightQuotaGuard_AddsSeventhNightWhenSpacingAllows()
+    {
+        var start = new DateTime(2026, 8, 1);
+        var user = MakeUser(22, exactNights: 7, exactHolidayNights: null);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(30),
+            UserConstraints = [user],
+            ShiftRequirements = [Shift(3, ShiftLabel.Night)],
+            HardRules = new HardRuleSet { EnforceSpecialtyCapacity = true }
+        };
+
+        var solution = new ShiftSolution();
+        foreach (var dayOffset in new[] { 0, 4, 8, 12, 16, 20 })
+        {
+            solution.AddAssignment(22, 3, start.AddDays(dayOffset), ShiftLabel.Night, false);
+        }
+
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+
+        var nights = solution.GetUserAllAssignments(22).Count(a => a.ShiftLabel == ShiftLabel.Night);
+        Assert.True(nights >= 7, $"Expected >= 7 nights, got {nights}");
+    }
+
     private static UserConstraint MakeUser(int id, int? exactNights, int? exactHolidayNights) => new()
     {
         UserId = id,
