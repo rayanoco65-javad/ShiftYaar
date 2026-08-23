@@ -52,6 +52,62 @@ public static class ExactNightQuotaGuard
                 EnforceForUser(solution, constraints, user, nightShift);
             }
         }
+
+        // وقتی مجموع سهمیه = ظرفیت ماه است، رزرو شب تعطیل نباید مانع تکمیل حداقل کل شود
+        ForceFillRemainingTotalIgnoringHolidayReservation(solution, constraints, nightShift);
+    }
+
+    /// <summary>
+    /// آخرین تلاش: اگر سهمیه کل هنوز کامل نشده، رزرو «باقی‌مانده برای تعطیل» را نادیده بگیر
+    /// و از زنجیرهٔ دو مرحله‌ای برای جابه‌جایی در ماه پر استفاده کن.
+    /// </summary>
+    private static void ForceFillRemainingTotalIgnoringHolidayReservation(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        ShiftRequirement nightShift)
+    {
+        for (var pass = 0; pass < 3; pass++)
+        {
+            var anyProgress = false;
+            foreach (var user in OrderUsersByDeficit(solution, constraints))
+            {
+                if (!user.ExactNightShiftCount.HasValue)
+                {
+                    continue;
+                }
+
+                var remaining = user.ExactNightShiftCount.Value - CountNights(solution, user.UserId);
+                if (remaining <= 0)
+                {
+                    continue;
+                }
+
+                var minGap = Math.Max(1, user.MinDaysBetweenNightShifts);
+                var before = CountNights(solution, user.UserId);
+                TryFillNights(solution, constraints, user, nightShift, remaining, holidayOnly: false);
+                var stillNeed = user.ExactNightShiftCount.Value - CountNights(solution, user.UserId);
+                if (stillNeed > 0)
+                {
+                    ClaimNightsFromDonors(solution, constraints, user, nightShift, stillNeed, holidayOnly: false, minGap, ignoreHolidayReservation: true);
+                    stillNeed = user.ExactNightShiftCount.Value - CountNights(solution, user.UserId);
+                }
+
+                if (stillNeed > 0)
+                {
+                    ClaimViaTwoHopChain(solution, constraints, user, nightShift, stillNeed, holidayOnly: false, minGap, ignoreHolidayReservation: true);
+                }
+
+                if (CountNights(solution, user.UserId) > before)
+                {
+                    anyProgress = true;
+                }
+            }
+
+            if (!anyProgress)
+            {
+                break;
+            }
+        }
     }
 
     private static IEnumerable<UserConstraint> OrderUsersByDeficit(

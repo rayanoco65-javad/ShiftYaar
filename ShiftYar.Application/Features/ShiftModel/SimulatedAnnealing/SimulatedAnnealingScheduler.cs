@@ -1541,20 +1541,34 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 var nights = solution.GetUserAllAssignments(user.UserId)
                     .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall)
                     .ToList();
+                var holidayNights = user.ExactHolidayWeekendNightShiftCount.HasValue
+                    ? nights.Count(a => _constraints.IsHolidayWeekendNight(a.Date))
+                    : 0;
+                var displayName = string.IsNullOrWhiteSpace(user.UserName)
+                    ? $"کاربر {user.UserId}"
+                    : $"«{user.UserName}» (شناسه {user.UserId})";
+
                 if (user.ExactNightShiftCount.HasValue && nights.Count < user.ExactNightShiftCount.Value)
                 {
-                    violations.Add(
-                        $"User {user.UserId} minimum night quota not met ({nights.Count}/{user.ExactNightShiftCount.Value}).");
-                }
-
-                if (user.ExactHolidayWeekendNightShiftCount.HasValue)
-                {
-                    var holidayNights = nights.Count(a => _constraints.IsHolidayWeekendNight(a.Date));
-                    if (holidayNights < user.ExactHolidayWeekendNightShiftCount.Value)
+                    var msg =
+                        $"{displayName}: سهمیه حداقل شیفت شب رعایت نشد — {nights.Count} شب تخصیص داده شده، " +
+                        $"حداقل موردنیاز {user.ExactNightShiftCount.Value} شب است.";
+                    if (user.ExactHolidayWeekendNightShiftCount.HasValue &&
+                        holidayNights < user.ExactHolidayWeekendNightShiftCount.Value)
                     {
-                        violations.Add(
-                            $"User {user.UserId} minimum holiday/weekend night quota not met ({holidayNights}/{user.ExactHolidayWeekendNightShiftCount.Value}).");
+                        msg +=
+                            $" همچنین سهمیه شب تعطیل/آخرهفته: {holidayNights}/{user.ExactHolidayWeekendNightShiftCount.Value}.";
                     }
+
+                    violations.Add(msg);
+                }
+                else if (user.ExactHolidayWeekendNightShiftCount.HasValue &&
+                         holidayNights < user.ExactHolidayWeekendNightShiftCount.Value)
+                {
+                    violations.Add(
+                        $"{displayName}: سهمیه حداقل شب تعطیل/آخرهفته رعایت نشد — {holidayNights} شب، " +
+                        $"حداقل موردنیاز {user.ExactHolidayWeekendNightShiftCount.Value} شب است " +
+                        $"(کل شب‌های تخصیص‌یافته: {nights.Count}).");
                 }
             }
 
