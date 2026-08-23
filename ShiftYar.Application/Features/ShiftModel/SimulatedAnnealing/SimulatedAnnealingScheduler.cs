@@ -1593,12 +1593,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                     if (!_constraints.HardRules.AllowEveningAfterNightShift)
                     {
-                        msg += " (تنظیم «اجازه عصر روز بعد از شب» غیرفعال است؛ عصر روز بعد ممکن است مانع باشد.)";
+                        msg += " (تنظیم «اجازه عصر روز بعد از شب» غیرفعال است.)";
                     }
 
                     if (!_constraints.HardRules.AllowNightShiftAfterNightShift)
                     {
-                        msg += " (تنظیم «اجازه شب روز بعد از شب» غیرفعال است؛ شب متوالی ممکن است مانع باشد.)";
+                        msg += " (تنظیم «اجازه شب روز بعد از شب» غیرفعال است.)";
                     }
 
                     if (_constraints.HardRules.EnforceMaxShiftsPerDay

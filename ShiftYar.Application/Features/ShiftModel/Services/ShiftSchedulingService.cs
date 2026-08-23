@@ -1591,10 +1591,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     constraints.HardRules.EnforceWeeklyMaxShifts = deptSettingEarly.EnforceWeeklyMaxShifts ?? false;
                     constraints.HardRules.EnforceNightShiftMonthlyCap = deptSettingEarly.EnforceNightShiftMonthlyCap ?? false;
                     constraints.HardRules.EnforceSpecialtyCapacity = deptSettingEarly.EnforceSpecialtyCapacity ?? true;
-                    constraints.HardRules.AllowEveningAfterNightShift =
-                        deptSettingEarly.AllowEveningAfterNightShift;
-                    constraints.HardRules.AllowNightShiftAfterNightShift =
-                        deptSettingEarly.AllowNightShiftAfterNightShift;
+                    DepartmentPostNightShiftRulesApplier.Apply(constraints, deptSettingEarly);
 
                     // تنظیم Soft Weights
                     constraints.SoftWeights.GenderBalanceWeight = deptSettingEarly.GenderBalanceWeight ?? 1.0;
@@ -2362,10 +2359,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     if (deptSetting.EnforceWeeklyMaxShifts.HasValue) constraints.HardRules.EnforceWeeklyMaxShifts = deptSetting.EnforceWeeklyMaxShifts.Value;
                     if (deptSetting.EnforceNightShiftMonthlyCap.HasValue) constraints.HardRules.EnforceNightShiftMonthlyCap = deptSetting.EnforceNightShiftMonthlyCap.Value;
                     if (deptSetting.EnforceSpecialtyCapacity.HasValue) constraints.HardRules.EnforceSpecialtyCapacity = deptSetting.EnforceSpecialtyCapacity.Value;
-                    constraints.HardRules.AllowEveningAfterNightShift =
-                        deptSetting.AllowEveningAfterNightShift;
-                    constraints.HardRules.AllowNightShiftAfterNightShift =
-                        deptSetting.AllowNightShiftAfterNightShift;
+                    DepartmentPostNightShiftRulesApplier.Apply(constraints, deptSetting);
 
                     // سقف روزانه از تنظیمات دپارتمان (۱ یا ۲)
                     constraints.HardRules.ForbidDuplicateDailyAssignments = true;
