@@ -828,6 +828,66 @@ public class SimulatedAnnealingSchedulerTests
             Assert.Empty(ApprovedRequestGuard.GetUnmetViolations(solution, constraints));
         }
 
+        [Fact]
+        public void ApplyMandatoryConstraints_PreservesRequiredNight_AgainstProductivityMorningNextDay()
+        {
+            var nightDate = new DateTime(2026, 8, 26);
+            var nextDay = nightDate.AddDays(1);
+            var user = User(24, UserGender.Female);
+            user.UserName = "مریم امیدی منش";
+            user.ExactNightShiftCount = 7;
+            user.ProductivityRequiredHours = 152;
+            user.IncludedInProductivityPlan = true;
+            user.RequiredShiftSlots.Add(new ShiftSlotConstraint
+            {
+                Date = nightDate,
+                ShiftLabel = ShiftLabel.Night,
+                ShiftId = 3
+            });
+
+            var specialty = new SpecialtyRequirement { SpecialtyId = 10, RequiredTotalCount = 2 };
+            var constraints = BuildConstraints(nightDate.AddDays(-5), days: 15, users: [user, User(2, UserGender.Male), User(3, UserGender.Female)], specialty: specialty);
+            constraints.ShiftRequirements.Add(new ShiftRequirement
+            {
+                ShiftId = 2,
+                ShiftLabel = ShiftLabel.Evening,
+                DepartmentId = 1,
+                DurationHours = 6,
+                SpecialtyRequirements = [CloneSpecialty(specialty)]
+            });
+            constraints.ShiftRequirements.Add(new ShiftRequirement
+            {
+                ShiftId = 3,
+                ShiftLabel = ShiftLabel.Night,
+                DepartmentId = 1,
+                DurationHours = 12,
+                SpecialtyRequirements = [CloneSpecialty(specialty)]
+            });
+            constraints.HardRules.EnforceProductivityHours = true;
+            constraints.HardRules.AllowEveningAfterNightShift = false;
+
+            var solution = new ShiftSolution();
+            foreach (var dayOffset in new[] { 0, 4, 8, 12, 16, 20 })
+            {
+                var d = nightDate.AddDays(dayOffset - 10);
+                if (d < constraints.StartDate || d > constraints.EndDate)
+                {
+                    continue;
+                }
+
+                solution.AddAssignment(24, 3, d, ShiftLabel.Night, false);
+                solution.AddAssignment(24, 1, d.AddDays(1), ShiftLabel.Morning, false);
+            }
+
+            var scheduler = new SimulatedAnnealingScheduler(constraints, FastParameters);
+            scheduler.ApplyMandatoryConstraints(solution);
+
+            Assert.True(
+                solution.GetShiftAssignments(3, nightDate).Any(a => a.UserId == 24 && !a.IsOnCall),
+                "Required night on 2026-08-26 must survive ApplyMandatoryConstraints");
+            Assert.Empty(ApprovedRequestGuard.GetUnmetViolations(solution, constraints));
+        }
+
         private static SpecialtyRequirement CloneSpecialty(SpecialtyRequirement s) => new()
         {
             SpecialtyId = s.SpecialtyId,

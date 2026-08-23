@@ -59,6 +59,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
+                    // ON صریح همان روز/شیفت بر OFF مشتق اولویت دارد
+                    if (IsApprovedRequiredSlot(user, slot.Date, slot.ShiftLabel, slot.ShiftId))
+                    {
+                        continue;
+                    }
+
                     if (solution.GetUserAllAssignments(user.UserId)
                         .Any(a => a.Date.Date == slot.Date.Date && a.ShiftLabel == slot.ShiftLabel))
                     {
@@ -89,7 +95,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     if (!ok)
                     {
                         violations.Add(
-                            $"حضور اجباری شیفت‌مشخص اعمال نشد: کاربر {user.UserId} ({user.UserName}) باید در {required.ShiftLabel} تاریخ {required.Date:yyyy-MM-dd} باشد.");
+                            DescribeUnmetRequiredSlot(solution, constraints, user, required, shiftReq));
                     }
                 }
 
@@ -230,8 +236,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
 
                 // چند پاس پاک‌سازی تا تداخل‌های غیرمحافظت‌شده جلوی حضور اجباری را نگیرند
-                for (var pass = 0; pass < 4; pass++)
+                for (var pass = 0; pass < 6; pass++)
                 {
+                    PrepareForRequiredSlot(solution, constraints, user, required.Date, required.ShiftLabel);
                     ClearUnprotectedAdjacentConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
                     ClearUnprotectedSameDayConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
 
@@ -249,6 +256,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 RemoveOtherDailyAssignments(solution, constraints, user, required.Date, shiftReq.ShiftId);
                 MakeRoomForIncoming(solution, constraints, shiftReq, required.Date, user);
 
+                PrepareForRequiredSlot(solution, constraints, user, required.Date, required.ShiftLabel);
                 ClearUnprotectedAdjacentConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
                 ClearUnprotectedSameDayConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
 
@@ -356,6 +364,150 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         isOnCall: false);
                 }
             }
+        }
+
+        /// <summary>
+        /// برای حضور اجباری، انتساب‌های غیرمحافظت‌شده‌ای که توالی ممنوع می‌سازند حذف می‌شوند.
+        /// </summary>
+        private static void PrepareForRequiredSlot(
+            ShiftSolution solution,
+            ShiftConstraints constraints,
+            UserConstraint user,
+            DateTime date,
+            ShiftLabel label)
+        {
+            if (label == ShiftLabel.Night)
+            {
+                var next = date.Date.AddDays(1);
+                if (!constraints.HardRules.AllowEveningAfterNightShift)
+                {
+                    foreach (var assignment in solution.GetUserAssignments(user.UserId, next).ToList())
+                    {
+                        if (!IsHardProtectedAssignment(user, assignment))
+                        {
+                            solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                        }
+                    }
+                }
+                else
+                {
+                    foreach (var assignment in solution.GetUserAssignments(user.UserId, next)
+                                 .Where(a => a.ShiftLabel == ShiftLabel.Morning)
+                                 .ToList())
+                    {
+                        if (!IsHardProtectedAssignment(user, assignment))
+                        {
+                            solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                        }
+                    }
+                }
+
+                if (!constraints.HardRules.AllowEveningAfterNightShift)
+                {
+                    foreach (var assignment in GetUserNightAssignments(solution, user.UserId)
+                                 .Where(a => a.Date.Date == date.Date.AddDays(-1))
+                                 .ToList())
+                    {
+                        if (!IsHardProtectedAssignment(user, assignment))
+                        {
+                            solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                        }
+                    }
+                }
+            }
+
+            foreach (var assignment in solution.GetUserAssignments(user.UserId, date)
+                         .Where(a => a.ShiftLabel == ShiftLabel.Evening && a.ShiftLabel != label)
+                         .ToList())
+            {
+                if (label == ShiftLabel.Night && !IsHardProtectedAssignment(user, assignment))
+                {
+                    solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                }
+            }
+        }
+
+        private static IEnumerable<SaShiftAssignment> GetUserNightAssignments(ShiftSolution solution, int userId) =>
+            solution.GetUserAllAssignments(userId)
+                .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+
+        private static string DescribeUnmetRequiredSlot(
+            ShiftSolution solution,
+            ShiftConstraints constraints,
+            UserConstraint user,
+            ShiftSlotConstraint required,
+            ShiftRequirement? shiftReq)
+        {
+            var baseMsg =
+                $"حضور اجباری شیفت‌مشخص اعمال نشد: کاربر {user.UserId} ({user.UserName}) باید در {required.ShiftLabel} تاریخ {required.Date:yyyy-MM-dd} باشد.";
+
+            if (!Common.Utilities.ShiftEligibilityResolver.MayEverTakeLabel(user, required.ShiftLabel))
+            {
+                return baseMsg + " علت: کاربر مجوز این نوع شیفت را ندارد.";
+            }
+
+            if (shiftReq == null)
+            {
+                return baseMsg + " علت: شیفت در تنظیمات دپارتمان یافت نشد.";
+            }
+
+            if (user.UnavailableDates.Any(d => d.Date == required.Date.Date))
+            {
+                return baseMsg + " علت: درخواست عدم‌حضور کل‌روز تأییدشده برای همین تاریخ وجود دارد.";
+            }
+
+            if (user.UnavailableShiftSlots.Any(s =>
+                    s.Date.Date == required.Date.Date && s.ShiftLabel == required.ShiftLabel) &&
+                !IsApprovedRequiredSlot(user, required.Date, required.ShiftLabel, required.ShiftId))
+            {
+                return baseMsg + " علت: درخواست عدم‌حضور تأییدشده برای همین شیفت وجود دارد.";
+            }
+
+            if (Common.Utilities.ApprovedOffNightBeforeRules.IsNightBlockedByApprovedOff(user, required.Date) &&
+                !IsApprovedRequiredSlot(user, required.Date, required.ShiftLabel, required.ShiftId))
+            {
+                return baseMsg +
+                       " علت: درخواست OFF صبح/کل‌روز روز بعد، شب این تاریخ را مسدود کرده است.";
+            }
+
+            var specialtyReq = shiftReq.SpecialtyRequirements
+                .FirstOrDefault(r => r.SpecialtyId == user.SpecialtyId);
+            var day = specialtyReq?.ForDay(constraints.IsHoliday(required.Date));
+            if (specialtyReq == null || day == null || day.Value.RequiredTotalCount <= 0)
+            {
+                return baseMsg + " علت: ظرفیت این شیفت در این تاریخ صفر است.";
+            }
+
+            var occupants = solution.GetShiftAssignments(shiftReq.ShiftId, required.Date)
+                .Where(a => !a.IsOnCall && a.UserId != user.UserId)
+                .ToList();
+            var blockedByApprovedPeers = occupants.Count(a =>
+            {
+                var peer = constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId);
+                return peer != null &&
+                       IsApprovedRequiredSlot(peer, required.Date, required.ShiftLabel, shiftReq.ShiftId);
+            });
+            if (blockedByApprovedPeers >= day.Value.RequiredTotalCount)
+            {
+                return baseMsg + " علت: صندلی با درخواست ON تأییدشدهٔ کاربر دیگر پر شده است.";
+            }
+
+            if (!IsUserAvailable(user, required.Date, required.ShiftLabel, solution, constraints))
+            {
+                var next = required.Date.Date.AddDays(1);
+                var protectedNextDay = solution.GetUserAssignments(user.UserId, next)
+                    .Any(a => !a.IsOnCall && IsHardProtectedAssignment(user, a));
+                if (required.ShiftLabel == ShiftLabel.Night && protectedNextDay)
+                {
+                    return baseMsg +
+                           $" علت: درخواست تأییدشدهٔ دیگر در {next:yyyy-MM-dd} با استراحت بعد از شب (بیش از ۱۲ ساعت کار متوالی) تداخل دارد.";
+                }
+
+                return baseMsg +
+                       " علت: قوانین توالی شیفت (شب→صبح روز بعد) یا سقف شیفت روزانه مانع تخصیص است.";
+            }
+
+            return baseMsg;
         }
 
         /// <summary>
@@ -575,6 +727,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private static bool IsOffConflictFree(UserConstraint user, DateTime date, ShiftLabel shiftLabel)
         {
+            // ON صریح همان روز/شیفت بر OFF مشتق یا متعارض اولویت دارد
+            if (IsApprovedRequiredSlot(user, date, shiftLabel))
+            {
+                return true;
+            }
+
             if (user.UnavailableDates.Any(d => d.Date == date.Date))
             {
                 return false;

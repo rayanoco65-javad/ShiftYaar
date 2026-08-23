@@ -2144,6 +2144,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                                     s.ShiftId == slot.ShiftId))
                             {
                                 uc.RequiredShiftSlots.Add(slot);
+                                // ON صریح بر OFF مشتق همان روز/شیفت اولویت دارد
+                                uc.UnavailableShiftSlots.RemoveAll(s =>
+                                    s.Date.Date == slot.Date.Date && s.ShiftLabel == slot.ShiftLabel);
                                 appliedOnSlot++;
                                 _logger.LogInformation(
                                     "LoadConstraints: ON-Slot UserId={UserId} Date={Date:yyyy-MM-dd} Label={Label} ShiftId={ShiftId} RequestId={RequestId}",

@@ -35,6 +35,13 @@ public static class ApprovedOffNightBeforeRules
             return;
         }
 
+        // ON صریح شب همان روز اولویت دارد — OFF صبح روز بعد نباید آن را باطل کند
+        if (user.RequiredShiftSlots.Any(s =>
+                s.Date.Date == previousDay.Date && s.ShiftLabel == ShiftLabel.Night))
+        {
+            return;
+        }
+
         var nightShift = departmentShifts.FirstOrDefault(s =>
         {
             var label = s.Label

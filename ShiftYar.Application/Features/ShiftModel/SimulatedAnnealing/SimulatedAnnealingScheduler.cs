@@ -1509,6 +1509,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftCoverageGuard.Enforce(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
 
+            // آخرین حرف: ON تأییدشده بعد از همه گاردها دوباره اعمال شود
+            ApprovedRequestGuard.ForceApply(solution, _constraints);
+
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
             solution.Violations.AddRange(managerWarnings);
