@@ -271,6 +271,8 @@ public static class ExactNightQuotaGuard
             return;
         }
 
+        MakeRoomForMorningNightComboQuota(solution, constraints, user);
+
         var minGap = Math.Max(1, user.MinDaysBetweenNightShifts);
         var filled = 0;
 
@@ -1025,6 +1027,54 @@ public static class ExactNightQuotaGuard
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// اگر سقف سهمیه ترکیبی صبح/شب (fallback=false) پر است، برای افزودن شب جدید ابتدا صبح غیرمحافظت‌شده حذف می‌شود.
+    /// </summary>
+    private static void MakeRoomForMorningNightComboQuota(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user)
+    {
+        if (!ComboShiftQuotaEligibility.HasComboQuotaConfigured(user))
+        {
+            return;
+        }
+
+        var userStub = new Domain.Entities.UserModel.User
+        {
+            Id = user.UserId,
+            ShiftType = user.ShiftType,
+            ShiftSubType = user.ShiftSubType,
+            TwoShiftRotationPattern = user.TwoShiftRotationPattern
+        };
+        if (!ShiftQuotaTypeValidator.CanUseMorningNightPattern(userStub, user.AllowedShiftPermissions))
+        {
+            return;
+        }
+
+        var maxTotal = ComboShiftQuotaEligibility.GetMaxAllowedMorningNightTotal(user);
+        if (maxTotal == int.MaxValue)
+        {
+            return;
+        }
+
+        while (ComboShiftQuotaEligibility.CountMorningNightAssignments(solution, user.UserId) >= maxTotal)
+        {
+            var removableMorning = solution.GetUserAllAssignments(user.UserId)
+                .Where(a => !a.IsOnCall && a.ShiftLabel == ShiftLabel.Morning)
+                .Where(a => !IsProtected(constraints, user.UserId, a))
+                .OrderByDescending(a => a.Date)
+                .FirstOrDefault();
+            if (removableMorning != null)
+            {
+                solution.RemoveAssignment(removableMorning.UserId, removableMorning.ShiftId, removableMorning.Date);
+                continue;
+            }
+
+            break;
+        }
     }
 
     private static void ClearConflictingForNight(

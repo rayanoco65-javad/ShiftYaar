@@ -7,6 +7,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 
 /// <summary>
 /// حذف مازاد سهمیه ترکیبی صبح/عصر و صبح/شب وقتی fallback=false.
+/// شب‌های موردنیاز سهمیه شب (<see cref="UserConstraint.ExactNightShiftCount"/>) هرگز حذف نمی‌شوند.
 /// </summary>
 public static class ExactComboShiftQuotaGuard
 {
@@ -75,9 +76,13 @@ public static class ExactComboShiftQuotaGuard
         }
 
         var targetHoliday = user.MorningNightHolidayCount ?? 0;
+        var minNight = user.ExactNightShiftCount ?? 0;
 
         while (ComboShiftQuotaEligibility.CountMorningNightAssignments(solution, user.UserId) > maxTotal)
         {
+            var nightCount = solution.GetUserAllAssignments(user.UserId)
+                .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+
             var assignments = solution.GetUserAllAssignments(user.UserId)
                 .Where(a => !a.IsOnCall && (a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Night))
                 .OrderByDescending(a => a.Date)
@@ -90,9 +95,12 @@ public static class ExactComboShiftQuotaGuard
                 .Select(a => (
                     Assignment: a,
                     IsHoliday: constraints.IsHoliday(a.Date),
-                    CanRemove: !constraints.IsHoliday(a.Date) || holidayCount - 1 >= targetHoliday))
-                .Where(x => x.CanRemove)
-                .OrderBy(x => x.IsHoliday ? 1 : 0)
+                    IsMorning: a.ShiftLabel == ShiftLabel.Morning,
+                    CanRemoveHoliday: !constraints.IsHoliday(a.Date) || holidayCount - 1 >= targetHoliday,
+                    CanRemoveNight: a.ShiftLabel == ShiftLabel.Night && nightCount > minNight))
+                .Where(x => x.IsMorning ? x.CanRemoveHoliday : x.CanRemoveNight && x.CanRemoveHoliday)
+                .OrderBy(x => x.IsMorning ? 0 : 1)
+                .ThenBy(x => x.IsHoliday ? 1 : 0)
                 .Select(x => x.Assignment)
                 .FirstOrDefault();
 
@@ -102,6 +110,10 @@ public static class ExactComboShiftQuotaGuard
             }
 
             solution.RemoveAssignment(removable.UserId, removable.ShiftId, removable.Date);
+            if (removable.ShiftLabel == ShiftLabel.Night)
+            {
+                nightCount--;
+            }
         }
     }
 }

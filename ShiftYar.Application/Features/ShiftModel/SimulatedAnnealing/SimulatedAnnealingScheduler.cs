@@ -1497,9 +1497,15 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftCoverageGuard.EnforceCapacityCeiling(solution, _constraints);
             ProductivityHourFillGuard.EnforceFinalBalance(solution, _constraints);
             MorningEveningBalanceGuard.Enforce(solution, _constraints);
+            // پر کردن موظفی ممکن است صبح/عصر اضافه کند یا شب جابه‌جا کند — سهمیه شب را دوباره قفل کن
+            ExactNightQuotaGuard.Enforce(solution, _constraints);
+            ExactDayShiftQuotaGuard.EnforceAll(solution, _constraints);
+            ExactComboShiftQuotaGuard.Enforce(solution, _constraints);
+            ExactNightQuotaGuard.Enforce(solution, _constraints);
             ApprovedRequestGuard.ForceApply(solution, _constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             ShiftCoverageGuard.Enforce(solution, _constraints);
+            ExactNightQuotaGuard.Enforce(solution, _constraints);
 
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
@@ -1558,6 +1564,26 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     {
                         msg +=
                             $" همچنین سهمیه شب تعطیل/آخرهفته: {holidayNights}/{user.ExactHolidayWeekendNightShiftCount.Value}.";
+                    }
+
+                    if (ComboShiftQuotaEligibility.HasComboQuotaConfigured(user)
+                        && user.MorningNightShiftCount.HasValue
+                        && user.MorningNightFallbackParticipation == false
+                        && user.ExactNightShiftCount.Value > user.MorningNightShiftCount.Value)
+                    {
+                        msg +=
+                            $" سهمیه ترکیبی صبح/شب ({user.MorningNightShiftCount.Value}) از سهمیه شب ({user.ExactNightShiftCount.Value}) کمتر است.";
+                    }
+                    else if (ComboShiftQuotaEligibility.HasComboQuotaConfigured(user)
+                             && user.MorningNightShiftCount.HasValue)
+                    {
+                        var comboTotal = ComboShiftQuotaEligibility.CountMorningNightAssignments(solution, user.UserId);
+                        if (comboTotal >= user.MorningNightShiftCount.Value
+                            && user.MorningNightFallbackParticipation == false)
+                        {
+                            msg +=
+                                $" سقف سهمیه ترکیبی صبح/شب ({comboTotal}/{user.MorningNightShiftCount.Value}) ممکن است مانع باشد.";
+                        }
                     }
 
                     violations.Add(msg);
