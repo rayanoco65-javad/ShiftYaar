@@ -1,10 +1,14 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using ShiftYar.Infrastructure.Persistence.AppDbContext;
 
 #nullable disable
 
 namespace ShiftYar.Infrastructure.Migrations
 {
     /// <inheritdoc />
+    [DbContext(typeof(ShiftYarDbContext))]
+    [Migration("20260821210000_MakeDayShiftFallbackNullable")]
     public partial class MakeDayShiftFallbackNullable : Migration
     {
         /// <inheritdoc />

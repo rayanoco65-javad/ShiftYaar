@@ -1,9 +1,11 @@
 ﻿using AutoMapper;
 using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.DTOs.DepartmentModel;
+using ShiftYar.Application.DTOs.RoleModel;
 using ShiftYar.Application.DTOs.UserModel;
 using ShiftYar.Domain.Entities.DepartmentModel;
 using ShiftYar.Domain.Entities.RoleModel;
+using ShiftYar.Domain.Entities.ShiftModel;
 using ShiftYar.Domain.Entities.UserModel;
 using System.Linq;
 
@@ -37,60 +39,36 @@ namespace ShiftYar.Application.Common.Mappings
 
             CreateMap<User, UserDtoGet>()
                 .ForMember(dest => dest.DateOfEmployment, opt => opt.MapFrom(src =>
-                    DateConverter.NormalizeEmploymentDate(src.DateOfEmployment)))
-                .ForMember(dest => dest.OtherPhoneNumbers, opt => opt.MapFrom(src =>
-                    src.OtherPhoneNumbers.Select(p => new UserPhoneNumber
-                    {
-                        Id = p.Id,
-                        PhoneNumber = p.PhoneNumber,
-                        UserId = p.UserId,
-                        IsActive = p.IsActive
-                    }).ToList()))
-                .ForMember(dest => dest.UserRoles, opt => opt.MapFrom(src =>
-                    src.UserRoles.Select(r => new UserRole
-                    {
-                        Id = r.Id,
-                        UserId = r.UserId,
-                        RoleId = r.RoleId,
-                        Role = r.Role != null ? new Role
-                        {
-                            Id = r.Role.Id,
-                            Name = r.Role.Name,
-                            IsActive = r.Role.IsActive
-                        } : null
-                    }).ToList()))
-                .ForMember(dest => dest.Department, opt => opt.MapFrom(src =>
-                    src.Department != null ? new Department
-                    {
-                        Id = src.Department.Id,
-                        Name = src.Department.Name,
-                        Description = src.Department.Description,
-                        IsActive = src.Department.IsActive,
-                        HospitalId = src.Department.HospitalId
-                    } : null));
+                    DateConverter.NormalizeEmploymentDate(src.DateOfEmployment)));
+
+            CreateMap<Department, UserDepartmentDtoGet>();
+            CreateMap<Specialty, UserSpecialtyDtoGet>();
+            CreateMap<UserPhoneNumber, UserPhoneNumberDtoGet>();
+            CreateMap<UserRole, UserRoleDtoGet>();
+            CreateMap<Role, RoleDtoGet>();
 
             CreateMap<UserDtoGet, User>()
+                .ForMember(dest => dest.Department, opt => opt.Ignore())
+                .ForMember(dest => dest.Specialty, opt => opt.Ignore())
                 .ForMember(dest => dest.OtherPhoneNumbers, opt => opt.MapFrom(src =>
-                    src.OtherPhoneNumbers.Select(p => new UserPhoneNumber
-                    {
-                        Id = p.Id,
-                        PhoneNumber = p.PhoneNumber,
-                        UserId = p.UserId,
-                        IsActive = p.IsActive
-                    }).ToList()))
-                .ForMember(dest => dest.UserRoles, opt => opt.MapFrom(src =>
-                    src.UserRoles.Select(r => new UserRole
-                    {
-                        Id = r.Id,
-                        UserId = r.UserId,
-                        RoleId = r.RoleId,
-                        Role = r.Role != null ? new Role
+                    src.OtherPhoneNumbers != null
+                        ? src.OtherPhoneNumbers.Select(p => new UserPhoneNumber
                         {
-                            Id = r.Role.Id,
-                            Name = r.Role.Name,
-                            IsActive = r.Role.IsActive
-                        } : null
-                    }).ToList()));
+                            Id = p.Id,
+                            PhoneNumber = p.PhoneNumber,
+                            UserId = p.UserId,
+                            IsActive = p.IsActive
+                        }).ToList()
+                        : null))
+                .ForMember(dest => dest.UserRoles, opt => opt.MapFrom(src =>
+                    src.UserRoles != null
+                        ? src.UserRoles.Select(r => new UserRole
+                        {
+                            Id = r.Id,
+                            UserId = r.UserId,
+                            RoleId = r.RoleId
+                        }).ToList()
+                        : null));
 
             // DepartmentSchedulingSettings mappings
             CreateMap<DepartmentSchedulingSettings, DepartmentSchedulingSettingsDtoGet>();

@@ -1,10 +1,14 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using ShiftYar.Infrastructure.Persistence.AppDbContext;
 
 #nullable disable
 
 namespace ShiftYar.Infrastructure.Migrations
 {
     /// <inheritdoc />
+    [DbContext(typeof(ShiftYarDbContext))]
+    [Migration("20260821200000_AddUserMonthlyDayShiftQuota")]
     public partial class AddUserMonthlyDayShiftQuota : Migration
     {
         /// <inheritdoc />

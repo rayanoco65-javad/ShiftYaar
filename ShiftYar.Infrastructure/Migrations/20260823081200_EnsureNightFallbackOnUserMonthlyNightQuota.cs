@@ -6,10 +6,13 @@ using ShiftYar.Infrastructure.Persistence.AppDbContext;
 
 namespace ShiftYar.Infrastructure.Migrations
 {
-    /// <inheritdoc />
+    /// <summary>
+    /// اطمینان از وجود ستون‌های fallback سهمیه شب (برای دیتابیس‌هایی که
+    /// migration قبلی بدون [Migration] attribute کشف/اعمال نشده بود).
+    /// </summary>
     [DbContext(typeof(ShiftYarDbContext))]
-    [Migration("20260821220000_AddNightFallbackToUserMonthlyNightQuota")]
-    public partial class AddNightFallbackToUserMonthlyNightQuota : Migration
+    [Migration("20260823081200_EnsureNightFallbackOnUserMonthlyNightQuota")]
+    public partial class EnsureNightFallbackOnUserMonthlyNightQuota : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)

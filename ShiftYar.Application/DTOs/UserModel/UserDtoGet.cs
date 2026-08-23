@@ -1,12 +1,4 @@
-﻿using ShiftYar.Domain.Entities.DepartmentModel;
-using ShiftYar.Domain.Entities.ShiftModel;
-using ShiftYar.Domain.Entities.UserModel;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using ShiftYar.Application.DTOs.RoleModel;
 using static ShiftYar.Domain.Enums.ShiftModel.ShiftEnums;
 using static ShiftYar.Domain.Enums.UserModel.UserEnums;
 
@@ -35,9 +27,9 @@ namespace ShiftYar.Application.DTOs.UserModel
         public decimal? MaxProductivityRequiredHours { get; set; }
         public string? Image { get; set; }
         public int? DepartmentId { get; set; }
-        public Department? Department { get; set; }
+        public UserDepartmentDtoGet? Department { get; set; }
         public int? SpecialtyId { get; set; }
-        public Specialty? Specialty { get; set; }
+        public UserSpecialtyDtoGet? Specialty { get; set; }
 
         //کاربر چه نوع شیفتی میدهد؟
         public ShiftTypes? ShiftType { get; set; }
@@ -48,7 +40,39 @@ namespace ShiftYar.Application.DTOs.UserModel
         /// <summary>مجوزهای صریح نوع شیفت (flags). null = مشتق از ShiftType.</summary>
         public UserShiftPermission? AllowedShiftPermissions { get; set; }
 
-        public List<UserPhoneNumber>? OtherPhoneNumbers { get; set; }
-        public List<UserRole>? UserRoles { get; set; }
+        public List<UserPhoneNumberDtoGet>? OtherPhoneNumbers { get; set; }
+        public List<UserRoleDtoGet>? UserRoles { get; set; }
+    }
+
+    public class UserDepartmentDtoGet
+    {
+        public int Id { get; set; }
+        public string? Name { get; set; }
+        public string? Description { get; set; }
+        public bool? IsActive { get; set; }
+        public int? HospitalId { get; set; }
+    }
+
+    public class UserSpecialtyDtoGet
+    {
+        public int? Id { get; set; }
+        public int? DepartmentId { get; set; }
+        public string? SpecialtyName { get; set; }
+    }
+
+    public class UserPhoneNumberDtoGet
+    {
+        public int? Id { get; set; }
+        public int? UserId { get; set; }
+        public string? PhoneNumber { get; set; }
+        public bool? IsActive { get; set; }
+    }
+
+    public class UserRoleDtoGet
+    {
+        public int? Id { get; set; }
+        public int? UserId { get; set; }
+        public int? RoleId { get; set; }
+        public RoleDtoGet? Role { get; set; }
     }
 }
