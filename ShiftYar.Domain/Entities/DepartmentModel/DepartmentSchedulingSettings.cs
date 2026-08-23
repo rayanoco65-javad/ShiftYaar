@@ -87,9 +87,14 @@ namespace ShiftYar.Domain.Entities.DepartmentModel
 
         /// <summary>
         /// اجازهٔ شیفت عصر در روز بعد از شیفت شب.
-        /// true: در صورت نیاز می‌توان عصر روز بعد را داد (صبح روز بعد همچنان ممنوع است).
-        /// false: روز بعد از شب باید کاملاً off باشد (صبح/عصر/شب ممنوع).
+        /// پیش‌فرض false: عصر روز بعد ممنوع.
         /// </summary>
-        public bool? AllowEveningAfterNightShift { get; set; }
+        public bool AllowEveningAfterNightShift { get; set; }
+
+        /// <summary>
+        /// اجازهٔ شیفت شب در روز بعد از شیفت شب (شب متوالی).
+        /// پیش‌فرض false: شب متوالی ممنوع.
+        /// </summary>
+        public bool AllowNightShiftAfterNightShift { get; set; }
     }
 }

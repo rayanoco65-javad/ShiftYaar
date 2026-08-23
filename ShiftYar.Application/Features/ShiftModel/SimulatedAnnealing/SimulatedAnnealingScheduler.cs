@@ -1109,7 +1109,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             {
                 if (AdjacentShiftRestRules.HasForbiddenAdjacentPair(
                         solution.GetUserAllAssignments(userConstraint.UserId),
-                        _constraints.HardRules.AllowEveningAfterNightShift))
+                        _constraints.HardRules))
                 {
                     return false;
                 }
@@ -1593,10 +1593,17 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                     if (!_constraints.HardRules.AllowEveningAfterNightShift)
                     {
-                        msg += " (تنظیم «روز بعد از شب باید off باشد» فعال است؛ درخواست/شیفت صبح یا عصر روز بعد ممکن است مانع باشد.)";
+                        msg += " (تنظیم «اجازه عصر روز بعد از شب» غیرفعال است؛ عصر روز بعد ممکن است مانع باشد.)";
                     }
-                    else if (_constraints.HardRules.EnforceMaxShiftsPerDay
-                             && _constraints.GlobalConstraints.MaxShiftsPerDay <= 1)
+
+                    if (!_constraints.HardRules.AllowNightShiftAfterNightShift)
+                    {
+                        msg += " (تنظیم «اجازه شب روز بعد از شب» غیرفعال است؛ شب متوالی ممکن است مانع باشد.)";
+                    }
+
+                    if (_constraints.HardRules.EnforceMaxShiftsPerDay
+                        && _constraints.GlobalConstraints.MaxShiftsPerDay <= 1
+                        && _constraints.HardRules.AllowEveningAfterNightShift)
                     {
                         msg += " (حداکثر ۱ شیفت در روز فعال است؛ شیفت صبح/عصر همان روز ممکن است مانع شب شود.)";
                     }

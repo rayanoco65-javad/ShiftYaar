@@ -1090,14 +1090,26 @@ public static class ExactNightQuotaGuard
     {
         foreach (var night in GetNights(solution, user.UserId))
         {
-            var next = night.Date.Date.AddDays(1);
-            if (!constraints.HardRules.AllowEveningAfterNightShift)
+            RemoveForbiddenOnDayAfterNight(solution, constraints, user, night.Date.Date.AddDays(1));
+        }
+    }
+
+    private static void RemoveForbiddenOnDayAfterNight(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user,
+        DateTime date)
+    {
+        foreach (var assignment in solution.GetUserAssignments(user.UserId, date).ToList())
+        {
+            if (IsProtected(constraints, user.UserId, assignment))
             {
-                RemoveAllClearableOnDate(solution, constraints, user, next);
+                continue;
             }
-            else
+
+            if (constraints.HardRules.IsForbiddenOnDayAfterNight(assignment.ShiftLabel))
             {
-                RemoveClearableAssignments(solution, constraints, user, next, ShiftLabel.Morning);
+                solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
             }
         }
     }
@@ -1125,13 +1137,12 @@ public static class ExactNightQuotaGuard
         }
 
         // روز بعد از شب
-        if (!constraints.HardRules.AllowEveningAfterNightShift)
+        RemoveForbiddenOnDayAfterNight(solution, constraints, user, next);
+
+        // شب روز قبل (شب متوالی)
+        if (!constraints.HardRules.AllowNightShiftAfterNightShift)
         {
-            RemoveAllClearableOnDate(solution, constraints, user, next);
-        }
-        else
-        {
-            RemoveClearableAssignments(solution, constraints, user, next, ShiftLabel.Morning);
+            RemoveClearableAssignments(solution, constraints, user, day.AddDays(-1), ShiftLabel.Night);
         }
     }
 
@@ -1184,7 +1195,6 @@ public static class ExactNightQuotaGuard
         var canKeepSameDayMorning = maxPerDay >= 2
                                     && ShiftEligibilityResolver.SupportsMorningNightCombo(user)
                                     && ShiftEligibilityResolver.MayEverTakeLabel(user, ShiftLabel.Morning);
-        var fullDayOffAfterNight = !constraints.HardRules.AllowEveningAfterNightShift;
 
         return solution.GetUserAllAssignments(user.UserId)
             .Where(a =>
@@ -1211,29 +1221,17 @@ public static class ExactNightQuotaGuard
                     return false;
                 }
 
-                // روز بعد از شبِ کاندید
-                if (a.Date.Date == next)
+                if (a.Date.Date == day.AddDays(-1)
+                    && a.ShiftLabel == ShiftLabel.Night
+                    && !constraints.HardRules.AllowNightShiftAfterNightShift)
                 {
-                    if (fullDayOffAfterNight)
-                    {
-                        return false;
-                    }
-
-                    if (a.ShiftLabel == ShiftLabel.Morning)
-                    {
-                        return false;
-                    }
+                    return false;
                 }
 
-                // روز بعد از هر شب موجود — برای WouldConflict هنگام افزودن شب جدید
-                if (userNightDates.Contains(a.Date.Date.AddDays(-1)))
+                // روز بعد از شبِ کاندید یا شب موجود
+                if (a.Date.Date == next || userNightDates.Contains(a.Date.Date.AddDays(-1)))
                 {
-                    if (fullDayOffAfterNight)
-                    {
-                        return false;
-                    }
-
-                    if (a.ShiftLabel == ShiftLabel.Morning)
+                    if (constraints.HardRules.IsForbiddenOnDayAfterNight(a.ShiftLabel))
                     {
                         return false;
                     }
@@ -1260,26 +1258,23 @@ public static class ExactNightQuotaGuard
         }
 
         var nextDay = date.Date.AddDays(1);
-        if (!constraints.HardRules.AllowEveningAfterNightShift)
+        var protectedBlockingNextDay = solution.GetUserAssignments(user.UserId, nextDay)
+            .Where(a => !a.IsOnCall)
+            .Where(a => IsProtected(constraints, user.UserId, a))
+            .Any(a => constraints.HardRules.IsForbiddenOnDayAfterNight(a.ShiftLabel));
+        if (protectedBlockingNextDay)
         {
-            var protectedNextDay = solution.GetUserAssignments(user.UserId, nextDay)
-                .Where(a => !a.IsOnCall)
-                .Any(a => IsProtected(constraints, user.UserId, a));
-            if (protectedNextDay)
-            {
-                return false;
-            }
+            return false;
         }
-        else
+
+        var prevDay = date.Date.AddDays(-1);
+        var protectedPrevNight = solution.GetUserAssignments(user.UserId, prevDay)
+            .Where(a => !a.IsOnCall)
+            .Where(a => a.ShiftLabel == ShiftLabel.Night)
+            .Any(a => IsProtected(constraints, user.UserId, a));
+        if (protectedPrevNight && !constraints.HardRules.AllowNightShiftAfterNightShift)
         {
-            var protectedNextMorning = solution.GetUserAssignments(user.UserId, nextDay)
-                .Where(a => !a.IsOnCall)
-                .Where(a => a.ShiftLabel == ShiftLabel.Morning)
-                .Any(a => IsProtected(constraints, user.UserId, a));
-            if (protectedNextMorning)
-            {
-                return false;
-            }
+            return false;
         }
 
         if (AdjacentShiftRestRules.WouldConflict(

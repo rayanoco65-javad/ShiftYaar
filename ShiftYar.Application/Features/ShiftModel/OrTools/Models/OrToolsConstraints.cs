@@ -175,7 +175,8 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools.Models
         public bool EnforceSpecialtyCapacity { get; set; } = true; // ظرفیت تخصص
         public bool EnforceProductivityHours { get; set; } = true; // اعمال سقف ساعات بهره‌وری
         /// <summary>true = عصر روز بعد از شب مجاز؛ false = روز بعد کاملاً off</summary>
-        public bool AllowEveningAfterNightShift { get; set; } = true;
+        public bool AllowEveningAfterNightShift { get; set; } = false;
+        public bool AllowNightShiftAfterNightShift { get; set; } = false;
 
         public static OrToolsHardRules CreateDefault()
         {

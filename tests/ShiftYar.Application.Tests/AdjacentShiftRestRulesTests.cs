@@ -50,13 +50,59 @@ public class AdjacentShiftRestRulesTests
     }
 
     [Fact]
-    public void NightThenAnyNextDay_ForbiddenWhenSettingDisabled()
+    public void NightThenNight_NextDay_ForbiddenWhenNightSettingDisabled()
     {
         var d = new DateTime(2026, 8, 25);
         Assert.True(AdjacentShiftRestRules.IsForbiddenBackToBack(
-            ShiftLabel.Night, d, ShiftLabel.Morning, d.AddDays(1), allowEveningAfterNightShift: false));
+            ShiftLabel.Night, d, ShiftLabel.Night, d.AddDays(1),
+            allowEveningAfterNightShift: true,
+            allowNightShiftAfterNightShift: false));
+        Assert.False(AdjacentShiftRestRules.IsForbiddenBackToBack(
+            ShiftLabel.Night, d, ShiftLabel.Night, d.AddDays(1),
+            allowEveningAfterNightShift: true,
+            allowNightShiftAfterNightShift: true));
+    }
+
+    [Fact]
+    public void NightThenEveningAndNight_NextDay_RespectSeparateSettings()
+    {
+        var d = new DateTime(2026, 8, 25);
         Assert.True(AdjacentShiftRestRules.IsForbiddenBackToBack(
-            ShiftLabel.Night, d, ShiftLabel.Night, d.AddDays(1), allowEveningAfterNightShift: false));
+            ShiftLabel.Night, d, ShiftLabel.Evening, d.AddDays(1),
+            allowEveningAfterNightShift: false,
+            allowNightShiftAfterNightShift: true));
+        Assert.False(AdjacentShiftRestRules.IsForbiddenBackToBack(
+            ShiftLabel.Night, d, ShiftLabel.Night, d.AddDays(1),
+            allowEveningAfterNightShift: false,
+            allowNightShiftAfterNightShift: true));
+    }
+
+    [Fact]
+    public void NightThenMorning_NextDay_AlwaysForbidden_EvenWhenOtherSettingsEnabled()
+    {
+        var d = new DateTime(2026, 8, 25);
+        Assert.True(AdjacentShiftRestRules.IsForbiddenBackToBack(
+            ShiftLabel.Night, d, ShiftLabel.Morning, d.AddDays(1),
+            allowEveningAfterNightShift: true,
+            allowNightShiftAfterNightShift: true));
+    }
+
+    [Fact]
+    public void NightThenAnyNextDay_ForbiddenWhenBothSettingsDisabled()
+    {
+        var d = new DateTime(2026, 8, 25);
+        Assert.True(AdjacentShiftRestRules.IsForbiddenBackToBack(
+            ShiftLabel.Night, d, ShiftLabel.Morning, d.AddDays(1),
+            allowEveningAfterNightShift: false,
+            allowNightShiftAfterNightShift: false));
+        Assert.True(AdjacentShiftRestRules.IsForbiddenBackToBack(
+            ShiftLabel.Night, d, ShiftLabel.Evening, d.AddDays(1),
+            allowEveningAfterNightShift: false,
+            allowNightShiftAfterNightShift: false));
+        Assert.True(AdjacentShiftRestRules.IsForbiddenBackToBack(
+            ShiftLabel.Night, d, ShiftLabel.Night, d.AddDays(1),
+            allowEveningAfterNightShift: false,
+            allowNightShiftAfterNightShift: false));
     }
 
     [Fact]

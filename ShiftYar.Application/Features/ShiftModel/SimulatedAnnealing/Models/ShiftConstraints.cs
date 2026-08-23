@@ -266,9 +266,21 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
 
         /// <summary>
         /// true: روز بعد از شب می‌تواند در صورت نیاز عصر بگیرد (صبح همچنان ممنوع).
-        /// false: روز بعد از شب باید کاملاً بدون شیفت باشد.
+        /// false: عصر روز بعد از شب ممنوع است (پیش‌فرض).
         /// </summary>
-        public bool AllowEveningAfterNightShift { get; set; } = true;
+        public bool AllowEveningAfterNightShift { get; set; } = false;
+
+        /// <summary>
+        /// true: روز بعد از شب می‌تواند در صورت نیاز شب بگیرد (شب متوالی؛ صبح همچنان ممنوع).
+        /// false: شب روز بعد از شب ممنوع است (پیش‌فرض).
+        /// </summary>
+        public bool AllowNightShiftAfterNightShift { get; set; } = false;
+
+        /// <summary>آیا شیفت مشخص در روز بعد از شب ممنوع است؟</summary>
+        public bool IsForbiddenOnDayAfterNight(ShiftLabel label) =>
+            label == ShiftLabel.Morning ||
+            (label == ShiftLabel.Evening && !AllowEveningAfterNightShift) ||
+            (label == ShiftLabel.Night && !AllowNightShiftAfterNightShift);
 
         public static HardRuleSet CreateDefault()
         {

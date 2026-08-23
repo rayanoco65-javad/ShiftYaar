@@ -379,30 +379,20 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             if (label == ShiftLabel.Night)
             {
                 var next = date.Date.AddDays(1);
-                if (!constraints.HardRules.AllowEveningAfterNightShift)
+                foreach (var assignment in solution.GetUserAssignments(user.UserId, next).ToList())
                 {
-                    foreach (var assignment in solution.GetUserAssignments(user.UserId, next).ToList())
+                    if (IsHardProtectedAssignment(user, assignment))
                     {
-                        if (!IsHardProtectedAssignment(user, assignment))
-                        {
-                            solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
-                        }
+                        continue;
                     }
-                }
-                else
-                {
-                    foreach (var assignment in solution.GetUserAssignments(user.UserId, next)
-                                 .Where(a => a.ShiftLabel == ShiftLabel.Morning)
-                                 .ToList())
+
+                    if (constraints.HardRules.IsForbiddenOnDayAfterNight(assignment.ShiftLabel))
                     {
-                        if (!IsHardProtectedAssignment(user, assignment))
-                        {
-                            solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
-                        }
+                        solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
                     }
                 }
 
-                if (!constraints.HardRules.AllowEveningAfterNightShift)
+                if (!constraints.HardRules.AllowNightShiftAfterNightShift)
                 {
                     foreach (var assignment in GetUserNightAssignments(solution, user.UserId)
                                  .Where(a => a.Date.Date == date.Date.AddDays(-1))
@@ -417,7 +407,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             foreach (var assignment in solution.GetUserAssignments(user.UserId, date)
-                         .Where(a => a.ShiftLabel == ShiftLabel.Evening && a.ShiftLabel != label)
+                         .Where(a => a.ShiftLabel == ShiftLabel.Evening)
                          .ToList())
             {
                 if (label == ShiftLabel.Night && !IsHardProtectedAssignment(user, assignment))
@@ -544,7 +534,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                 if (!Common.Utilities.AdjacentShiftRestRules.IsForbiddenBackToBack(
                         earlierLabel, earlierDate, laterLabel, laterDate,
-                        constraints.HardRules.AllowEveningAfterNightShift))
+                        constraints.HardRules))
                 {
                     continue;
                 }
@@ -773,12 +763,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return false;
             }
 
-            if (solution != null &&
+            if (solution != null && constraints != null &&
                 Common.Utilities.AdjacentShiftRestRules.WouldConflict(
                     solution.GetUserAllAssignments(user.UserId),
                     date,
                     shiftLabel,
-                    allowEveningAfterNightShift: constraints?.HardRules.AllowEveningAfterNightShift ?? true))
+                    constraints))
             {
                 return false;
             }
