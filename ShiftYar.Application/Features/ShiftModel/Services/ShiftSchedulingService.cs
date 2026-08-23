@@ -1826,6 +1826,12 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     userConstraint.MinRestDaysBetweenShifts = 1; // پیش‌فرض
                     userConstraint.MaxShiftsPerWeek = 5; // پیش‌فرض
                     userConstraint.MinDaysBetweenNightShifts = 2; // حداقل ۲ روز فاصله بین شب‌ها
+                    if (constraints.HardRules.AllowNightShiftAfterNightShift)
+                    {
+                        // با فعال بودن شب متوالی، فاصلهٔ اجباری بین شب‌ها برداشته می‌شود
+                        // (سقف طول زنجیره با MaxConsecutiveNightShifts کنترل می‌شود)
+                        userConstraint.MinDaysBetweenNightShifts = 0;
+                    }
                     if (!userConstraint.HasExactNightQuota)
                     {
                         userConstraint.MaxNightShiftsPerMonth = 8; // پیش‌فرض

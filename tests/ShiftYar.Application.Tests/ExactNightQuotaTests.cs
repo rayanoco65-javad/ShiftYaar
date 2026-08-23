@@ -784,6 +784,40 @@ public class ExactNightQuotaTests
     }
 
     [Fact]
+    public void ExactNightQuotaGuard_AllowsConsecutiveNightsWhenDepartmentFlagEnabled()
+    {
+        // در ۱۰ روز با فاصلهٔ اجباری ۲ فقط حدود ۴ شب جا می‌شود؛ با شب متوالی باید به ۶ برسد.
+        var start = new DateTime(2026, 8, 1);
+        var user = MakeUser(1, exactNights: 6, exactHolidayNights: null);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(9),
+            UserConstraints = [user],
+            ShiftRequirements = [Shift(3, ShiftLabel.Night)],
+            HardRules = new HardRuleSet
+            {
+                EnforceSpecialtyCapacity = true,
+                AllowNightShiftAfterNightShift = true,
+                AllowEveningAfterNightShift = true
+            },
+            GlobalConstraints = new GlobalConstraints
+            {
+                MaxShiftsPerDay = 1,
+                AllowConsecutiveNightShifts = true,
+                MaxConsecutiveNightShifts = 2
+            }
+        };
+
+        var solution = new ShiftSolution();
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+
+        var nights = solution.GetUserAllAssignments(1)
+            .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+        Assert.Equal(6, nights);
+    }
+
+    [Fact]
     public void ExactNightQuotaGuard_AddsSeventhNightWhenSpacingAllows()
     {
         var start = new DateTime(2026, 8, 1);

@@ -32,6 +32,12 @@ public static class DepartmentPostNightShiftRulesApplier
             {
                 constraints.GlobalConstraints.MaxConsecutiveNightShifts = 2;
             }
+
+            // فاصلهٔ اجباری بین شب‌های کاربران باید با این فلگ هم‌خوان باشد
+            foreach (var user in constraints.UserConstraints)
+            {
+                user.MinDaysBetweenNightShifts = 0;
+            }
         }
     }
 }

@@ -82,7 +82,7 @@ public static class ExactNightQuotaGuard
                     continue;
                 }
 
-                var minGap = Math.Max(1, user.MinDaysBetweenNightShifts);
+                var minGap = ResolveNightSpacingGap(constraints, user);
                 var before = CountNights(solution, user.UserId);
                 TryFillNights(solution, constraints, user, nightShift, remaining, holidayOnly: false);
                 var stillNeed = user.ExactNightShiftCount.Value - CountNights(solution, user.UserId);
@@ -149,7 +149,7 @@ public static class ExactNightQuotaGuard
             if (holidayNeed > 0)
             {
                 // اول تعویض شب عادی↔تعطیل (تعداد کل ثابت می‌ماند)
-                var minGap = Math.Max(1, user.MinDaysBetweenNightShifts);
+                var minGap = ResolveNightSpacingGap(constraints, user);
                 SwapWeekdayForHoliday(solution, constraints, user, nightShift, holidayNeed, minGap);
                 nights = GetNights(solution, user.UserId);
                 holidayNights = nights.Where(a => constraints.IsHolidayWeekendNight(a.Date)).ToList();
@@ -276,7 +276,7 @@ public static class ExactNightQuotaGuard
         // صبح/عصر روز بعد از شب‌های موجود (مثلاً از ProductivityHourFill) مانع افزودن شب جدید می‌شود
         ClearStalePostNightConflicts(solution, constraints, user);
 
-        var minGap = Math.Max(1, user.MinDaysBetweenNightShifts);
+        var minGap = ResolveNightSpacingGap(constraints, user);
         var filled = 0;
 
         // ۱) صندلی‌های خالی
@@ -498,7 +498,7 @@ public static class ExactNightQuotaGuard
                 continue;
             }
 
-            if (ViolatesNightSpacing(solution, user, date, minGap))
+            if (ViolatesNightSpacing(solution, constraints, user, date, minGap))
             {
                 continue;
             }
@@ -546,7 +546,7 @@ public static class ExactNightQuotaGuard
                 continue;
             }
 
-            if (ViolatesNightSpacing(solution, user, date, minGap))
+            if (ViolatesNightSpacing(solution, constraints, user, date, minGap))
             {
                 continue;
             }
@@ -606,7 +606,7 @@ public static class ExactNightQuotaGuard
                 }
 
                 if (!IsPersonallyFeasibleNightDate(solution, constraints, user, nightShift, date, holidayOnly, ignoreHolidayReservation)
-                    || ViolatesNightSpacing(solution, user, date, minGap)
+                    || ViolatesNightSpacing(solution, constraints, user, date, minGap)
                     || !CanAcceptNightAfterClearing(solution, constraints, user, nightShift, date))
                 {
                     continue;
@@ -731,7 +731,7 @@ public static class ExactNightQuotaGuard
                 continue;
             }
 
-            if (!ViolatesNightSpacing(solution, user, date, minGap))
+            if (!ViolatesNightSpacing(solution, constraints, user, date, minGap))
             {
                 // فاصله OK — ادعای مستقیم
                 ClearConflictingForNight(solution, constraints, user, date);
@@ -759,7 +759,7 @@ public static class ExactNightQuotaGuard
                 continue;
             }
 
-            if (ViolatesNightSpacing(solution, user, date, minGap)
+            if (ViolatesNightSpacing(solution, constraints, user, date, minGap)
                 || !CanAcceptNightAfterClearing(solution, constraints, user, nightShift, date)
                 || !CanDonateNight(solution, constraints, donor, surplusNight, forHolidayClaim: holidayOnly))
             {
@@ -1336,7 +1336,7 @@ public static class ExactNightQuotaGuard
         UserConstraint user,
         ShiftRequirement nightShift)
     {
-        var minGap = Math.Max(1, user.MinDaysBetweenNightShifts);
+        var minGap = ResolveNightSpacingGap(constraints, user);
 
         for (var iter = 0; iter < 24; iter++)
         {
@@ -1678,8 +1678,24 @@ public static class ExactNightQuotaGuard
     private static int GetSpecialty(ShiftConstraints constraints, int userId) =>
         constraints.UserConstraints.FirstOrDefault(u => u.UserId == userId)?.SpecialtyId ?? 0;
 
+    /// <summary>
+    /// فاصلهٔ حداقل بین شب‌ها.
+    /// اگر «شب روز بعد از شب» مجاز باشد، فاصلهٔ صفر (شب متوالی مجاز) تا سقف MaxConsecutiveNightShifts.
+    /// در غیر این صورت حداقل ۱ (و معمولاً ۲ از تنظیمات کاربر) اعمال می‌شود.
+    /// </summary>
+    private static int ResolveNightSpacingGap(ShiftConstraints constraints, UserConstraint user)
+    {
+        if (constraints.HardRules.AllowNightShiftAfterNightShift)
+        {
+            return 0;
+        }
+
+        return Math.Max(1, user.MinDaysBetweenNightShifts);
+    }
+
     private static bool ViolatesNightSpacing(
         ShiftSolution solution,
+        ShiftConstraints constraints,
         UserConstraint user,
         DateTime candidateDate,
         int minGap)
@@ -1692,7 +1708,39 @@ public static class ExactNightQuotaGuard
             }
         }
 
+        if (minGap == 0 && WouldExceedMaxConsecutiveNights(solution, constraints, user, candidateDate))
+        {
+            return true;
+        }
+
         return false;
+    }
+
+    private static bool WouldExceedMaxConsecutiveNights(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user,
+        DateTime candidateDate)
+    {
+        var maxRun = Math.Max(1, constraints.GlobalConstraints.MaxConsecutiveNightShifts);
+        var nights = GetNights(solution, user.UserId)
+            .Select(a => a.Date.Date)
+            .Append(candidateDate.Date)
+            .ToHashSet();
+
+        var left = 0;
+        for (var d = candidateDate.Date.AddDays(-1); nights.Contains(d); d = d.AddDays(-1))
+        {
+            left++;
+        }
+
+        var right = 0;
+        for (var d = candidateDate.Date.AddDays(1); nights.Contains(d); d = d.AddDays(1))
+        {
+            right++;
+        }
+
+        return 1 + left + right > maxRun;
     }
 
     private static bool IsProtected(ShiftConstraints constraints, int userId, SaShiftAssignment assignment)
