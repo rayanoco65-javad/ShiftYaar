@@ -57,6 +57,21 @@ namespace ShiftYar.Api.Controllers.DepartmentModel
         }
 
         /// <summary>
+        /// اعمال تنظیمات پیش‌فرض بهینه زمان‌بندی برای دپارتمان (ایجاد یا بازنویسی).
+        /// </summary>
+        [HttpPost]
+        public async Task<ActionResult<ApiResponse<DepartmentSchedulingSettingsDtoGet>>> ApplyDefaultDepartmentSchedulingSettings(int departmentId)
+        {
+            var result = await _service.ApplyDefaultSettingsAsync(departmentId);
+            if (!result.IsSuccess)
+            {
+                return result.Message.Contains("یافت نشد") ? NotFound(result) : BadRequest(result);
+            }
+
+            return Ok(result);
+        }
+
+        /// <summary>
         /// تنظیمات توزیع شیفت‌های شب بر اساس سابقه
         /// </summary>
         [HttpPut("night-shift-distribution/{id}")]

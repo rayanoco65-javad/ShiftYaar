@@ -5,9 +5,13 @@ using ShiftYar.Application.Common.Models.ResponseModel;
 using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.DTOs.DepartmentModel;
 using ShiftYar.Application.Features.DepartmentModel.Filters;
+using ShiftYar.Application.Features.ShiftModel.Filters;
+using ShiftYar.Application.Features.UserModel.Filters;
 using ShiftYar.Application.Interfaces.DepartmentModel;
 using ShiftYar.Application.Interfaces.Persistence;
 using ShiftYar.Domain.Entities.DepartmentModel;
+using ShiftYar.Domain.Entities.ShiftModel;
+using ShiftYar.Domain.Entities.UserModel;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -20,13 +24,26 @@ namespace ShiftYar.Application.Features.DepartmentModel.Services
     public class DepartmentSchedulingSettingsService : IDepartmentSchedulingSettingsService
     {
         private readonly IEfRepository<DepartmentSchedulingSettings> _repository;
+        private readonly IEfRepository<Department> _departmentRepository;
+        private readonly IEfRepository<User> _userRepository;
+        private readonly IEfRepository<Shift> _shiftRepository;
         private readonly IMapper _mapper;
         private readonly ILogger<DepartmentSchedulingSettingsService> _logger;
         private readonly IHttpContextAccessor _httpContextAccessor;
 
-        public DepartmentSchedulingSettingsService(IEfRepository<DepartmentSchedulingSettings> repository, IMapper mapper, ILogger<DepartmentSchedulingSettingsService> logger, IHttpContextAccessor httpContextAccessor)
+        public DepartmentSchedulingSettingsService(
+            IEfRepository<DepartmentSchedulingSettings> repository,
+            IEfRepository<Department> departmentRepository,
+            IEfRepository<User> userRepository,
+            IEfRepository<Shift> shiftRepository,
+            IMapper mapper,
+            ILogger<DepartmentSchedulingSettingsService> logger,
+            IHttpContextAccessor httpContextAccessor)
         {
             _repository = repository;
+            _departmentRepository = departmentRepository;
+            _userRepository = userRepository;
+            _shiftRepository = shiftRepository;
             _mapper = mapper;
             _logger = logger;
             _httpContextAccessor = httpContextAccessor;
@@ -211,6 +228,101 @@ namespace ShiftYar.Application.Features.DepartmentModel.Services
             _repository.Delete(entity);
             await _repository.SaveAsync();
             return ApiResponse<string>.Success("تنظیمات با موفقیت حذف شد.");
+        }
+
+        public async Task<ApiResponse<DepartmentSchedulingSettingsDtoGet>> ApplyDefaultSettingsAsync(int departmentId)
+        {
+            if (departmentId <= 0)
+            {
+                return ApiResponse<DepartmentSchedulingSettingsDtoGet>.Fail("شناسه دپارتمان نامعتبر است.");
+            }
+
+            var department = await _departmentRepository.GetByIdAsync(departmentId);
+            if (department == null)
+            {
+                return ApiResponse<DepartmentSchedulingSettingsDtoGet>.Fail("دپارتمان یافت نشد.");
+            }
+
+            var usersResult = await _userRepository.GetByFilterAsync(
+                new UserFilter
+                {
+                    DepartmentId = departmentId,
+                    IsActive = true,
+                    PageNumber = 1,
+                    PageSize = 5000
+                },
+                Array.Empty<string>());
+
+            var shiftsResult = await _shiftRepository.GetByFilterAsync(
+                new ShiftFilter
+                {
+                    DepartmentId = departmentId,
+                    PageNumber = 1,
+                    PageSize = 500
+                },
+                new[] { "RequiredSpecialties", "RequiredSpecialties.Specialty" });
+
+            var profile = DepartmentSchedulingProfileFactory.Create(
+                department,
+                usersResult.Items.ToList(),
+                shiftsResult.Items.ToList());
+
+            var dto = DepartmentSchedulingDefaultSettingsBuilder.Build(profile);
+            NormalizeMaxShiftsPerDay(dto);
+
+            if (!ValidateWeights(dto, out var validationMessage))
+            {
+                return ApiResponse<DepartmentSchedulingSettingsDtoGet>.Fail(validationMessage);
+            }
+
+            var existing = await _repository.GetByFilterAsync(
+                new DepartmentSchedulingSettingsFilter
+                {
+                    DepartmentId = departmentId,
+                    PageNumber = 1,
+                    PageSize = 1
+                },
+                Array.Empty<string>());
+
+            var entity = existing.Items.FirstOrDefault();
+            var userId = Convert.ToInt16(_httpContextAccessor.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+
+            if (entity == null)
+            {
+                entity = _mapper.Map<DepartmentSchedulingSettings>(dto);
+                entity.CreateDate = DateTime.Now;
+                entity.TheUserId = userId;
+                await _repository.AddAsync(entity);
+                await _repository.SaveAsync();
+
+                _logger.LogInformation(
+                    "Applied default department scheduling settings (create) for DepartmentId={DepartmentId}, ActiveUsers={ActiveUsers}, NightHeadcount={NightHeadcount}",
+                    departmentId,
+                    profile.ActiveUserCount,
+                    profile.NightHeadcountPerShift);
+
+                var created = _mapper.Map<DepartmentSchedulingSettingsDtoGet>(entity);
+                return ApiResponse<DepartmentSchedulingSettingsDtoGet>.Success(
+                    created,
+                    "تنظیمات پیش‌فرض بهینه با موفقیت ایجاد شد.");
+            }
+
+            _mapper.Map(dto, entity);
+            entity.UpdateDate = DateTime.Now;
+            entity.TheUserId = userId;
+            _repository.Update(entity);
+            await _repository.SaveAsync();
+
+            _logger.LogInformation(
+                "Applied default department scheduling settings (update) for DepartmentId={DepartmentId}, ActiveUsers={ActiveUsers}, NightHeadcount={NightHeadcount}",
+                departmentId,
+                profile.ActiveUserCount,
+                profile.NightHeadcountPerShift);
+
+            var updated = _mapper.Map<DepartmentSchedulingSettingsDtoGet>(entity);
+            return ApiResponse<DepartmentSchedulingSettingsDtoGet>.Success(
+                updated,
+                "تنظیمات پیش‌فرض بهینه با موفقیت اعمال شد.");
         }
     }
 }

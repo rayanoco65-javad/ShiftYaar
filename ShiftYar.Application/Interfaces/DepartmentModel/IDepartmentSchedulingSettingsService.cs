@@ -16,5 +16,6 @@ namespace ShiftYar.Application.Interfaces.DepartmentModel
         Task<ApiResponse<DepartmentSchedulingSettingsDtoGet>> CreateSettingAsync(DepartmentSchedulingSettingsDtoAdd dto);
         Task<ApiResponse<DepartmentSchedulingSettingsDtoGet>> UpdateSettingAsync(int id, DepartmentSchedulingSettingsDtoAdd dto);
         Task<ApiResponse<string>> DeleteSettingAsync(int id);
+        Task<ApiResponse<DepartmentSchedulingSettingsDtoGet>> ApplyDefaultSettingsAsync(int departmentId);
     }
 }

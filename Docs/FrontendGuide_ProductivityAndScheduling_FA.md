@@ -308,10 +308,71 @@
 |----------|-------------------|--------|
 | `allowCurrentMonthScheduling` | امکان شیفت‌بندی ماه جاری | اگر فعال باشد، برای **ماه شمسی جاری** حتی پس از شروع ماه، Optimize و `DeleteMonthlySchedule` مجاز است. **فقط برای توسعه و تست** استفاده شود. ماه‌های گذشته همچنان مسدود می‌مانند. |
 | `allowMonthlyRescheduleWithAutoDelete` | امکان شیفت‌بندی مجدد ماهانه و حذف خودکار شیفت‌بندی قبلی | اگر فعال باشد و برنامهٔ قبلی برای همان ماه وجود داشته باشد، قبل از ذخیرهٔ برنامهٔ جدید، همه انتساب‌های آن ماه دپارتمان **خودکار حذف** و با برنامه جدید جایگزین می‌شوند (نیازی به فراخوانی دستی حذف نیست). |
-| `allowEveningAfterNightShift` | اجازه شیفت عصر در روز بعد از شب | **bool** — پیش‌فرض `false`: عصر روز بعد ممنوع. `true`: عصر روز بعد مجاز. |
-| `allowNightShiftAfterNightShift` | اجازه شیفت شب در روز بعد از شب | **bool** — پیش‌فرض `false`: شب متوالی ممنوع. `true`: شب روز بعد مجاز. |
+| `allowEveningAfterNightShift` | اجازه شیفت عصر در روز بعد از شب | **`bool` (غیر nullable)** — پیش‌فرض `false`: عصر روز بعد از شب **ممنوع**. `true`: فقط **عصر** روز بعد مجاز است. |
+| `allowNightShiftAfterNightShift` | اجازه شیفت شب در روز بعد از شب | **`bool` (غیر nullable)** — پیش‌فرض `false`: شب پشت شب **ممنوع**. `true`: **شب** روز بعد از شب مجاز است. |
 
-ترکیب پیشنهادی برای تست ماه جاری: دو فلگ اول را روشن کنید تا بتوانید ماه جاری را دوباره Optimize کنید و برنامه قبلی جایگزین شود.
+#### قواعد استراحت بعد از شب (مهم برای UI)
+
+| شیفت روز بعد از شب | همیشه | با `allowEveningAfterNightShift=false` | با `allowEveningAfterNightShift=true` | با `allowNightShiftAfterNightShift=true` |
+|---------------------|--------|----------------------------------------|---------------------------------------|------------------------------------------|
+| **صبح** | ❌ ممنوع | ❌ | ❌ | ❌ |
+| **عصر** | — | ❌ | ✅ | — (فقط اگر evening فلگ true باشد) |
+| **شب** | — | ❌ | ❌ (مگر night فلگ جدا true باشد) | ✅ |
+| **Off / بدون شیفت** | ✅ پیش‌فرض | ✅ | — | — |
+
+- این دو فلگ **مستقل** از هم هستند؛ روشن کردن یکی، دیگری را روشن نمی‌کند.
+- در API و DB هر دو فیلد **`bool`** هستند (نه `null`)؛ در فرم UI دو **سوئیچ boolean** (checked = true، unchecked = false).
+- پیش‌فرض هر دو: **خاموش (`false`)** — یعنی روز بعد از شب معمولاً Off است.
+
+ترکیب پیشنهادی برای تست ماه جاری: دو فلگ اول (`allowCurrentMonthScheduling` و `allowMonthlyRescheduleWithAutoDelete`) را روشن کنید تا بتوانید ماه جاری را دوباره Optimize کنید و برنامه قبلی جایگزین شود.
+
+### اکشن تنظیمات پیش‌فرض بهینه (`ApplyDefaultDepartmentSchedulingSettings`)
+
+برای پر کردن خودکار تنظیمات بهینه بر اساس شرایط دپارتمان (تعداد پرسنل، شیفت شب، مسئول شیفت، نوع گردشی، `IsNightLover` و …).
+
+| اکشن | روش | توضیح |
+|------|------|--------|
+| `ApplyDefaultDepartmentSchedulingSettings` | `POST /ApplyDefaultDepartmentSchedulingSettings?departmentId={id}` | اگر رکورد تنظیمات **وجود نداشته باشد** → **ایجاد** می‌کند. اگر **وجود داشته باشد** → همه فیلدها را با مقادیر پیش‌فرض بهینه **بازنویسی** می‌کند. |
+
+#### بدنه
+
+بدون body — فقط `departmentId` در query string.
+
+#### پاسخ موفق
+
+همان ساختار `DepartmentSchedulingSettingsDtoGet` + `message` نمونه:
+- ایجاد: «تنظیمات پیش‌فرض بهینه با موفقیت ایجاد شد.»
+- به‌روزرسانی: «تنظیمات پیش‌فرض بهینه با موفقیت اعمال شد.»
+
+#### منطق کلی (برای tooltip / راهنمای UI)
+
+| شرایط دپارتمان | تنظیمات پیشنهادی |
+|----------------|------------------|
+| هر دپارتمان | `allowEveningAfterNightShift = false`، `allowNightShiftAfterNightShift = false` |
+| دارد شیفت شب | `maxConsecutiveNightShifts = 1` |
+| توزیع شب بر اساس سابقه | `enableNightShiftDistributionBySeniority = false` (پیش‌فرض) |
+| نیاز مدیر شیفت | `requireManagerForEveningShift = false`، `requireManagerForNightShift = false` (پیش‌فرض) |
+| `IsNightLover = false` (شب‌گریز) | `nightShiftDistributionType = 1` (فقط اگر بعداً توزیع سابقه را فعال کنید) |
+| production | `allowCurrentMonthScheduling = false`، `allowMonthlyRescheduleWithAutoDelete = false` |
+
+#### اقدام لازم در فرانت
+
+- دکمه **«اعمال تنظیمات پیش‌فرض»** / **«بازنشانی به پیش‌فرض بهینه»** در صفحه تنظیمات زمان‌بندی دپارتمان.
+- قبل از اجرا **confirm** بگذارید: «تنظیمات فعلی بازنویسی می‌شود.»
+- پس از موفقیت، فرم را با `data` برگشتی refresh کنید.
+- اگر `isSuccess === false` و پیام «دپارتمان یافت نشد» → `404`؛ سایر خطاها → `400`.
+
+### APIهای CRUD تنظیمات (`DepartmentSchedulingSettingsController`)
+
+| اکشن | روش | توضیح |
+|------|------|--------|
+| `GetSettings` | GET | لیست/فیلتر |
+| `GetSetting` | GET | جزئیات با `id` |
+| `CreateSetting` | POST | ایجاد (یک رکورد به ازای هر دپارتمان) |
+| `UpdateSetting` | PUT | ویرایش با `id` |
+| `DeleteSetting` | DELETE | حذف |
+| `ApplyDefaultDepartmentSchedulingSettings` | POST | اعمال پیش‌فرض بهینه (جدید) |
+| `UpdateNightShiftDistributionSettings` | PUT `/night-shift-distribution/{id}` | فقط فیلدهای توزیع شب |
 
 ### درخواست حضور (یادآوری برای فرانت)
 
@@ -445,8 +506,14 @@
 
 ### اقدام لازم در فرانت
 
-- در فرم `DepartmentSchedulingSettings` سوئیچ‌های `allowCurrentMonthScheduling`، `allowMonthlyRescheduleWithAutoDelete` و **`allowEveningAfterNightShift`** را اضافه کنید (برچسب فارسی مطابق جدول).
-- برای `allowEveningAfterNightShift` توضیح کوتاه UI: «اگر خاموش باشد، روز بعد از شیفت شب حتماً مرخص/بدون شیفت است؛ اگر روشن باشد فقط عصر روز بعد در صورت نیاز مجاز است (صبح بعد از شب همیشه ممنوع).»
+- در فرم `DepartmentSchedulingSettings` این سوئیچ‌ها را اضافه کنید:
+  - `allowCurrentMonthScheduling`
+  - `allowMonthlyRescheduleWithAutoDelete`
+  - **`allowEveningAfterNightShift`** (boolean، پیش‌فرض خاموش)
+  - **`allowNightShiftAfterNightShift`** (boolean، پیش‌فرض خاموش)
+- توضیح UI برای `allowEveningAfterNightShift`: «اگر خاموش باشد، عصر روز بعد از شب ممنوع است. صبح روز بعد از شب **همیشه** ممنوع است.»
+- توضیح UI برای `allowNightShiftAfterNightShift`: «اگر خاموش باشد، شب پشت شب ممنوع است. مستقل از فلگ عصر است.»
+- دکمه **«اعمال تنظیمات پیش‌فرض»** → `POST /ApplyDefaultDepartmentSchedulingSettings?departmentId=...` با confirm بازنویسی.
 - دکمه «حذف شیفت‌بندی ماه» با تأیید کاربر؛ اگر ماه شروع شده و `allowCurrentMonthScheduling` خاموش است، دکمه را غیرفعال کنید.
 - قبل از `optimize-and-save` اگر برنامه قبلی هست و `allowMonthlyRescheduleWithAutoDelete` خاموش است، دکمه Optimize را قفل کنید و کاربر را به حذف هدایت کنید؛ اگر فلگ روشن است، نیازی به قفل به‌خاطر برنامه قبلی نیست.
 - پیام `message` خطای API را عیناً به سوپروایزر نشان دهید.
@@ -618,9 +685,12 @@
 - پرسنل شیفت ثابت در روزهای تعطیل نباید شیفت بگیرند، مگر اینکه از سمت قواعد موجود مجاز شده باشند.
 - توالی‌های ممنوع رعایت می‌شوند:
   - `عصر -> شب` در همان روز ممنوع
-  - `شب -> صبح` در روز بعد همیشه ممنوع
-  - اگر `allowEveningAfterNightShift = false` باشد، روز بعد از شب کاملاً بدون شیفت است (عصر/شب روز بعد هم ممنوع)
-  - اگر `allowEveningAfterNightShift = true` باشد، عصر روز بعد از شب در صورت نیاز مجاز است (الزام نیست)
+  - `شب -> صبح` در روز بعد **همیشه** ممنوع
+  - `allowEveningAfterNightShift = false` → **عصر** روز بعد از شب ممنوع (پیش‌فرض)
+  - `allowEveningAfterNightShift = true` → **عصر** روز بعد از شب مجاز
+  - `allowNightShiftAfterNightShift = false` → **شب** روز بعد از شب ممنوع (پیش‌فرض)
+  - `allowNightShiftAfterNightShift = true` → **شب** روز بعد از شب (شب پشت شب) مجاز
+  - با هر دو فلگ خاموش، روز بعد از شب معمولاً **Off** است (فقط استراحت)
 - **OFF تأییدشده** برای صبح یا کل‌روز → شب روز قبل مسدود (`ApprovedOffNightBeforeRules`)
 - **اولویت پر کردن موظفی:** غیرطرحی (`IsProjectPersonnel = false/null`) قبل از طرحی؛ پرسنل طرحی فقط تا موظفی، بدون اضافه‌کار
 - ظرفیت روزهای تعطیل و غیرتعطیل برای تخصص‌ها جداگانه در نظر گرفته می‌شود.
@@ -840,8 +910,10 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - **حذف** سهمیه شب از فرم کاربر؛ ساخت UI ماهانه با `UserMonthlyNightQuota` APIها
 - قبل از Optimize، تنظیم سهمیه شب برای ماه شمسی موردنظر
 - دکمه حذف شیفت‌بندی ماه (`DeleteMonthlySchedule`) + قفل Optimize وقتی برنامه قبلی هست یا ماه شروع شده (با درنظرگرفتن فلگ‌های `allowCurrentMonthScheduling` و `allowMonthlyRescheduleWithAutoDelete`)
-- دو سوئیچ در فرم تنظیمات دپارتمان: `allowCurrentMonthScheduling` و `allowMonthlyRescheduleWithAutoDelete`
-- سوئیچ `allowEveningAfterNightShift` (اجازه عصر روز بعد از شب / یا off کامل روز بعد)
+- فرم تنظیمات دپارتمان:
+  - دو سوئیچ عملیاتی: `allowCurrentMonthScheduling`، `allowMonthlyRescheduleWithAutoDelete`
+  - دو سوئیچ استراحت بعد از شب (**boolean، پیش‌فرض false**): `allowEveningAfterNightShift`، `allowNightShiftAfterNightShift`
+  - دکمه **«اعمال تنظیمات پیش‌فرض»** (`ApplyDefaultDepartmentSchedulingSettings`)
 - در فرم درخواست شیفت: برای حضور فقط `SpecificShift`؛ گزینهٔ حضور کل‌روز را نشان ندهید / غیرفعال کنید
 - نمایش ستون `requestAction` (حضور / عدم‌حضور) در لیست درخواست‌ها
 - دکمه «رد / لغو تأیید» برای درخواست‌های `Approved` (`UpdateShiftRequestBySupervisor` با `status: 2`)
@@ -880,6 +952,10 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftSchedulingModel/DeleteMonthlyScheduleRequestDto.cs`
 - `ShiftYar.Domain/Entities/DepartmentModel/DepartmentSchedulingSettings.cs`
 - `ShiftYar.Application/DTOs/DepartmentModel/DepartmentSchedulingSettingsDtoAdd.cs`
+- `ShiftYar.Api/Controllers/DepartmentModel/DepartmentSchedulingSettingsController.cs`
+- `ShiftYar.Application/Features/DepartmentModel/Services/DepartmentSchedulingSettingsService.cs`
+- `ShiftYar.Application/Common/Utilities/DepartmentSchedulingDefaultSettingsBuilder.cs`
+- `ShiftYar.Application/Common/Utilities/DepartmentSchedulingProfileFactory.cs`
 - `ShiftYar.Application/Common/Utilities/NightQuotaRequestLinker.cs`
 - `ShiftYar.Application/Common/Utilities/DailyAssignmentRules.cs`
 - `ShiftYar.Application/Common/Utilities/AdjacentShiftRestRules.cs`
