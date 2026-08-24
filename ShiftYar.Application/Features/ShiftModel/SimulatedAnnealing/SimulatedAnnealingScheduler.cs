@@ -311,6 +311,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             score += CalculateFairMorningEveningPeerPenalty(solution) * _constraints.SoftWeights.FairMorningEveningPeerWeight;
             score += CalculateFairHolidayMorningEveningPeerPenalty(solution) * _constraints.SoftWeights.FairHolidayMorningEveningPeerWeight;
             score += CalculateWorkdaySpreadPenalty(solution) * _constraints.SoftWeights.WorkdaySpreadWeight;
+            score += MaxConsecutiveWorkdayRules.CalculateOffSpreadPenalty(solution, _constraints)
+                     * _constraints.SoftWeights.OffSpreadWeight;
             score += CalculateExactNightQuotaPenalty(solution) * _constraints.SoftWeights.ExactNightQuotaWeight;
             score += CalculateExtraShiftRotationPenalty(solution) * _constraints.SoftWeights.ExtraShiftRotationWeight;
             score += CalculateShiftLabelBalancePenalty(solution) * _constraints.SoftWeights.ShiftLabelBalanceWeight;
@@ -1522,6 +1524,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             solution.Violations.AddRange(GetExactNightQuotaViolations(solution));
             solution.Violations.AddRange(GetExactDayShiftQuotaViolations(solution));
             solution.Violations.AddRange(ExactDayShiftQuotaGuard.GetFallbackPoolWarnings(solution, _constraints));
+            solution.Violations.AddRange(MaxConsecutiveWorkdayRules.GetViolations(solution, _constraints));
         }
 
         public bool AreExactDayShiftQuotasSatisfied(ShiftSolution solution, out List<string> unmet)
@@ -1872,8 +1875,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return false;
             }
 
-            // سقف هفته/روزهای متوالی فقط جریمه نرم و اولویت‌بندی است؛
-            // اینجا اعمال سخت نمی‌شود تا ظرفیت اجباری صبح/عصر خالی نماند.
+            if (solution != null &&
+                MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
+                    solution, _constraints, user, date))
+            {
+                return false;
+            }
 
             if (shiftLabel == ShiftLabel.Night && solution != null)
             {

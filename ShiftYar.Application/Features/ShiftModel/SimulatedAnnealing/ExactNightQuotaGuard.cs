@@ -1319,7 +1319,9 @@ public static class ExactNightQuotaGuard
         return ShiftEligibilityResolver.MayEverTakeLabel(user, ShiftLabel.Night)
                && !user.UnavailableDates.Any(d => d.Date == date.Date)
                && !user.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == ShiftLabel.Night)
-               && !solution.HasAssignment(user.UserId, nightShift.ShiftId, date);
+               && !solution.HasAssignment(user.UserId, nightShift.ShiftId, date)
+               && !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
+                   solution, constraints, user, date);
     }
 
     private static IEnumerable<DateTime> AllCandidateDates(ShiftConstraints constraints, bool holidayOnly) =>
@@ -1647,7 +1649,9 @@ public static class ExactNightQuotaGuard
             return false;
         }
 
-        return ShiftEligibilityResolver.MayEverTakeLabel(user, ShiftLabel.Night);
+        return ShiftEligibilityResolver.MayEverTakeLabel(user, ShiftLabel.Night)
+               && !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
+                   solution, constraints, user, date);
     }
 
     private static bool HasSpecialtyCapacity(

@@ -1,0 +1,43 @@
+multi-mark cells: 44
+('الناز رستمی چگنی', ' data-day="29" class="hw-cell"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="شب"><span class="hw-mark hw-mark-n">N</span></span><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-')
+('بهاره بهاری پور', ' data-day="13" class="hw-cell hw-holiday-col"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-mark hw-mark-m">M</span></span><span class="hw-mark-wrap" role="img" aria-label="عصر"><span class="hw')
+('بهاره بهاری پور', ' data-day="26" class="hw-cell"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-mark hw-mark-m">M</span></span><span class="hw-mark-wrap" role="img" aria-label="عصر"><span class="hw')
+('حدیث کاظمی', ' data-day="8" class="hw-cell hw-holiday-col"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-mark hw-mark-m">M</span></span><span class="hw-mark-wrap" role="img" aria-label="عصر"><span class="hw')
+('حدیث کاظمی', ' data-day="15" class="hw-cell"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="شب"><span class="hw-mark hw-mark-n">N</span></span><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-')
+('خدیجه متقی', ' data-day="6" class="hw-cell hw-holiday-col"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-mark hw-mark-m">M</span></span><span class="hw-mark-wrap" role="img" aria-label="عصر"><span class="hw')
+('خدیجه متقی', ' data-day="13" class="hw-cell hw-holiday-col"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="شب"><span class="hw-mark hw-mark-n">N</span></span><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-')
+('زهرا درخشانی الوار', ' data-day="7" class="hw-cell"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-mark hw-mark-m">M</span></span><span class="hw-mark-wrap" role="img" aria-label="عصر"><span class="hw')
+('زهرا درخشانی الوار', ' data-day="13" class="hw-cell hw-holiday-col"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="عصر"><span class="hw-mark hw-mark-e">E</span></span><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw')
+('زهرا درخشانی الوار', ' data-day="21" class="hw-cell"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-mark hw-mark-m">M</span></span><span class="hw-mark-wrap" role="img" aria-label="عصر"><span class="hw')
+('سپیده دریکوند', ' data-day="20" class="hw-cell hw-holiday-col"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="شب"><span class="hw-mark hw-mark-n">N</span></span><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-')
+('عاطفه رحیمی منفرد', ' data-day="3" class="hw-cell"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-mark hw-mark-m">M</span></span><span class="hw-mark-wrap" role="img" aria-label="عصر"><span class="hw')
+('فاطمه دبستانیان', ' data-day="6" class="hw-cell hw-holiday-col"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="شب"><span class="hw-mark hw-mark-n">N</span></span><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-')
+('فاطمه دبستانیان', ' data-day="24" class="hw-cell"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-mark hw-mark-m">M</span></span><span class="hw-mark-wrap" role="img" aria-label="عصر"><span class="hw')
+('فاطمه دبستانیان', ' data-day="30" class="hw-cell"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="شب"><span class="hw-mark hw-mark-n">N</span></span><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-')
+('فاطمه رازانی', ' data-day="17" class="hw-cell"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="شب"><span class="hw-mark hw-mark-n">N</span></span><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-')
+('فاطمه رازانی', ' data-day="20" class="hw-cell hw-holiday-col"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="شب"><span class="hw-mark hw-mark-n">N</span></span><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-')
+('فاطمه رازانی', ' data-day="31" class="hw-cell"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="شب"><span class="hw-mark hw-mark-n">N</span></span><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-')
+('فاطمه رضایی', ' data-day="8" class="hw-cell hw-holiday-col"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-mark hw-mark-m">M</span></span><span class="hw-mark-wrap" role="img" aria-label="عصر"><span class="hw')
+('فاطمه رضایی', ' data-day="9" class="hw-cell"', '<span class="hw-cell-marks"><span class="hw-mark-wrap" role="img" aria-label="شب"><span class="hw-mark hw-mark-n">N</span></span><span class="hw-mark-wrap" role="img" aria-label="صبح"><span class="hw-')
+DIFF الناز رستمی چگنی: elif=3/4/7 span=3/4/8 ind=3/4/8
+DIFF بهاره بهاری پور: elif=15/0/4 span=15/2/4 ind=15/2/4
+DIFF حدیث کاظمی: elif=4/4/4 span=4/5/5 ind=4/5/5
+DIFF خدیجه متقی: elif=5/4/3 span=5/5/4 ind=5/5/4
+DIFF زهرا درخشانی الوار: elif=4/11/0 span=4/14/0 ind=4/14/0
+DIFF سپیده دریکوند: elif=2/3/8 span=2/3/9 ind=2/3/9
+DIFF عاطفه رحیمی منفرد: elif=3/5/5 span=3/6/5 ind=3/6/5
+DIFF فاطمه دبستانیان: elif=3/3/6 span=3/4/8 ind=3/4/8
+DIFF فاطمه رازانی: elif=3/3/5 span=3/3/8 ind=3/3/8
+DIFF فاطمه رضایی: elif=5/3/3 span=5/5/4 ind=5/5/4
+DIFF فاطمه سلیمی: elif=4/5/4 span=4/8/4 ind=4/8/4
+DIFF فاطمه مدهنی: elif=2/3/9 span=2/5/9 ind=2/5/9
+DIFF فاطمه یوسفی کشکولی: elif=3/4/6 span=3/4/9 ind=3/4/9
+DIFF کیمیا کاظمی: elif=3/4/6 span=3/5/8 ind=3/5/8
+DIFF گلنوش باقری: elif=3/3/7 span=3/5/8 ind=3/5/8
+DIFF مریم امیدی منش: elif=3/3/6 span=3/4/8 ind=3/4/8
+DIFF مریم کرمی: elif=3/4/5 span=3/4/8 ind=3/4/8
+DIFF نازنین سبزواری: elif=3/4/5 span=3/4/8 ind=3/4/8
+
+=== daily coverage (span count) ===
+bad days: 0/31
+totals M=124 E=93 N=124

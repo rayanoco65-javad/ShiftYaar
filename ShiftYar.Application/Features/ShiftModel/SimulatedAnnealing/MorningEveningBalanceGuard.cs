@@ -532,6 +532,15 @@ public static class MorningEveningBalanceGuard
             return false;
         }
 
+        if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
+                remaining,
+                user,
+                assignment.Date,
+                constraints.HardRules.EnforceMaxConsecutiveShifts))
+        {
+            return false;
+        }
+
         var projected = remaining.ToList();
         projected.Add(new SaShiftAssignment
         {

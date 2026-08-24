@@ -1609,6 +1609,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     constraints.SoftWeights.FairMorningEveningPeerWeight = 4.0;
                     constraints.SoftWeights.FairHolidayMorningEveningPeerWeight = 8.0;
                     constraints.SoftWeights.WorkdaySpreadWeight = 1.5;
+                    constraints.SoftWeights.OffSpreadWeight = 1.0;
                     constraints.SoftWeights.ProductivityShortfallWeight = 8.0;
                     constraints.SoftWeights.ProductivityOvertimeWeight = 6.0;
                     constraints.EnableNightShiftDistributionBySeniority =
@@ -2407,6 +2408,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     constraints.SoftWeights.FairMorningEveningPeerWeight = Math.Max(4.0, constraints.SoftWeights.FairMorningEveningPeerWeight);
                     constraints.SoftWeights.FairHolidayMorningEveningPeerWeight = Math.Max(8.0, constraints.SoftWeights.FairHolidayMorningEveningPeerWeight);
                     constraints.SoftWeights.WorkdaySpreadWeight = Math.Max(1.5, constraints.SoftWeights.WorkdaySpreadWeight);
+                    constraints.SoftWeights.OffSpreadWeight = Math.Max(1.0, constraints.SoftWeights.OffSpreadWeight);
                     constraints.SoftWeights.FairNightShiftBalanceWeight = Math.Max(2.0, constraints.SoftWeights.FairNightShiftBalanceWeight);
                     constraints.SoftWeights.ProductivityShortfallWeight = Math.Max(8.0, constraints.SoftWeights.ProductivityShortfallWeight);
                     constraints.SoftWeights.ProductivityOvertimeWeight = Math.Max(6.0, constraints.SoftWeights.ProductivityOvertimeWeight);

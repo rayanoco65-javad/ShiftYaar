@@ -186,7 +186,8 @@ public static class HolidayMorningEveningFairnessGuard
             return false;
         }
 
-        return true;
+        return !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
+            solution, constraints, user, date);
     }
 
     private static bool IsRequestProtected(UserConstraint user, SaShiftAssignment assignment)

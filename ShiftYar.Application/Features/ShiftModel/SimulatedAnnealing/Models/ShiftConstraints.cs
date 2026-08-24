@@ -309,8 +309,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public double FairMorningEveningPeerWeight { get; set; } = 4.0;
         /// <summary>تعادل صبح/عصر روزهای تعطیل بین کاربران گردشی (جدا از تعادل ماهانه).</summary>
         public double FairHolidayMorningEveningPeerWeight { get; set; } = 8.0;
-        /// <summary>جریمه تراکم روزهای کاری (چند روز متوالی یا پر کردن کل هفته). سبک نگه دار تا پوشش ظرفیت خراب نشود.</summary>
+        /// <summary>جریمه تراکم روزهای کاری (چند روز متوالی یا پر کردن کل هفته).</summary>
         public double WorkdaySpreadWeight { get; set; } = 1.5;
+        /// <summary>جریمه OFFهای طولانی بدون درخواست OFF تمام‌روز تأییدشده.</summary>
+        public double OffSpreadWeight { get; set; } = 1.0;
         public double ExactNightQuotaWeight { get; set; } = 200.0; // جریمه کسری از حداقل سهمیه شب
         public double ExtraShiftRotationWeight { get; set; } = 1.0;     // جلوگیری از دادن شیفت اضافه به کسانی که اخیراً زیاد گرفته‌اند
         public double ShiftLabelBalanceWeight { get; set; } = 1.0;      // تعادل Morning/Evening/Night برای کاربران گردشی

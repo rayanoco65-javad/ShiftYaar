@@ -1,3 +1,4 @@
+using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
 using Xunit;
@@ -34,8 +35,6 @@ public class MorningEveningFairnessTests
     [Fact]
     public void Optimize_RespectsMaxConsecutiveWorkdays()
     {
-        // سقف متوالی دیگر مانع پوشش ظرفیت نمی‌شود؛ فقط ترجیح نرم است.
-        // این تست اطمینان می‌دهد Optimize همچنان راه‌حل می‌سازد و پوشش صبح/عصر خالی نمی‌ماند.
         var start = new DateTime(2026, 6, 22);
         var users = Enumerable.Range(1, 5).Select(i =>
         {
@@ -49,9 +48,17 @@ public class MorningEveningFairnessTests
         constraints.HardRules.EnforceMaxConsecutiveShifts = true;
         constraints.HardRules.EnforceWeeklyMaxShifts = true;
         constraints.SoftWeights.WorkdaySpreadWeight = 1.5;
+        constraints.SoftWeights.OffSpreadWeight = 1.0;
         constraints.SoftWeights.FairMorningEveningPeerWeight = 2.5;
 
         var solution = new SimulatedAnnealingScheduler(constraints, SoftSaParams()).Optimize();
+
+        foreach (var user in users)
+        {
+            var maxRun = MaxConsecutiveWorkdayRules.GetMaxConsecutiveWorkRun(solution, user.UserId);
+            Assert.True(maxRun <= user.MaxConsecutiveShifts,
+                $"User {user.UserId} max consecutive work run {maxRun} > {user.MaxConsecutiveShifts}");
+        }
 
         var morningOk = 0;
         var eveningOk = 0;

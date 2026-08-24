@@ -1093,6 +1093,12 @@ public static class ProductivityHourFillGuard
             return false;
         }
 
+        if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
+                solution, constraints, user, assignment.Date))
+        {
+            return false;
+        }
+
         if (assignment.ShiftLabel == ShiftLabel.Night)
         {
             var nights = solution.GetUserAllAssignments(user.UserId)

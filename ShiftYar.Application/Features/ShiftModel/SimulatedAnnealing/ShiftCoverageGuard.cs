@@ -425,7 +425,7 @@ public static class ShiftCoverageGuard
         DateTime date,
         ShiftLabel label)
     {
-        // عمداً سقف هفته/متوالی اینجا اعمال نمی‌شود — پوشش ظرفیت اجباری است
+        // عمداً سقف هفته اینجا اعمال نمی‌شود — پوشش ظرفیت اجباری است؛ سقف روزهای کاری متوالی اعمال می‌شود.
         var existing = solution.GetUserAssignments(user.UserId, date).Select(a => a.ShiftLabel);
         var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
             ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
@@ -441,6 +441,12 @@ public static class ShiftCoverageGuard
 
         if (AdjacentShiftRestRules.WouldConflict(
                 solution.GetUserAllAssignments(user.UserId), date, label, constraints))
+        {
+            return false;
+        }
+
+        if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
+                solution, constraints, user, date))
         {
             return false;
         }

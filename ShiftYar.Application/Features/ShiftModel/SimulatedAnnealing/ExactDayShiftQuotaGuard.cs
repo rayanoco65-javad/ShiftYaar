@@ -309,7 +309,9 @@ public static class ExactDayShiftQuotaGuard
         }
 
         return !AdjacentShiftRestRules.WouldConflict(
-            solution.GetUserAllAssignments(user.UserId), date, label, constraints);
+            solution.GetUserAllAssignments(user.UserId), date, label, constraints)
+               && !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
+                   solution, constraints, user, date);
     }
 
     private static bool IsProtected(
