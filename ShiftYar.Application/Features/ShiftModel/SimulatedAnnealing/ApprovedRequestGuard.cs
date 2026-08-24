@@ -484,17 +484,43 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             if (!IsUserAvailable(user, required.Date, required.ShiftLabel, solution, constraints))
             {
-                var next = required.Date.Date.AddDays(1);
-                var protectedNextDay = solution.GetUserAssignments(user.UserId, next)
-                    .Any(a => !a.IsOnCall && IsHardProtectedAssignment(user, a));
-                if (required.ShiftLabel == ShiftLabel.Night && protectedNextDay)
+                if (required.ShiftLabel == ShiftLabel.Night)
                 {
-                    return baseMsg +
-                           $" علت: درخواست تأییدشدهٔ دیگر در {next:yyyy-MM-dd} با استراحت بعد از شب (بیش از ۱۲ ساعت کار متوالی) تداخل دارد.";
+                    var prev = required.Date.Date.AddDays(-1);
+                    var protectedPrevNight = solution.GetUserAssignments(user.UserId, prev)
+                        .Any(a => !a.IsOnCall &&
+                                  a.ShiftLabel == ShiftLabel.Night &&
+                                  IsHardProtectedAssignment(user, a));
+                    if (protectedPrevNight && !constraints.HardRules.AllowNightShiftAfterNightShift)
+                    {
+                        return baseMsg +
+                               $" علت: درخواست شب تأییدشده در {prev:yyyy-MM-dd} با قانون «شب روز بعد از شب» (غیرفعال در تنظیمات دپارتمان) تداخل دارد.";
+                    }
+
+                    var next = required.Date.Date.AddDays(1);
+                    var protectedNextMorning = solution.GetUserAssignments(user.UserId, next)
+                        .Any(a => !a.IsOnCall &&
+                                  a.ShiftLabel == ShiftLabel.Morning &&
+                                  IsHardProtectedAssignment(user, a));
+                    if (protectedNextMorning)
+                    {
+                        return baseMsg +
+                               $" علت: درخواست صبح تأییدشده در {next:yyyy-MM-dd} با استراحت بعد از شب (شب→صبح ممنوع) تداخل دارد.";
+                    }
+
+                    var protectedNextEvening = solution.GetUserAssignments(user.UserId, next)
+                        .Any(a => !a.IsOnCall &&
+                                  a.ShiftLabel == ShiftLabel.Evening &&
+                                  IsHardProtectedAssignment(user, a));
+                    if (protectedNextEvening && !constraints.HardRules.AllowEveningAfterNightShift)
+                    {
+                        return baseMsg +
+                               $" علت: درخواست عصر تأییدشده در {next:yyyy-MM-dd} با قانون «عصر روز بعد از شب» (غیرفعال در تنظیمات دپارتمان) تداخل دارد.";
+                    }
                 }
 
                 return baseMsg +
-                       " علت: قوانین توالی شیفت (شب→صبح روز بعد) یا سقف شیفت روزانه مانع تخصیص است.";
+                       " علت: قوانین توالی شیفت (شب→صبح روز بعد / شب متوالی) یا سقف شیفت روزانه مانع تخصیص است.";
             }
 
             return baseMsg;

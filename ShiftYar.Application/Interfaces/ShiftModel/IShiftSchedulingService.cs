@@ -43,7 +43,9 @@ namespace ShiftYar.Application.Interfaces.ShiftModel
 
 
         /// ذخیره نتیجه بهینه‌سازی در دیتابیس
-        Task<ApiResponse<string>> SaveOptimizedScheduleAsync(ShiftSchedulingResultDto result);
+        Task<ApiResponse<string>> SaveOptimizedScheduleAsync(
+            ShiftSchedulingResultDto result,
+            int? departmentId = null);
 
         /// حذف شیفت‌بندی ذخیره‌شده یک دپارتمان برای ماه شمسی مشخص (فقط قبل از شروع آن ماه)
         Task<ApiResponse<object>> DeleteMonthlyScheduleAsync(DeleteMonthlyScheduleRequestDto request);

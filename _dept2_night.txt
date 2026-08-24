@@ -1,0 +1,5 @@
+﻿DepartmentId|AllowEveningAfterNightShift|AllowNightShiftAfterNightShift|MaxConsecutiveNightShifts
+------------|---------------------------|------------------------------|-------------------------
+2|1|0|2
+
+(1 rows affected)

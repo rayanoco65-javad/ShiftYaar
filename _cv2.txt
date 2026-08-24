@@ -1,0 +1,11 @@
+﻿python : Traceback (most recent call last):
+At C:\Users\Paria\AppData\Local\Temp\ps-script-5baebac6-587d-489a-af35-30e09de041ab.ps1:107 char:1
++ python -c "import cv2; print('cv2 ok')" 2>&1 | Out-File -FilePath "D: ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "<string>", line 1, in <module>
+    import cv2; print('cv2 ok')
+    ^^^^^^^^^^
+ModuleNotFoundError: No module named 'cv2'

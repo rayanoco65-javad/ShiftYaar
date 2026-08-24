@@ -258,8 +258,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                 await ReportJobProgressAsync(backgroundJobId, "Saving optimized schedule...");
 
-                // ذخیره نتیجه
-                var saveResult = await SaveOptimizedScheduleAsync(optimizationResult.Data);
+                // ذخیره نتیجه — حذف قبلی باید بر اساس دپارتمان باشد، نه فقط ShiftIdهای نتیجهٔ جدید
+                // (در غیر این صورت انتساب‌های قدیمی با ShiftId دپارتمان دیگر مثل ۱/۲ باقی می‌مانند و Get شیفت‌های اضافه نشان می‌دهد)
+                var saveResult = await SaveOptimizedScheduleAsync(optimizationResult.Data, request.DepartmentId);
                 if (!saveResult.IsSuccess)
                 {
                     return ApiResponse<object>.Fail(saveResult.Message ?? "Saving optimized schedule failed");
@@ -473,7 +474,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
 
         /// ذخیره نتیجه بهینه‌سازی در دیتابیس
-        public async Task<ApiResponse<string>> SaveOptimizedScheduleAsync(ShiftSchedulingResultDto result)
+        public async Task<ApiResponse<string>> SaveOptimizedScheduleAsync(
+            ShiftSchedulingResultDto result,
+            int? departmentId = null)
         {
             try
             {
@@ -486,7 +489,12 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                 var startDate = result.Assignments.Min(a => a.Date).Date;
                 var endDate = result.Assignments.Max(a => a.Date).Date;
-                var scheduleShiftIds = result.Assignments.Select(a => a.ShiftId).Distinct().ToHashSet();
+                var resolvedDepartmentId = departmentId ?? await ResolveDepartmentIdFromAssignmentsAsync(result);
+                if (!resolvedDepartmentId.HasValue || resolvedDepartmentId.Value <= 0)
+                {
+                    return ApiResponse<string>.Fail(
+                        "DepartmentId مشخص نیست؛ امکان پاک‌سازی انتساب‌های قبلی قبل از ذخیره وجود ندارد.");
+                }
 
                 // واکشی شناسه‌های تاریخ‌های مورد نیاز (کل بازه، بدون قطع pagination)
                 var (shiftDates, shiftDatesTotal) = await _shiftDateRepository.GetByFilterAsync(
@@ -511,31 +519,14 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     .GroupBy(d => d.Date!.Value.Date)
                     .ToDictionary(g => g.Key, g => g.First().Id!.Value);
 
-                // حذف همه انتساب‌های قبلی همین شیفت‌های برنامه در بازه (نه فقط ۱۰ ردیف اول)
-                var (existingAssignments, existingTotal) = await _shiftAssignmentRepository.GetByFilterAsync(
-                    filter: new Application.Common.Filters.SimpleFilter<ShiftAssignment>(a =>
-                        a.ShiftDateId.HasValue &&
-                        a.ShiftDate != null &&
-                        a.ShiftDate.Date.HasValue &&
-                        a.ShiftDate.Date.Value.Date >= startDate &&
-                        a.ShiftDate.Date.Value.Date <= endDate &&
-                        a.ShiftId.HasValue &&
-                        scheduleShiftIds.Contains(a.ShiftId.Value)
-                    ),
-                    includes: "ShiftDate"
-                );
-
-                _logger.LogInformation(
-                    "SaveOptimizedSchedule: Deleting {Loaded}/{Total} existing assignment(s) for shifts [{ShiftIds}] in {Start}..{End}",
-                    existingAssignments.Count,
-                    existingTotal,
-                    string.Join(",", scheduleShiftIds),
-                    startDate.ToString("yyyy-MM-dd"),
-                    endDate.ToString("yyyy-MM-dd"));
-
-                foreach (var ea in existingAssignments)
+                // حذف همه انتساب‌های دپارتمان در بازه — شامل شیفت‌های اشتباه/قدیمی دپارتمان دیگر
+                var (deletedCount, deletedTotal) = await DeleteDepartmentAssignmentsInRangeAsync(
+                    resolvedDepartmentId.Value, startDate, endDate);
+                if (deletedTotal > deletedCount)
                 {
-                    _shiftAssignmentRepository.Delete(ea);
+                    _logger.LogWarning(
+                        "SaveOptimizedSchedule: deleted assignment list truncated ({Loaded}/{Total}) for DepartmentId={DepartmentId}",
+                        deletedCount, deletedTotal, resolvedDepartmentId.Value);
                 }
 
                 // ذخیره انتساب‌های جدید
@@ -578,7 +569,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         $"Schedule partially saved: {missingShiftDateCount} assignment(s) had no matching calendar date. Seed the calendar for {ToPersianDateString(startDate)}..{ToPersianDateString(endDate)} and re-run.");
                 }
 
-                _logger.LogInformation("Successfully saved {Count} shift assignments", result.Assignments.Count);
+                _logger.LogInformation(
+                    "Successfully saved {Count} shift assignments for DepartmentId={DepartmentId} after deleting {Deleted} prior row(s)",
+                    result.Assignments.Count, resolvedDepartmentId.Value, deletedCount);
 
                 return ApiResponse<string>.Success("Schedule saved successfully");
             }
@@ -587,6 +580,40 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 _logger.LogError(ex, "Error occurred while saving optimized schedule");
                 return ApiResponse<string>.Fail($"Error: {ex.Message}");
             }
+        }
+
+        private async Task<int?> ResolveDepartmentIdFromAssignmentsAsync(ShiftSchedulingResultDto result)
+        {
+            var shiftIds = result.Assignments.Select(a => a.ShiftId).Distinct().ToList();
+            if (shiftIds.Count == 0)
+            {
+                return null;
+            }
+
+            var (shifts, _) = await _shiftRepository.GetByFilterAsync(
+                filter: new Application.Common.Filters.SimpleFilter<Shift>(s =>
+                    s.Id.HasValue && shiftIds.Contains(s.Id.Value)));
+
+            var deptIds = shifts
+                .Where(s => s.DepartmentId.HasValue && s.DepartmentId.Value > 0)
+                .Select(s => s.DepartmentId!.Value)
+                .Distinct()
+                .ToList();
+            if (deptIds.Count == 1)
+            {
+                return deptIds[0];
+            }
+
+            var userIds = result.Assignments.Select(a => a.UserId).Distinct().ToList();
+            var (users, _) = await _userRepository.GetByFilterAsync(
+                filter: new Application.Common.Filters.SimpleFilter<User>(u =>
+                    u.Id.HasValue && userIds.Contains(u.Id.Value)));
+            var userDeptIds = users
+                .Where(u => u.DepartmentId.HasValue && u.DepartmentId.Value > 0)
+                .Select(u => u.DepartmentId!.Value)
+                .Distinct()
+                .ToList();
+            return userDeptIds.Count == 1 ? userDeptIds[0] : null;
         }
 
         /// <summary>
@@ -789,9 +816,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     a.ShiftDate.Date.HasValue &&
                     a.ShiftDate.Date.Value.Date >= monthStart.Date &&
                     a.ShiftDate.Date.Value.Date <= monthEnd.Date &&
-                    a.Shift != null &&
-                    a.Shift.DepartmentId == departmentId),
-                includes: new[] { "ShiftDate", "Shift" });
+                    (
+                        (a.Shift != null && a.Shift.DepartmentId == departmentId) ||
+                        (a.User != null && a.User.DepartmentId == departmentId)
+                    )),
+                includes: new[] { "ShiftDate", "Shift", "User" });
 
             return assignments.Count > 0;
         }
@@ -801,6 +830,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             DateTime monthStart,
             DateTime monthEnd)
         {
+            // هم انتساب‌های شیفت‌های همین دپارتمان، هم انتساب‌های کاربران همین دپارتمان
+            // (حتی اگر اشتباهاً روی ShiftId دپارتمان دیگر ذخیره شده باشند)
             var (assignments, total) = await _shiftAssignmentRepository.GetByFilterAsync(
                 filter: new Application.Common.Filters.SimpleFilter<ShiftAssignment>(a =>
                     a.ShiftDateId.HasValue &&
@@ -808,9 +839,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     a.ShiftDate.Date.HasValue &&
                     a.ShiftDate.Date.Value.Date >= monthStart.Date &&
                     a.ShiftDate.Date.Value.Date <= monthEnd.Date &&
-                    a.Shift != null &&
-                    a.Shift.DepartmentId == departmentId),
-                includes: new[] { "ShiftDate", "Shift" });
+                    (
+                        (a.Shift != null && a.Shift.DepartmentId == departmentId) ||
+                        (a.User != null && a.User.DepartmentId == departmentId)
+                    )),
+                includes: new[] { "ShiftDate", "Shift", "User" });
 
             if (assignments.Count == 0)
             {

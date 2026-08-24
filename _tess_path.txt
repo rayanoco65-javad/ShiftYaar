@@ -1,0 +1,7 @@
+where.exe : INFO: Could not find files for the given pattern(s).
+At C:\Users\Paria\AppData\Local\Temp\ps-script-7af025c1-5693-4847-b1be-b19c163d6a47.ps1:107 char:1
++ where.exe tesseract 2>&1 | Out-File -FilePath "D:\Hampadco\RealProjec ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (INFO: Could not...ven pattern(s).:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
