@@ -72,7 +72,22 @@ namespace ShiftYar.Application.Common.Mappings
 
             // DepartmentSchedulingSettings mappings
             CreateMap<DepartmentSchedulingSettings, DepartmentSchedulingSettingsDtoGet>();
-            CreateMap<DepartmentSchedulingSettingsDtoAdd, DepartmentSchedulingSettings>();
+            CreateMap<DepartmentSchedulingSettingsDtoAdd, DepartmentSchedulingSettings>()
+                // bool غیرnullable روی entity: اگر در درخواست ارسال نشود (null) مقدار قبلی حفظ شود
+                .ForMember(
+                    dest => dest.AllowEveningAfterNightShift,
+                    opt =>
+                    {
+                        opt.PreCondition(src => src.AllowEveningAfterNightShift.HasValue);
+                        opt.MapFrom(src => src.AllowEveningAfterNightShift!.Value);
+                    })
+                .ForMember(
+                    dest => dest.AllowNightShiftAfterNightShift,
+                    opt =>
+                    {
+                        opt.PreCondition(src => src.AllowNightShiftAfterNightShift.HasValue);
+                        opt.MapFrom(src => src.AllowNightShiftAfterNightShift!.Value);
+                    });
         }
     }
 }

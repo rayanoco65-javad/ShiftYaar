@@ -133,7 +133,11 @@ namespace ShiftYar.Api.Controllers.DepartmentModel
                 EnableNightShiftDistributionBySeniority = dto.EnableNightShiftDistributionBySeniority,
                 NightShiftDistributionType = dto.NightShiftDistributionType,
                 NightShiftDistributionWeight = dto.NightShiftDistributionWeight,
-                SeniorityDistributionSlope = dto.SeniorityDistributionSlope
+                SeniorityDistributionSlope = dto.SeniorityDistributionSlope,
+                AllowCurrentMonthScheduling = updatedSettings.AllowCurrentMonthScheduling,
+                AllowMonthlyRescheduleWithAutoDelete = updatedSettings.AllowMonthlyRescheduleWithAutoDelete,
+                AllowEveningAfterNightShift = updatedSettings.AllowEveningAfterNightShift,
+                AllowNightShiftAfterNightShift = updatedSettings.AllowNightShiftAfterNightShift
             };
 
             var result = await _service.UpdateSettingAsync(id, dtoAdd);

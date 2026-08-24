@@ -74,11 +74,11 @@ namespace ShiftYar.Application.DTOs.DepartmentModel
         /// <summary>شیفت‌بندی مجدد ماهانه با حذف خودکار برنامه قبلی</summary>
         public bool? AllowMonthlyRescheduleWithAutoDelete { get; set; }
 
-        /// <summary>اجازه شیفت عصر در روز بعد از شب (پیش‌فرض: false)</summary>
-        public bool AllowEveningAfterNightShift { get; set; }
+        /// <summary>اجازه شیفت عصر در روز بعد از شب (null = بدون تغییر هنگام ویرایش)</summary>
+        public bool? AllowEveningAfterNightShift { get; set; }
 
-        /// <summary>اجازه شیفت شب در روز بعد از شب (پیش‌فرض: false)</summary>
-        public bool AllowNightShiftAfterNightShift { get; set; }
+        /// <summary>اجازه شیفت شب در روز بعد از شب (null = بدون تغییر هنگام ویرایش)</summary>
+        public bool? AllowNightShiftAfterNightShift { get; set; }
     }
     public class DepartmentSchedulingSettingsDtoGet : DepartmentSchedulingSettingsDtoAdd
     {
