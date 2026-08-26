@@ -27,6 +27,18 @@ namespace ShiftYar.Domain.Entities.ShiftModel
         public TimeSpan? StartTime { get; set; }
         public TimeSpan? EndTime { get; set; }
 
+        /// <summary>ساعات محاسبه‌شدهٔ عملکرد در روز عادی برای کاربر خارج از طرح بهره‌وری.</summary>
+        public double? WeekdayNonProductivityHours { get; set; }
+
+        /// <summary>ساعات محاسبه‌شدهٔ عملکرد در روز تعطیل برای کاربر خارج از طرح بهره‌وری.</summary>
+        public double? HolidayNonProductivityHours { get; set; }
+
+        /// <summary>ساعات محاسبه‌شدهٔ عملکرد در روز عادی برای کاربر داخل طرح بهره‌وری.</summary>
+        public double? WeekdayProductivityPlanHours { get; set; }
+
+        /// <summary>ساعات محاسبه‌شدهٔ عملکرد در روز تعطیل برای کاربر داخل طرح بهره‌وری.</summary>
+        public double? HolidayProductivityPlanHours { get; set; }
+
         public ICollection<ShiftRequiredSpecialty>? RequiredSpecialties { get; set; }
     }
 }

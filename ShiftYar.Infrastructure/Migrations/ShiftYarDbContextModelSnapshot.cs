@@ -824,6 +824,12 @@ namespace ShiftYar.Infrastructure.Migrations
                     b.Property<TimeSpan?>("EndTime")
                         .HasColumnType("time");
 
+                    b.Property<double?>("HolidayNonProductivityHours")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("HolidayProductivityPlanHours")
+                        .HasColumnType("float");
+
                     b.Property<int?>("Label")
                         .HasColumnType("int");
 
@@ -835,6 +841,12 @@ namespace ShiftYar.Infrastructure.Migrations
 
                     b.Property<DateTime?>("UpdateDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<double?>("WeekdayNonProductivityHours")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("WeekdayProductivityPlanHours")
+                        .HasColumnType("float");
 
                     b.HasKey("Id");
 

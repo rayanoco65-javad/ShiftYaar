@@ -18,6 +18,10 @@ namespace ShiftYar.Application.DTOs.ShiftModel
         public ShiftLabel? Label { get; set; }
         public TimeSpan? StartTime { get; set; }
         public TimeSpan? EndTime { get; set; }
+        public double? WeekdayNonProductivityHours { get; set; }
+        public double? HolidayNonProductivityHours { get; set; }
+        public double? WeekdayProductivityPlanHours { get; set; }
+        public double? HolidayProductivityPlanHours { get; set; }
         public List<ShiftRequiredSpecialtyDto>? RequiredSpecialties { get; set; }
     }
 

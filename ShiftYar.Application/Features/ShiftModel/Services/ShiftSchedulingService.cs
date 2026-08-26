@@ -1395,6 +1395,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             }
 
             var shiftInfoLookup = ProductivityWorkedHoursCalculator.BuildShiftInfoLookup(constraints.ShiftRequirements);
+            var isInPlan = ProductivityWorkedHoursCalculator.BuildProductivityPlanLookup(constraints.UserConstraints);
 
             var hoursByUser = result.Assignments
                 .GroupBy(a => a.UserId)
@@ -1410,7 +1411,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                             IsOnCall = a.IsOnCall
                         }),
                         shiftInfoLookup,
-                        constraints.IsHoliday));
+                        constraints.IsHoliday,
+                        isInPlan));
 
             result.Statistics ??= new ShiftSchedulingStatisticsDto();
             result.Statistics.WorkedHoursByUser = hoursByUser;
@@ -1937,7 +1939,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         ShiftLabel = resolvedLabel,
                         DepartmentId = shift.DepartmentId ?? 0,
                         StartTime = shift.StartTime ?? TimeSpan.Zero,
-                        EndTime = shift.EndTime ?? TimeSpan.Zero
+                        EndTime = shift.EndTime ?? TimeSpan.Zero,
+                        WeekdayNonProductivityHours = shift.WeekdayNonProductivityHours,
+                        HolidayNonProductivityHours = shift.HolidayNonProductivityHours,
+                        WeekdayProductivityPlanHours = shift.WeekdayProductivityPlanHours,
+                        HolidayProductivityPlanHours = shift.HolidayProductivityPlanHours
                     };
                     var durationHours = CalculateShiftDurationHours(shiftRequirement.StartTime, shiftRequirement.EndTime);
                     shiftRequirement.DurationHours = durationHours;

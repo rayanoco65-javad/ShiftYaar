@@ -1,15 +1,11 @@
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
-using ShiftYar.Domain.Entities.ProductivityModel;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using static ShiftYar.Domain.Enums.ShiftModel.ShiftEnums;
 
 namespace ShiftYar.Application.Common.Utilities;
 
 /// <summary>
-/// محاسبه ساعات مؤثر کار طبق قانون ارتقای بهره‌وری:
-/// ضریب ۱٫۵ برای شب/تعطیل، تحویل ۱ ساعته بین شیفت‌ها، سقف ۱۲ ساعت متوالی.
+/// محاسبه ساعات مؤثر کار برای موظفی/عملکرد.
+/// اولویت با چهار فیلد قابل‌تنظیم سوپروایزر روی شیفت است؛ در نبود آن‌ها از مدت Start/End و ضریب شب/تعطیل استفاده می‌شود.
 /// </summary>
 public static class ProductivityWorkedHoursCalculator
 {
@@ -23,12 +19,69 @@ public static class ProductivityWorkedHoursCalculator
         ShiftLabel Label,
         double DurationHours,
         TimeSpan StartTime,
-        TimeSpan EndTime);
+        TimeSpan EndTime,
+        double? WeekdayNonProductivityHours = null,
+        double? HolidayNonProductivityHours = null,
+        double? WeekdayProductivityPlanHours = null,
+        double? HolidayProductivityPlanHours = null);
+
+    /// <summary>
+    /// ساعات محاسبه‌شده برای یک نوبت (بدون تحویل‌کار)، بر اساس تنظیمات شیفت و وضعیت کاربر/روز.
+    /// </summary>
+    public static double ResolveCreditedHours(
+        ShiftWorkInfo info,
+        bool isHoliday,
+        bool includedInProductivityPlan,
+        double nightHolidayMultiplier = DefaultNightHolidayMultiplier)
+    {
+        double? configured = (includedInProductivityPlan, isHoliday) switch
+        {
+            (true, true) => info.HolidayProductivityPlanHours,
+            (true, false) => info.WeekdayProductivityPlanHours,
+            (false, true) => info.HolidayNonProductivityHours,
+            (false, false) => info.WeekdayNonProductivityHours
+        };
+
+        if (configured is > 0)
+        {
+            return configured.Value;
+        }
+
+        var clockHours = info.DurationHours > 0 ? info.DurationHours : 8.0;
+        var applyMultiplier = isHoliday || info.Label == ShiftLabel.Night;
+        return applyMultiplier ? clockHours * nightHolidayMultiplier : clockHours;
+    }
+
+    /// <summary>
+    /// تخمین ساعات یک انتساب شامل تحویل پیش‌فرض (برای گاردهای جابه‌جایی).
+    /// </summary>
+    public static double EstimateAssignmentHours(
+        SaShiftAssignment assignment,
+        IReadOnlyDictionary<int, ShiftWorkInfo> shiftInfoById,
+        bool isHoliday,
+        bool includedInProductivityPlan,
+        double handoverHours = DefaultHandoverHours,
+        double nightHolidayMultiplier = DefaultNightHolidayMultiplier)
+    {
+        if (!shiftInfoById.TryGetValue(assignment.ShiftId, out var info))
+        {
+            info = new ShiftWorkInfo(
+                assignment.ShiftId,
+                assignment.ShiftLabel,
+                8,
+                TimeSpan.Zero,
+                TimeSpan.Zero);
+        }
+
+        return handoverHours + ResolveCreditedHours(
+            info, isHoliday, includedInProductivityPlan, nightHolidayMultiplier);
+    }
 
     public static double CalculateEffectiveWorkedHours(
         IEnumerable<SaShiftAssignment> assignments,
         IReadOnlyDictionary<int, ShiftWorkInfo> shiftInfoById,
         Func<DateTime, bool> isHoliday,
+        Func<int, bool>? isIncludedInProductivityPlan = null,
         double nightHolidayMultiplier = DefaultNightHolidayMultiplier,
         double handoverHours = DefaultHandoverHours)
     {
@@ -42,13 +95,21 @@ public static class ProductivityWorkedHoursCalculator
         for (var i = 0; i < ordered.Count; i++)
         {
             var assignment = ordered[i];
-            var shiftHours = GetShiftDurationHours(assignment.ShiftId, shiftInfoById);
-            var handover = i > 0 ? handoverHours : 0;
-            var weighted = IsWeightedShift(assignment, shiftInfoById, isHoliday);
+            if (!shiftInfoById.TryGetValue(assignment.ShiftId, out var info))
+            {
+                info = new ShiftWorkInfo(
+                    assignment.ShiftId,
+                    assignment.ShiftLabel,
+                    8,
+                    DefaultStartForLabel(assignment.ShiftLabel),
+                    TimeSpan.Zero);
+            }
 
-            total += weighted
-                ? shiftHours * nightHolidayMultiplier + handover
-                : shiftHours + handover;
+            var holiday = isHoliday(assignment.Date.Date);
+            var inPlan = isIncludedInProductivityPlan?.Invoke(assignment.UserId) == true;
+            var credited = ResolveCreditedHours(info, holiday, inPlan, nightHolidayMultiplier);
+            var handover = i > 0 ? handoverHours : 0;
+            total += credited + handover;
         }
 
         return total;
@@ -131,31 +192,23 @@ public static class ProductivityWorkedHoursCalculator
                         end = start.Add(TimeSpan.FromHours(duration));
                     }
 
-                    return new ShiftWorkInfo(shift.ShiftId, shift.ShiftLabel, duration, start, end);
+                    return new ShiftWorkInfo(
+                        shift.ShiftId,
+                        shift.ShiftLabel,
+                        duration,
+                        start,
+                        end,
+                        shift.WeekdayNonProductivityHours,
+                        shift.HolidayNonProductivityHours,
+                        shift.WeekdayProductivityPlanHours,
+                        shift.HolidayProductivityPlanHours);
                 });
     }
 
-    private static bool IsWeightedShift(
-        SaShiftAssignment assignment,
-        IReadOnlyDictionary<int, ShiftWorkInfo> shiftInfoById,
-        Func<DateTime, bool> isHoliday)
+    public static Func<int, bool> BuildProductivityPlanLookup(IEnumerable<UserConstraint> users)
     {
-        if (isHoliday(assignment.Date.Date))
-        {
-            return true;
-        }
-
-        return shiftInfoById.TryGetValue(assignment.ShiftId, out var info) && info.Label == ShiftLabel.Night;
-    }
-
-    private static double GetShiftDurationHours(int shiftId, IReadOnlyDictionary<int, ShiftWorkInfo> shiftInfoById)
-    {
-        if (shiftInfoById.TryGetValue(shiftId, out var info) && info.DurationHours > 0)
-        {
-            return info.DurationHours;
-        }
-
-        return 8;
+        var map = users.ToDictionary(u => u.UserId, u => u.IncludedInProductivityPlan);
+        return userId => map.TryGetValue(userId, out var inPlan) && inPlan;
     }
 
     private static (DateTime Start, DateTime End) GetShiftWindow(

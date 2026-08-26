@@ -181,15 +181,15 @@ public static class ProductivityHourFillGuard
                          .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, a))
                          .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, donor, a))
                          .OrderBy(a => DonationPriority(a))
-                         .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints)))
+                         .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints, donor)))
             {
                 if (!CanUserTakeShift(solution, constraints, lookup, receiver, assignment, ignoreShiftId: null))
                 {
                     continue;
                 }
 
-                var shiftHours = EstimateShiftHours(assignment, lookup, constraints);
-                if (hours[donor.UserId] - shiftHours < (double)donor.ProductivityRequiredHours!.Value - crossTier)
+                var donorHours = EstimateShiftHours(assignment, lookup, constraints, donor);
+                if (hours[donor.UserId] - donorHours < (double)donor.ProductivityRequiredHours!.Value - crossTier)
                 {
                     continue;
                 }
@@ -284,20 +284,22 @@ public static class ProductivityHourFillGuard
                          .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, a))
                          .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, donor, a))
                          .OrderBy(a => DonationPriority(a))
-                         .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints)))
+                         .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints, donor)))
             {
                 if (!CanUserTakeShift(solution, constraints, lookup, receiver, assignment, ignoreShiftId: null))
                 {
                     continue;
                 }
 
-                var shiftHours = EstimateShiftHours(assignment, lookup, constraints);
+                var donorShiftHours = EstimateShiftHours(assignment, lookup, constraints, donor);
+                var receiverShiftHours = EstimateShiftHours(assignment, lookup, constraints, receiver);
                 if (!IsBeneficialCrossTierMove(
                         donor,
                         receiver,
                         hours[donor.UserId],
                         hours[receiver.UserId],
-                        shiftHours,
+                        donorShiftHours,
+                        receiverShiftHours,
                         crossTier))
                 {
                     continue;
@@ -361,7 +363,7 @@ public static class ProductivityHourFillGuard
                              .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, a))
                              .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, user, a))
                              .OrderBy(a => DonationPriority(a))
-                             .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints)))
+                             .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints, user)))
                 {
                     var receiver = nonProject
                         .Where(u => GetDeficit(u, CalculateWorked(solution, u.UserId, lookup, constraints)) > crossTier)
@@ -410,7 +412,8 @@ public static class ProductivityHourFillGuard
         UserConstraint receiver,
         double donorWorked,
         double receiverWorked,
-        double shiftHours,
+        double donorShiftHours,
+        double receiverShiftHours,
         double crossTierTolerance)
     {
         if (!ProjectPersonnelProductivityPriority.IsProjectPersonnel(donor) ||
@@ -426,14 +429,14 @@ public static class ProductivityHourFillGuard
 
         var donorRequired = (double)donor.ProductivityRequiredHours.Value;
         var receiverRequired = (double)receiver.ProductivityRequiredHours.Value;
-        var donorAfter = donorWorked - shiftHours;
+        var donorAfter = donorWorked - donorShiftHours;
         if (donorAfter < donorRequired - crossTierTolerance)
         {
             return false;
         }
 
         var deficitBefore = Math.Max(0, receiverRequired - receiverWorked);
-        var deficitAfter = Math.Max(0, receiverRequired - (receiverWorked + shiftHours));
+        var deficitAfter = Math.Max(0, receiverRequired - (receiverWorked + receiverShiftHours));
         return deficitAfter + 0.01 < deficitBefore;
     }
 
@@ -489,7 +492,7 @@ public static class ProductivityHourFillGuard
                          .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, a))
                          .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, donor, a))
                          .OrderBy(a => DonationPriority(a))
-                         .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints)))
+                         .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints, donor)))
             {
                 if (!CanUserTakeShift(solution, constraints, lookup, receiver, assignment, ignoreShiftId: null))
                 {
@@ -585,12 +588,13 @@ public static class ProductivityHourFillGuard
         IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
         ShiftConstraints constraints)
     {
-        var shiftHours = EstimateShiftHours(assignment, lookup, constraints);
+        var donorShiftHours = EstimateShiftHours(assignment, lookup, constraints, donor);
+        var receiverShiftHours = EstimateShiftHours(assignment, lookup, constraints, receiver);
         var before = CalculateRatioSpread(hours, ratioCohort);
 
         var beforeImbalance = CalculateTotalImbalance(hours, ratioCohort);
 
-        var donorAfter = hours[donor.UserId] - shiftHours;
+        var donorAfter = hours[donor.UserId] - donorShiftHours;
         if (donor.ProductivityRequiredHours.HasValue &&
             donorAfter < (double)donor.ProductivityRequiredHours.Value - DeficitToleranceHours)
         {
@@ -600,7 +604,7 @@ public static class ProductivityHourFillGuard
         var afterHours = new Dictionary<int, double>(hours)
         {
             [donor.UserId] = donorAfter,
-            [receiver.UserId] = hours[receiver.UserId] + shiftHours
+            [receiver.UserId] = hours[receiver.UserId] + receiverShiftHours
         };
 
         var receiverRequired = (double)receiver.ProductivityRequiredHours!.Value;
@@ -855,7 +859,7 @@ public static class ProductivityHourFillGuard
                     }
 
                     var donorHours = CalculateWorked(solution, donor.User.UserId, lookup, constraints);
-                    var shiftHours = EstimateShiftHours(assignment, lookup, constraints);
+                    var shiftHours = EstimateShiftHours(assignment, lookup, constraints, donor.User);
                     if (donor.User.ProductivityRequiredHours.HasValue &&
                         donorHours - shiftHours < (double)donor.User.ProductivityRequiredHours.Value - DeficitToleranceHours)
                     {
@@ -1126,7 +1130,10 @@ public static class ProductivityHourFillGuard
         var projected = solution.GetUserAllAssignments(user.UserId).ToList();
         projected.Add(assignment);
         var worked = ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
-            projected, lookup, constraints.IsHoliday);
+            projected,
+            lookup,
+            constraints.IsHoliday,
+            uid => uid == user.UserId && user.IncludedInProductivityPlan);
         return !ProjectPersonnelProductivityPriority.WouldExceedSchedulingCap(user, worked);
     }
 
@@ -1182,16 +1189,18 @@ public static class ProductivityHourFillGuard
     private static double EstimateShiftHours(
         SaShiftAssignment assignment,
         IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
-        ShiftConstraints constraints)
+        ShiftConstraints constraints,
+        UserConstraint? forUser = null)
     {
-        var duration = lookup.TryGetValue(assignment.ShiftId, out var info) && info.DurationHours > 0
-            ? info.DurationHours
-            : 8;
-        var weighted = ProductivityWorkedHoursCalculator.DefaultHandoverHours +
-                       (constraints.IsHoliday(assignment.Date) || assignment.ShiftLabel == ShiftLabel.Night
-                           ? duration * ProductivityWorkedHoursCalculator.DefaultNightHolidayMultiplier
-                           : duration);
-        return weighted;
+        var inPlan = forUser?.IncludedInProductivityPlan
+            ?? constraints.UserConstraints.FirstOrDefault(u => u.UserId == assignment.UserId)?.IncludedInProductivityPlan
+            ?? false;
+
+        return ProductivityWorkedHoursCalculator.EstimateAssignmentHours(
+            assignment,
+            lookup,
+            constraints.IsHoliday(assignment.Date),
+            inPlan);
     }
 
     private static double CalculateWorked(
@@ -1200,7 +1209,10 @@ public static class ProductivityHourFillGuard
         IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
         ShiftConstraints constraints) =>
         ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
-            solution.GetUserAllAssignments(userId), lookup, constraints.IsHoliday);
+            solution.GetUserAllAssignments(userId),
+            lookup,
+            constraints.IsHoliday,
+            ProductivityWorkedHoursCalculator.BuildProductivityPlanLookup(constraints.UserConstraints));
 
     private static double GetDeficit(UserConstraint user, double worked)
     {

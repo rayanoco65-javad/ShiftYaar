@@ -554,7 +554,10 @@ public static class MorningEveningBalanceGuard
         if (user.IncludedInProductivityPlan && user.ProductivityRequiredHours.HasValue)
         {
             var worked = ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
-                projected, lookup, constraints.IsHoliday);
+                projected,
+                lookup,
+                constraints.IsHoliday,
+                uid => uid == user.UserId && user.IncludedInProductivityPlan);
             if (ProjectPersonnelProductivityPriority.WouldExceedSchedulingCap(user, worked))
             {
                 return false;

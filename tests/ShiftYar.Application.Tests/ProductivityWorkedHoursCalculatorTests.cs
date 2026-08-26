@@ -45,6 +45,57 @@ public class ProductivityWorkedHoursCalculatorTests
     }
 
     [Fact]
+    public void ResolveCreditedHours_UsesSupervisorConfiguredValues()
+    {
+        var night = new ProductivityWorkedHoursCalculator.ShiftWorkInfo(
+            2,
+            ShiftLabel.Night,
+            12,
+            TimeSpan.FromHours(19),
+            TimeSpan.FromHours(7),
+            WeekdayNonProductivityHours: 12,
+            HolidayNonProductivityHours: 18,
+            WeekdayProductivityPlanHours: 19,
+            HolidayProductivityPlanHours: 19);
+
+        Assert.Equal(12, ProductivityWorkedHoursCalculator.ResolveCreditedHours(night, isHoliday: false, includedInProductivityPlan: false));
+        Assert.Equal(19, ProductivityWorkedHoursCalculator.ResolveCreditedHours(night, isHoliday: false, includedInProductivityPlan: true));
+        Assert.Equal(18, ProductivityWorkedHoursCalculator.ResolveCreditedHours(night, isHoliday: true, includedInProductivityPlan: false));
+        Assert.Equal(19, ProductivityWorkedHoursCalculator.ResolveCreditedHours(night, isHoliday: true, includedInProductivityPlan: true));
+    }
+
+    [Fact]
+    public void CalculateEffectiveWorkedHours_UsesPlanFlagAndConfiguredHours()
+    {
+        var lookup = new Dictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo>
+        {
+            [10] = new(
+                10,
+                ShiftLabel.Morning,
+                7,
+                TimeSpan.FromHours(7),
+                TimeSpan.FromHours(14),
+                WeekdayNonProductivityHours: 7,
+                HolidayNonProductivityHours: 10,
+                WeekdayProductivityPlanHours: 7,
+                HolidayProductivityPlanHours: 10)
+        };
+
+        var holidayMorning = new[]
+        {
+            new SaShiftAssignment { UserId = 5, ShiftId = 10, Date = new DateTime(2026, 1, 5), ShiftLabel = ShiftLabel.Morning }
+        };
+
+        var nonPlan = ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
+            holidayMorning, lookup, _ => true, _ => false);
+        var inPlan = ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
+            holidayMorning, lookup, _ => true, _ => true);
+
+        Assert.Equal(10, nonPlan, precision: 2);
+        Assert.Equal(10, inPlan, precision: 2);
+    }
+
+    [Fact]
     public void ExceedsMaxConsecutiveWorkHours_DetectsLongStretch()
     {
         var shiftInfo = new Dictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo>

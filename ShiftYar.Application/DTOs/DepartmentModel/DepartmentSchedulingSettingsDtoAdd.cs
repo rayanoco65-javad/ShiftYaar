@@ -16,14 +16,15 @@ namespace ShiftYar.Application.DTOs.DepartmentModel
         public bool? ForbidDuplicateDailyAssignments { get; set; }  //ممنوعیت تکالیف تکراری روزانه
         public bool? EnforceMaxShiftsPerDay { get; set; }   //اعمال حداکثر شیفت در روز
         public bool? EnforceMinRestDays { get; set; }   //اعمال حداقل روزهای استراحت
-        public bool? EnforceMaxConsecutiveShifts { get; set; }  //اعمال حداکثر شیفت‌های متوالی
+        public bool? EnforceMaxConsecutiveShifts { get; set; }  //اعمال سقف روزهای کاری متوالی
         public bool? EnforceWeeklyMaxShifts { get; set; }   //اعمال حداکثر شیفت‌های هفتگی
         public bool? EnforceNightShiftMonthlyCap { get; set; }  //اعمال سقف ماهانه شیفت شب
         public bool? EnforceSpecialtyCapacity { get; set; } //اعمال ظرفیت تخصصی
 
         // مقادیر عددی قوانین سخت (اختیاری؛ هنگام فعال بودن Enforce ها اعمال می‌شوند)
         public int? MinRestDaysBetweenShifts { get; set; }  //حداقل روزهای استراحت بین شیفت‌ها
-        public int? MaxConsecutiveShifts { get; set; }  //حداکثر شیفت‌های متوالی
+        /// <summary>حداکثر روز کاری متوالی (هر روز با حداقل یک شیفت). null/نامعتبر → پیش‌فرض ۳.</summary>
+        public int? MaxConsecutiveShifts { get; set; }
         public int? MaxShiftsPerWeek { get; set; }  //حداکثر شیفت در هفته
         public int? MaxNightShiftsPerMonth { get; set; }    //حداکثر شیفت شب در ماه
         [Range(1, 2, ErrorMessage = "حداکثر شیفت در روز فقط می‌تواند ۱ یا ۲ باشد.")]

@@ -214,12 +214,68 @@ public static class MaxConsecutiveWorkdayRules
 
         foreach (var user in constraints.UserConstraints.Where(u => u.ShiftType != ShiftTypes.FixedShift))
         {
-            var maxRun = GetMaxConsecutiveWorkRun(solution, user.UserId);
-            if (maxRun > user.MaxConsecutiveShifts)
+            var workDates = GetWorkDates(solution, user.UserId).OrderBy(d => d).ToList();
+            if (workDates.Count == 0)
             {
-                violations.Add(
-                    $"کاربر {user.UserId}: {maxRun} روز کار متوالی (سقف {user.MaxConsecutiveShifts})");
+                continue;
             }
+
+            var runStart = workDates[0];
+            var runEnd = workDates[0];
+            var run = 1;
+            var bestStart = runStart;
+            var bestEnd = runEnd;
+            var maxRun = 1;
+
+            for (var i = 1; i < workDates.Count; i++)
+            {
+                if ((workDates[i] - workDates[i - 1]).Days == 1)
+                {
+                    run++;
+                    runEnd = workDates[i];
+                    if (run > maxRun)
+                    {
+                        maxRun = run;
+                        bestStart = runStart;
+                        bestEnd = runEnd;
+                    }
+                }
+                else
+                {
+                    run = 1;
+                    runStart = workDates[i];
+                    runEnd = workDates[i];
+                }
+            }
+
+            if (maxRun <= user.MaxConsecutiveShifts)
+            {
+                continue;
+            }
+
+            var name = string.IsNullOrWhiteSpace(user.UserName) ? null : user.UserName.Trim();
+            var who = name == null ? $"کاربر {user.UserId}" : $"کاربر {user.UserId} ({name})";
+            var msg =
+                $"{who}: {maxRun} روز کار متوالی از {bestStart:yyyy-MM-dd} تا {bestEnd:yyyy-MM-dd} (سقف {user.MaxConsecutiveShifts})";
+
+            var requiredDays = user.RequiredShiftSlots
+                .Select(s => s.Date.Date)
+                .Concat(user.RequiredPresenceDates.Select(d => d.Date))
+                .ToHashSet();
+            var daysInRun = Enumerable.Range(0, (bestEnd - bestStart).Days + 1)
+                .Select(i => bestStart.AddDays(i))
+                .ToList();
+            var requiredInRun = daysInRun.Count(d => requiredDays.Contains(d));
+            if (requiredInRun == daysInRun.Count)
+            {
+                msg += " — به‌خاطر درخواست‌های ON تأییدشده (اولویت مطلق؛ الگوریتم حذفشان نمی‌کند).";
+            }
+            else if (requiredInRun > 0)
+            {
+                msg += $" — {requiredInRun}/{daysInRun.Count} روز این بازه درخواست ON تأییدشده دارد.";
+            }
+
+            violations.Add(msg);
         }
 
         return violations;

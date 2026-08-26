@@ -157,6 +157,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public TimeSpan EndTime { get; set; }
         public double DurationHours { get; set; }
         public int DurationMinutes { get; set; }
+
+        /// <summary>ساعات عملکرد روز عادی (خارج از طرح) — null یعنی fallback به Start/End و ضریب شب/تعطیل.</summary>
+        public double? WeekdayNonProductivityHours { get; set; }
+        public double? HolidayNonProductivityHours { get; set; }
+        public double? WeekdayProductivityPlanHours { get; set; }
+        public double? HolidayProductivityPlanHours { get; set; }
+
         public List<SpecialtyRequirement> SpecialtyRequirements { get; set; } = new List<SpecialtyRequirement>();
     }
 

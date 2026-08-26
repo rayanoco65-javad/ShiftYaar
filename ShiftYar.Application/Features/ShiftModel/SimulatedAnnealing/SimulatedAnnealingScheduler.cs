@@ -22,6 +22,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         private readonly AlgorithmStatistics _statistics;
         private readonly Dictionary<int, double> _shiftDurationLookup;
         private readonly Dictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> _shiftInfoLookup;
+        private readonly Func<int, bool> _isInProductivityPlan;
 
         public SimulatedAnnealingScheduler(ShiftConstraints constraints, SimulatedAnnealingParameters parameters)
         {
@@ -33,6 +34,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             _shiftDurationLookup = _shiftInfoLookup.ToDictionary(
                 kvp => kvp.Key,
                 kvp => kvp.Value.DurationHours > 0 ? kvp.Value.DurationHours : 8);
+            _isInProductivityPlan = ProductivityWorkedHoursCalculator.BuildProductivityPlanLookup(constraints.UserConstraints);
         }
 
         /// <summary>
@@ -2322,7 +2324,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             return ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
                 assignments,
                 _shiftInfoLookup,
-                _constraints.IsHoliday);
+                _constraints.IsHoliday,
+                _isInProductivityPlan);
         }
 
         private double GetShiftDuration(int shiftId)
@@ -2728,11 +2731,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private double GetShiftEffectiveHours(SaShiftAssignment assignment)
         {
-            var duration = GetShiftDuration(assignment.ShiftId);
-            return ProductivityWorkedHoursCalculator.DefaultHandoverHours +
-                   (_constraints.IsHoliday(assignment.Date) || assignment.ShiftLabel == ShiftLabel.Night
-                       ? duration * ProductivityWorkedHoursCalculator.DefaultNightHolidayMultiplier
-                       : duration);
+            return ProductivityWorkedHoursCalculator.EstimateAssignmentHours(
+                assignment,
+                _shiftInfoLookup,
+                _constraints.IsHoliday(assignment.Date),
+                _isInProductivityPlan(assignment.UserId));
         }
 
         private List<StaffingSlotGap> FindUnderstaffedSlots(ShiftSolution solution)

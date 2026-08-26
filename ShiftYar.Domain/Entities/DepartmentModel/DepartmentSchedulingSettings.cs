@@ -22,14 +22,15 @@ namespace ShiftYar.Domain.Entities.DepartmentModel
         public bool? ForbidDuplicateDailyAssignments { get; set; } // ممنوعیت بیش از یک شیفت در روز برای کاربر
         public bool? EnforceMaxShiftsPerDay { get; set; } // اعمال حداکثر شیفت روزانه مطابق تنظیمات سراسری
         public bool? EnforceMinRestDays { get; set; } // اعمال حداقل روزهای استراحت بین شیفت‌ها
-        public bool? EnforceMaxConsecutiveShifts { get; set; } // اعمال حداکثر شیفت‌های متوالی
+        public bool? EnforceMaxConsecutiveShifts { get; set; } // اعمال سقف روزهای کاری متوالی
         public bool? EnforceWeeklyMaxShifts { get; set; } // اعمال سقف هفتگی شیفت‌ها
         public bool? EnforceNightShiftMonthlyCap { get; set; } // اعمال سقف شیفت شب ماهانه
         public bool? EnforceSpecialtyCapacity { get; set; } // جلوگیری از تجاوز از ظرفیت تخصص/شیفت/روز
 
         // مقادیر عددی قوانین (برای ساده‌سازی ورود اطلاعات توسط سوپروایزر)
         public int? MinRestDaysBetweenShifts { get; set; } // حداقل روزهای استراحت بین شیفت‌ها
-        public int? MaxConsecutiveShifts { get; set; } // حداکثر شیفت‌های متوالی
+        /// <summary>حداکثر روز کاری متوالی؛ اگر خالی باشد در شیفت‌بندی مقدار ۳ استفاده می‌شود.</summary>
+        public int? MaxConsecutiveShifts { get; set; }
         public int? MaxShiftsPerWeek { get; set; } // سقف تعداد شیفت در هفته
         public int? MaxNightShiftsPerMonth { get; set; } // سقف شیفت شب ماهانه
         public int? MaxShiftsPerDay { get; set; } // حداکثر شیفت روزانه هر نفر (سراسری)
