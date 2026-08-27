@@ -63,9 +63,18 @@ namespace ShiftYar.Application.DTOs.DepartmentModel
         public bool? RequireManagerForNightShift { get; set; }
         public double? ShiftManagerRequirementWeight { get; set; }
 
-        // تنظیمات توزیع شیفت‌های شب باقی‌مانده بر اساس سابقه
+        // تنظیمات توزیع بر اساس سابقه — تفکیک صبح / عصر / شب
+        // نوع: 0=اولویت سابقه بیشتر، 1=اولویت سابقه کمتر، 2=خنثی
+        public bool? EnableMorningShiftDistributionBySeniority { get; set; }
+        public int? MorningShiftDistributionType { get; set; }
+        public double? MorningShiftDistributionWeight { get; set; }
+
+        public bool? EnableEveningShiftDistributionBySeniority { get; set; }
+        public int? EveningShiftDistributionType { get; set; }
+        public double? EveningShiftDistributionWeight { get; set; }
+
         public bool? EnableNightShiftDistributionBySeniority { get; set; }
-        public int? NightShiftDistributionType { get; set; } // 0=شب‌دوست (سابقه بیشتر اولویت), 1=شب‌گریز (سابقه کمتر اولویت), 2=خنثی
+        public int? NightShiftDistributionType { get; set; }
         public double? NightShiftDistributionWeight { get; set; }
         public double? SeniorityDistributionSlope { get; set; }
 

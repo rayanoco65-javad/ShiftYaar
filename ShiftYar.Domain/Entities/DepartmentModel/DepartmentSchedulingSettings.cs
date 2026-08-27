@@ -68,11 +68,19 @@ namespace ShiftYar.Domain.Entities.DepartmentModel
         public bool? RequireManagerForNightShift { get; set; } // الزام حضور مسئول در شیفت شب
         public double? ShiftManagerRequirementWeight { get; set; } // وزن الزام حضور مسئول در شیفت‌ها
 
-        // تنظیمات توزیع شیفت‌های شب باقی‌مانده بر اساس سابقه
-        public bool? EnableNightShiftDistributionBySeniority { get; set; } // فعال‌سازی توزیع شیفت‌های شب بر اساس سابقه
-        public int? NightShiftDistributionType { get; set; } // نوع توزیع: 0=شب‌دوست (سابقه بیشتر اولویت), 1=شب‌گریز (سابقه کمتر اولویت), 2=خنثی
-        public double? NightShiftDistributionWeight { get; set; } // وزن توزیع شیفت‌های شب بر اساس سابقه
-        public double? SeniorityDistributionSlope { get; set; } // شیب توزیع بر اساس سابقه (مقدار پیش‌فرض: 1.0)
+        // تنظیمات توزیع شیفت‌های باقی‌مانده بر اساس سابقه (تفکیک صبح / عصر / شب)
+        public bool? EnableMorningShiftDistributionBySeniority { get; set; }
+        public int? MorningShiftDistributionType { get; set; } // 0=سابقه بیشتر، 1=سابقه کمتر، 2=خنثی
+        public double? MorningShiftDistributionWeight { get; set; }
+
+        public bool? EnableEveningShiftDistributionBySeniority { get; set; }
+        public int? EveningShiftDistributionType { get; set; } // 0=سابقه بیشتر، 1=سابقه کمتر، 2=خنثی
+        public double? EveningShiftDistributionWeight { get; set; }
+
+        public bool? EnableNightShiftDistributionBySeniority { get; set; }
+        public int? NightShiftDistributionType { get; set; } // 0=سابقه بیشتر، 1=سابقه کمتر، 2=خنثی
+        public double? NightShiftDistributionWeight { get; set; }
+        public double? SeniorityDistributionSlope { get; set; } // شیب مشترک برای هر سه نوع (پیش‌فرض: 1.0)
 
         /// <summary>
         /// امکان شیفت‌بندی ماه جاری — فقط برای توسعه/تست.

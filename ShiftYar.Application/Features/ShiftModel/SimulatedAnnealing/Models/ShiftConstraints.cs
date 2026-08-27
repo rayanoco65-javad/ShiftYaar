@@ -31,12 +31,25 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public bool IsHolidayWeekendNight(DateTime date) =>
             HolidayWeekendNightRules.IsHolidayWeekendNight(date, IsHoliday);
 
+        /// <summary>فعال‌سازی توزیع نرم شیفت صبح بر اساس سابقه (بعد از سهمیه دقیق).</summary>
+        public bool EnableMorningShiftDistributionBySeniority { get; set; }
+
+        /// <summary>۰=سابقه بیشتر، ۱=سابقه کمتر، ۲=خنثی.</summary>
+        public int MorningShiftDistributionType { get; set; } = 2;
+
+        /// <summary>فعال‌سازی توزیع نرم شیفت عصر بر اساس سابقه.</summary>
+        public bool EnableEveningShiftDistributionBySeniority { get; set; }
+
+        /// <summary>۰=سابقه بیشتر، ۱=سابقه کمتر، ۲=خنثی.</summary>
+        public int EveningShiftDistributionType { get; set; } = 2;
+
         /// <summary>فعال‌سازی توزیع نرم شیفت شب بر اساس سابقه (بعد از سهمیه دقیق).</summary>
         public bool EnableNightShiftDistributionBySeniority { get; set; }
 
-        /// <summary>۰=شب‌دوست، ۱=شب‌گریز، ۲=خنثی.</summary>
+        /// <summary>۰=سابقه بیشتر، ۱=سابقه کمتر، ۲=خنثی.</summary>
         public int NightShiftDistributionType { get; set; } = 2;
 
+        /// <summary>شیب مشترک وزن‌دهی سابقه برای صبح/عصر/شب.</summary>
         public double SeniorityDistributionSlope { get; set; } = 1.0;
 
         public GlobalConstraints GlobalConstraints { get; set; } = new GlobalConstraints();
@@ -325,7 +338,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public double ShiftLabelBalanceWeight { get; set; } = 1.0;      // تعادل Morning/Evening/Night برای کاربران گردشی
         public int FairnessLookbackMonths { get; set; } = 1;            // بازه سابقه برای محاسبات عدالت
 
-        // Night shift distribution weights
+        // Seniority distribution by shift label
+        public double MorningShiftDistributionBySeniorityWeight { get; set; } = 1.0;
+        public double EveningShiftDistributionBySeniorityWeight { get; set; } = 1.0;
         public double NightShiftDistributionBySeniorityWeight { get; set; } = 1.0; // وزن توزیع شیفت‌های شب بر اساس سابقه
         public double ProductivityOvertimeWeight { get; set; } = 6.0; // وزن جریمه مازاد ساعات موظفی
         public double ProductivityShortfallWeight { get; set; } = 8.0; // وزن جریمه کمبود ساعات موظفی

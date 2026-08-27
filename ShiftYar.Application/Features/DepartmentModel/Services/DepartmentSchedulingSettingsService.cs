@@ -183,10 +183,24 @@ namespace ShiftYar.Application.Features.DepartmentModel.Services
             // اعتبارسنجی وزن الزام مسئول شیفت
             if (!ok(dto.ShiftManagerRequirementWeight)) { message = "وزن الزام حضور مسئول در شیفت‌ها باید نامنفی باشد."; return false; }
 
-            // اعتبارسنجی تنظیمات توزیع شیفت‌های شب بر اساس سابقه
+            // اعتبارسنجی تنظیمات توزیع بر اساس سابقه (صبح / عصر / شب)
+            if (dto.MorningShiftDistributionType.HasValue && (dto.MorningShiftDistributionType < 0 || dto.MorningShiftDistributionType > 2))
+            {
+                message = "نوع توزیع شیفت صبح باید بین 0 تا 2 باشد (0=سابقه بیشتر، 1=سابقه کمتر، 2=خنثی).";
+                return false;
+            }
+            if (!ok(dto.MorningShiftDistributionWeight)) { message = "وزن توزیع شیفت صبح بر اساس سابقه باید نامنفی باشد."; return false; }
+
+            if (dto.EveningShiftDistributionType.HasValue && (dto.EveningShiftDistributionType < 0 || dto.EveningShiftDistributionType > 2))
+            {
+                message = "نوع توزیع شیفت عصر باید بین 0 تا 2 باشد (0=سابقه بیشتر، 1=سابقه کمتر، 2=خنثی).";
+                return false;
+            }
+            if (!ok(dto.EveningShiftDistributionWeight)) { message = "وزن توزیع شیفت عصر بر اساس سابقه باید نامنفی باشد."; return false; }
+
             if (dto.NightShiftDistributionType.HasValue && (dto.NightShiftDistributionType < 0 || dto.NightShiftDistributionType > 2))
             {
-                message = "نوع توزیع شیفت‌های شب باید بین 0 تا 2 باشد (0=شب‌دوست، 1=شب‌گریز، 2=خنثی).";
+                message = "نوع توزیع شیفت شب باید بین 0 تا 2 باشد (0=سابقه بیشتر، 1=سابقه کمتر، 2=خنثی).";
                 return false;
             }
             if (!ok(dto.NightShiftDistributionWeight)) { message = "وزن توزیع شیفت‌های شب بر اساس سابقه باید نامنفی باشد."; return false; }
@@ -196,21 +210,32 @@ namespace ShiftYar.Application.Features.DepartmentModel.Services
         }
 
         /// <summary>
-        /// اعمال تنظیمات پیش‌فرض برای توزیع شیفت‌های شب بر اساس سابقه
+        /// اعمال تنظیمات پیش‌فرض برای توزیع بر اساس سابقه (صبح/عصر/شب)
         /// </summary>
         private void ApplyDefaultNightShiftDistributionSettings(DepartmentSchedulingSettingsDtoAdd dto)
         {
+            if (!dto.EnableMorningShiftDistributionBySeniority.HasValue)
+                dto.EnableMorningShiftDistributionBySeniority = false;
+            if (!dto.MorningShiftDistributionType.HasValue)
+                dto.MorningShiftDistributionType = 2;
+            if (!dto.MorningShiftDistributionWeight.HasValue)
+                dto.MorningShiftDistributionWeight = 0.0;
+
+            if (!dto.EnableEveningShiftDistributionBySeniority.HasValue)
+                dto.EnableEveningShiftDistributionBySeniority = false;
+            if (!dto.EveningShiftDistributionType.HasValue)
+                dto.EveningShiftDistributionType = 2;
+            if (!dto.EveningShiftDistributionWeight.HasValue)
+                dto.EveningShiftDistributionWeight = 0.0;
+
             if (!dto.EnableNightShiftDistributionBySeniority.HasValue)
-                dto.EnableNightShiftDistributionBySeniority = true;
-
+                dto.EnableNightShiftDistributionBySeniority = false;
             if (!dto.NightShiftDistributionType.HasValue)
-                dto.NightShiftDistributionType = 0; // پیش‌فرض: شب‌دوست
-
+                dto.NightShiftDistributionType = 2;
             if (!dto.NightShiftDistributionWeight.HasValue)
-                dto.NightShiftDistributionWeight = 1.0;
-
+                dto.NightShiftDistributionWeight = 0.0;
             if (!dto.SeniorityDistributionSlope.HasValue)
-                dto.SeniorityDistributionSlope = 1.0; // شیب پیش‌فرض
+                dto.SeniorityDistributionSlope = 1.0;
         }
 
         private static void NormalizeMaxShiftsPerDay(DepartmentSchedulingSettingsDtoAdd dto)

@@ -64,6 +64,14 @@ public static class DepartmentSchedulingDefaultSettingsBuilder
             RequireManagerForNightShift = false,
             ShiftManagerRequirementWeight = 0.0,
 
+            EnableMorningShiftDistributionBySeniority = false,
+            MorningShiftDistributionType = 2,
+            MorningShiftDistributionWeight = 0.0,
+
+            EnableEveningShiftDistributionBySeniority = false,
+            EveningShiftDistributionType = 2,
+            EveningShiftDistributionWeight = 0.0,
+
             EnableNightShiftDistributionBySeniority = false,
             NightShiftDistributionType = nightDistributionType,
             NightShiftDistributionWeight = 0.0,

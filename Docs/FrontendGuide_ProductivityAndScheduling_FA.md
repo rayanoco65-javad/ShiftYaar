@@ -353,9 +353,9 @@
 |----------------|------------------|
 | هر دپارتمان | `allowEveningAfterNightShift = false`، `allowNightShiftAfterNightShift = false` |
 | دارد شیفت شب | `maxConsecutiveNightShifts = 1` |
-| توزیع شب بر اساس سابقه | `enableNightShiftDistributionBySeniority = false` (پیش‌فرض) |
+| توزیع بر اساس سابقه | صبح/عصر/شب جدا؛ پیش‌فرض همه `enable* = false`، نوع صبح/عصر `2` (خنثی)، نوع شب از `IsNightLover` |
 | نیاز مدیر شیفت | `requireManagerForEveningShift = false`، `requireManagerForNightShift = false` (پیش‌فرض) |
-| `IsNightLover = false` (شب‌گریز) | `nightShiftDistributionType = 1` (فقط اگر بعداً توزیع سابقه را فعال کنید) |
+| `IsNightLover = false` (شب‌گریز) | `nightShiftDistributionType = 1` (فقط اگر توزیع سابقه شب را فعال کنید) |
 | production | `allowCurrentMonthScheduling = false`، `allowMonthlyRescheduleWithAutoDelete = false` |
 
 #### اقدام لازم در فرانت
@@ -375,7 +375,45 @@
 | `UpdateSetting` | PUT | ویرایش با `id` |
 | `DeleteSetting` | DELETE | حذف |
 | `ApplyDefaultDepartmentSchedulingSettings` | POST | اعمال پیش‌فرض بهینه (جدید) |
-| `UpdateNightShiftDistributionSettings` | PUT `/night-shift-distribution/{id}` | فقط فیلدهای توزیع شب |
+| `UpdateNightShiftDistributionSettings` | PUT `/night-shift-distribution/{id}` | فقط فیلدهای توزیع شب (سازگاری) |
+| `UpdateShiftSeniorityDistributionSettings` | PUT `/shift-seniority-distribution/{id}` | توزیع صبح/عصر/شب بر اساس سابقه |
+
+### توزیع شیفت بر اساس سابقه (صبح / عصر / شب)
+
+برای هر برچسب شیفت جداگانه قابل تنظیم است (سخت نیست؛ نرم و بعد از سهمیه قطعی):
+
+| فیلد | معنی |
+|------|------|
+| `enableMorningShiftDistributionBySeniority` | فعال‌سازی توزیع صبح |
+| `morningShiftDistributionType` | `0` اولویت سابقه بیشتر / `1` اولویت سابقه کمتر / `2` خنثی |
+| `morningShiftDistributionWeight` | وزن جریمه نرم (۰ = بی‌اثر) |
+| `enableEveningShiftDistributionBySeniority` + `eveningShiftDistributionType` + `eveningShiftDistributionWeight` | همان برای عصر |
+| `enableNightShiftDistributionBySeniority` + `nightShiftDistributionType` + `nightShiftDistributionWeight` | همان برای شب |
+| `seniorityDistributionSlope` | شیب مشترک شدت اثر سابقه (پیش‌فرض ۱) |
+
+**نکات UI**
+
+- سه بلوک جدا: صبح / عصر / شب + سوئیچ اختیاری «اعمال یکسان برای همه».
+- پیش‌فرض: هر سه غیرفعال؛ صبح/عصر نوع خنثی؛ شب نوع از پروفایل دپارتمان (`IsNightLover`).
+- کاربرانی که سهمیه قطعی همان نوع شیفت دارند از این توزیع نرم کنار گذاشته می‌شوند.
+- تاریخ استخدام (`dateOfEmployment`) باید درست باشد تا سنوات محاسبه شود.
+
+نمونه بدنه `PUT .../shift-seniority-distribution/{id}`:
+
+```json
+{
+  "enableMorningShiftDistributionBySeniority": true,
+  "morningShiftDistributionType": 0,
+  "morningShiftDistributionWeight": 1.5,
+  "enableEveningShiftDistributionBySeniority": true,
+  "eveningShiftDistributionType": 1,
+  "eveningShiftDistributionWeight": 1.5,
+  "enableNightShiftDistributionBySeniority": true,
+  "nightShiftDistributionType": 0,
+  "nightShiftDistributionWeight": 2.0,
+  "seniorityDistributionSlope": 1.0
+}
+```
 
 ### درخواست حضور (یادآوری برای فرانت)
 
@@ -963,6 +1001,7 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - فرم تنظیمات دپارتمان:
   - دو سوئیچ عملیاتی: `allowCurrentMonthScheduling`، `allowMonthlyRescheduleWithAutoDelete`
   - دو سوئیچ استراحت بعد از شب (**boolean، پیش‌فرض false**): `allowEveningAfterNightShift`، `allowNightShiftAfterNightShift`
+  - **توزیع بر اساس سابقه — تفکیک صبح/عصر/شب** (`enable*DistributionBySeniority` + `*DistributionType` + وزن + `seniorityDistributionSlope`)
   - دکمه **«اعمال تنظیمات پیش‌فرض»** (`ApplyDefaultDepartmentSchedulingSettings`)
 - در فرم درخواست شیفت: برای حضور فقط `SpecificShift`؛ گزینهٔ حضور کل‌روز را نشان ندهید / غیرفعال کنید
 - نمایش ستون `requestAction` (حضور / عدم‌حضور) در لیست درخواست‌ها

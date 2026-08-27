@@ -35,6 +35,10 @@ public class DepartmentSchedulingDefaultSettingsBuilderTests
         Assert.Equal(1, dto.MaxConsecutiveNightShifts);
         Assert.Equal(1, dto.NightShiftDistributionType);
         Assert.False(dto.EnableNightShiftDistributionBySeniority);
+        Assert.False(dto.EnableMorningShiftDistributionBySeniority);
+        Assert.False(dto.EnableEveningShiftDistributionBySeniority);
+        Assert.Equal(2, dto.MorningShiftDistributionType);
+        Assert.Equal(2, dto.EveningShiftDistributionType);
         Assert.False(dto.RequireManagerForEveningShift);
         Assert.False(dto.RequireManagerForNightShift);
         Assert.Equal(0.0, dto.ShiftManagerRequirementWeight);

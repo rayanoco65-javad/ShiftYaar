@@ -318,7 +318,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             score += CalculateExactNightQuotaPenalty(solution) * _constraints.SoftWeights.ExactNightQuotaWeight;
             score += CalculateExtraShiftRotationPenalty(solution) * _constraints.SoftWeights.ExtraShiftRotationWeight;
             score += CalculateShiftLabelBalancePenalty(solution) * _constraints.SoftWeights.ShiftLabelBalanceWeight;
-            score += CalculateNightShiftSeniorityPenalty(solution) * _constraints.SoftWeights.NightShiftDistributionBySeniorityWeight;
+            score += CalculateShiftLabelSeniorityPenalty(solution, ShiftLabel.Morning)
+                     * _constraints.SoftWeights.MorningShiftDistributionBySeniorityWeight;
+            score += CalculateShiftLabelSeniorityPenalty(solution, ShiftLabel.Evening)
+                     * _constraints.SoftWeights.EveningShiftDistributionBySeniorityWeight;
+            score += CalculateShiftLabelSeniorityPenalty(solution, ShiftLabel.Night)
+                     * _constraints.SoftWeights.NightShiftDistributionBySeniorityWeight;
 
             solution.Violations = violations;
 
@@ -783,59 +788,82 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             return penalty;
         }
 
-        private double CalculateNightShiftSeniorityPenalty(ShiftSolution solution)
+        private double CalculateShiftLabelSeniorityPenalty(ShiftSolution solution, ShiftLabel label)
         {
-            if (_constraints.SoftWeights.NightShiftDistributionBySeniorityWeight <= 0)
+            var (enabled, distributionType, weight) = label switch
+            {
+                ShiftLabel.Morning => (
+                    _constraints.EnableMorningShiftDistributionBySeniority,
+                    _constraints.MorningShiftDistributionType,
+                    _constraints.SoftWeights.MorningShiftDistributionBySeniorityWeight),
+                ShiftLabel.Evening => (
+                    _constraints.EnableEveningShiftDistributionBySeniority,
+                    _constraints.EveningShiftDistributionType,
+                    _constraints.SoftWeights.EveningShiftDistributionBySeniorityWeight),
+                _ => (
+                    _constraints.EnableNightShiftDistributionBySeniority,
+                    _constraints.NightShiftDistributionType,
+                    _constraints.SoftWeights.NightShiftDistributionBySeniorityWeight)
+            };
+
+            if (weight <= 0)
             {
                 return 0;
             }
 
             var eligible = _constraints.UserConstraints
                 .Where(u => u.ShiftType != ShiftTypes.FixedShift)
-                .Where(u => !u.HasExactNightQuota)
-                .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, ShiftLabel.Night))
+                .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, label))
+                .Where(u => label switch
+                {
+                    ShiftLabel.Morning => !u.HasExactMorningQuota,
+                    ShiftLabel.Evening => !u.HasExactEveningQuota,
+                    _ => !u.HasExactNightQuota
+                })
                 .ToList();
             if (eligible.Count < 2)
             {
                 return 0;
             }
 
-            var nightCounts = eligible.ToDictionary(
+            var counts = eligible.ToDictionary(
                 u => u.UserId,
-                u => solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall));
-            var totalNights = nightCounts.Values.Sum();
-            if (totalNights == 0)
+                u => solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == label && !a.IsOnCall));
+            var total = counts.Values.Sum();
+            if (total == 0)
             {
                 return 0;
             }
 
-            if (!_constraints.EnableNightShiftDistributionBySeniority)
+            if (!enabled)
             {
-                var equalFair = totalNights / (double)eligible.Count;
-                return eligible.Sum(u => Math.Abs(nightCounts[u.UserId] - equalFair));
+                var equalFair = total / (double)eligible.Count;
+                return eligible.Sum(u => Math.Abs(counts[u.UserId] - equalFair));
             }
 
-            var weights = eligible.ToDictionary(u => u.UserId, u => GetSeniorityNightWeight(u));
+            var weights = eligible.ToDictionary(
+                u => u.UserId,
+                u => GetSeniorityDistributionWeight(u, distributionType));
             var totalWeight = weights.Values.Sum();
             if (totalWeight <= 0)
             {
-                var equalFair = totalNights / (double)eligible.Count;
-                return eligible.Sum(u => Math.Abs(nightCounts[u.UserId] - equalFair));
+                var equalFair = total / (double)eligible.Count;
+                return eligible.Sum(u => Math.Abs(counts[u.UserId] - equalFair));
             }
 
             return eligible.Sum(u =>
             {
-                var fair = totalNights * weights[u.UserId] / totalWeight;
-                return Math.Abs(nightCounts[u.UserId] - fair);
+                var fair = total * weights[u.UserId] / totalWeight;
+                return Math.Abs(counts[u.UserId] - fair);
             });
         }
 
-        private double GetSeniorityNightWeight(UserConstraint user)
+        private double GetSeniorityDistributionWeight(UserConstraint user, int distributionType)
         {
             var years = Math.Clamp(user.ExperienceYears, 0, 40);
             var slope = Math.Max(0.1, _constraints.SeniorityDistributionSlope);
 
-            return _constraints.NightShiftDistributionType switch
+            return distributionType switch
             {
                 0 => Math.Pow(Math.Max(1, years + 1), slope),
                 1 => Math.Pow(Math.Max(1, 40 - years), slope),

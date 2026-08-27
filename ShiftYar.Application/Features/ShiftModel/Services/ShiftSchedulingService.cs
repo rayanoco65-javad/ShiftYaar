@@ -1647,12 +1647,24 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     constraints.SoftWeights.OffSpreadWeight = 1.0;
                     constraints.SoftWeights.ProductivityShortfallWeight = 8.0;
                     constraints.SoftWeights.ProductivityOvertimeWeight = 6.0;
+                    constraints.EnableMorningShiftDistributionBySeniority =
+                        deptSettingEarly.EnableMorningShiftDistributionBySeniority ?? false;
+                    constraints.MorningShiftDistributionType = deptSettingEarly.MorningShiftDistributionType ?? 2;
+                    constraints.SoftWeights.MorningShiftDistributionBySeniorityWeight =
+                        Math.Max(0.0, deptSettingEarly.MorningShiftDistributionWeight ?? 0.0);
+
+                    constraints.EnableEveningShiftDistributionBySeniority =
+                        deptSettingEarly.EnableEveningShiftDistributionBySeniority ?? false;
+                    constraints.EveningShiftDistributionType = deptSettingEarly.EveningShiftDistributionType ?? 2;
+                    constraints.SoftWeights.EveningShiftDistributionBySeniorityWeight =
+                        Math.Max(0.0, deptSettingEarly.EveningShiftDistributionWeight ?? 0.0);
+
                     constraints.EnableNightShiftDistributionBySeniority =
                         deptSettingEarly.EnableNightShiftDistributionBySeniority ?? false;
                     constraints.NightShiftDistributionType = deptSettingEarly.NightShiftDistributionType ?? 2;
                     constraints.SeniorityDistributionSlope = deptSettingEarly.SeniorityDistributionSlope ?? 1.0;
                     constraints.SoftWeights.NightShiftDistributionBySeniorityWeight =
-                        Math.Max(1.0, deptSettingEarly.NightShiftDistributionWeight ?? 1.0);
+                        Math.Max(0.0, deptSettingEarly.NightShiftDistributionWeight ?? 0.0);
                     constraints.HardRules.EnforceProductivityHours = true;
 
                     constraints.GlobalConstraints.RequireManagerForEveningShift = deptSettingEarly.RequireManagerForEveningShift ?? false;
@@ -2453,6 +2465,32 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     constraints.SoftWeights.ProductivityShortfallWeight = Math.Max(8.0, constraints.SoftWeights.ProductivityShortfallWeight);
                     constraints.SoftWeights.ProductivityOvertimeWeight = Math.Max(6.0, constraints.SoftWeights.ProductivityOvertimeWeight);
 
+                    constraints.EnableMorningShiftDistributionBySeniority =
+                        deptSetting.EnableMorningShiftDistributionBySeniority ?? constraints.EnableMorningShiftDistributionBySeniority;
+                    if (deptSetting.MorningShiftDistributionType.HasValue)
+                    {
+                        constraints.MorningShiftDistributionType = deptSetting.MorningShiftDistributionType.Value;
+                    }
+
+                    if (deptSetting.MorningShiftDistributionWeight.HasValue)
+                    {
+                        constraints.SoftWeights.MorningShiftDistributionBySeniorityWeight =
+                            Math.Max(0.0, deptSetting.MorningShiftDistributionWeight.Value);
+                    }
+
+                    constraints.EnableEveningShiftDistributionBySeniority =
+                        deptSetting.EnableEveningShiftDistributionBySeniority ?? constraints.EnableEveningShiftDistributionBySeniority;
+                    if (deptSetting.EveningShiftDistributionType.HasValue)
+                    {
+                        constraints.EveningShiftDistributionType = deptSetting.EveningShiftDistributionType.Value;
+                    }
+
+                    if (deptSetting.EveningShiftDistributionWeight.HasValue)
+                    {
+                        constraints.SoftWeights.EveningShiftDistributionBySeniorityWeight =
+                            Math.Max(0.0, deptSetting.EveningShiftDistributionWeight.Value);
+                    }
+
                     constraints.EnableNightShiftDistributionBySeniority =
                         deptSetting.EnableNightShiftDistributionBySeniority ?? constraints.EnableNightShiftDistributionBySeniority;
                     if (deptSetting.NightShiftDistributionType.HasValue)
@@ -2465,11 +2503,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         constraints.SeniorityDistributionSlope = deptSetting.SeniorityDistributionSlope.Value;
                     }
 
-                    // Night shift distribution weights
                     if (deptSetting.NightShiftDistributionWeight.HasValue)
-                        constraints.SoftWeights.NightShiftDistributionBySeniorityWeight = Math.Max(1.0, deptSetting.NightShiftDistributionWeight.Value);
-                    else
-                        constraints.SoftWeights.NightShiftDistributionBySeniorityWeight = Math.Max(1.0, constraints.SoftWeights.NightShiftDistributionBySeniorityWeight);
+                    {
+                        constraints.SoftWeights.NightShiftDistributionBySeniorityWeight =
+                            Math.Max(0.0, deptSetting.NightShiftDistributionWeight.Value);
+                    }
 
                     constraints.HardRules.EnforceProductivityHours = true;
                 }

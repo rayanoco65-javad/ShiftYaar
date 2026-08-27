@@ -166,6 +166,12 @@ namespace ShiftYar.Infrastructure.Migrations
                     b.Property<bool?>("EnableNightShiftPreference")
                         .HasColumnType("bit");
 
+                    b.Property<bool?>("EnableMorningShiftDistributionBySeniority")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("EnableEveningShiftDistributionBySeniority")
+                        .HasColumnType("bit");
+
                     b.Property<bool?>("EnforceMaxConsecutiveShifts")
                         .HasColumnType("bit");
 
@@ -242,6 +248,18 @@ namespace ShiftYar.Infrastructure.Migrations
                         .HasColumnType("int");
 
                     b.Property<double?>("NightShiftDistributionWeight")
+                        .HasColumnType("float");
+
+                    b.Property<int?>("MorningShiftDistributionType")
+                        .HasColumnType("int");
+
+                    b.Property<double?>("MorningShiftDistributionWeight")
+                        .HasColumnType("float");
+
+                    b.Property<int?>("EveningShiftDistributionType")
+                        .HasColumnType("int");
+
+                    b.Property<double?>("EveningShiftDistributionWeight")
                         .HasColumnType("float");
 
                     b.Property<int?>("NightShiftPreferenceType")
