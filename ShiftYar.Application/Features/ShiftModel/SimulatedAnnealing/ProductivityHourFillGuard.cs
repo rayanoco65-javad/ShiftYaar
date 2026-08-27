@@ -156,53 +156,70 @@ public static class ProductivityHourFillGuard
                 u => u.UserId,
                 u => CalculateWorked(solution, u.UserId, lookup, constraints));
 
-            var receiver = nonProject
+            var receivers = nonProject
                 .Where(u => GetDeficit(u, hours[u.UserId]) > crossTier)
                 .OrderByDescending(u => GetDeficit(u, hours[u.UserId]))
-                .FirstOrDefault();
-            if (receiver == null)
-            {
-                return;
-            }
-
-            var donor = nonProject
-                .Where(u => u.UserId != receiver.UserId)
-                .Where(u => GetDonorSurplusHours(u, hours[u.UserId]) > crossTier)
-                .OrderByDescending(u => GetDonorSurplusHours(u, hours[u.UserId]))
-                .ThenByDescending(u => hours[u.UserId])
-                .FirstOrDefault();
-            if (donor == null)
+                .ToList();
+            if (receivers.Count == 0)
             {
                 return;
             }
 
             var moved = false;
-            foreach (var assignment in solution.GetUserAllAssignments(donor.UserId)
-                         .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, a))
-                         .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, donor, a))
-                         .OrderBy(a => DonationPriority(a))
-                         .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints, donor)))
+            foreach (var receiver in receivers)
             {
-                if (!CanUserTakeShift(solution, constraints, lookup, receiver, assignment, ignoreShiftId: null))
+                var donors = nonProject
+                    .Where(u => u.UserId != receiver.UserId)
+                    .Where(u => GetDonatableSurplusHours(u, hours[u.UserId]) > crossTier)
+                    .OrderByDescending(u => GetDonatableSurplusHours(u, hours[u.UserId]))
+                    .ThenByDescending(u => hours[u.UserId])
+                    .ToList();
+                if (donors.Count == 0)
                 {
                     continue;
                 }
 
-                var donorHours = EstimateShiftHours(assignment, lookup, constraints, donor);
-                if (hours[donor.UserId] - donorHours < (double)donor.ProductivityRequiredHours!.Value - crossTier)
+                foreach (var d in donors)
                 {
-                    continue;
+                    foreach (var assignment in solution.GetUserAllAssignments(d.UserId)
+                                 .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, a))
+                                 .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, d, a))
+                                 .Where(a => ShiftEligibilityResolver.MayEverTakeLabel(receiver, a.ShiftLabel))
+                                 .OrderBy(a => DonationPriorityForReceiver(receiver, a))
+                                 .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints, d)))
+                    {
+                        if (!CanUserTakeShift(solution, constraints, lookup, receiver, assignment, ignoreShiftId: null))
+                        {
+                            continue;
+                        }
+
+                        var donorHours = EstimateShiftHours(assignment, lookup, constraints, d);
+                        if (hours[d.UserId] - donorHours < (double)d.ProductivityRequiredHours!.Value - crossTier)
+                        {
+                            continue;
+                        }
+
+                        solution.RemoveAssignment(d.UserId, assignment.ShiftId, assignment.Date);
+                        solution.AddAssignment(
+                            receiver.UserId,
+                            assignment.ShiftId,
+                            assignment.Date,
+                            assignment.ShiftLabel,
+                            assignment.IsOnCall);
+                        moved = true;
+                        break;
+                    }
+
+                    if (moved)
+                    {
+                        break;
+                    }
                 }
 
-                solution.RemoveAssignment(donor.UserId, assignment.ShiftId, assignment.Date);
-                solution.AddAssignment(
-                    receiver.UserId,
-                    assignment.ShiftId,
-                    assignment.Date,
-                    assignment.ShiftLabel,
-                    assignment.IsOnCall);
-                moved = true;
-                break;
+                if (moved)
+                {
+                    break;
+                }
             }
 
             if (!moved)
@@ -469,50 +486,81 @@ public static class ProductivityHourFillGuard
                 u => u.UserId,
                 u => CalculateWorked(solution, u.UserId, lookup, constraints));
 
-            var donor = productivityUsers
-                .Where(u => GetDonorSurplusHours(u, hours[u.UserId]) > 0)
-                .OrderByDescending(u => GetDonorSurplusHours(u, hours[u.UserId]))
+            var donors = productivityUsers
+                .Where(u => GetDonatableSurplusHours(u, hours[u.UserId]) > 0)
+                .OrderByDescending(u => GetDonatableSurplusHours(u, hours[u.UserId]))
                 .ThenByDescending(u => ProjectPersonnelProductivityPriority.FillTier(u))
                 .ThenByDescending(u => hours[u.UserId])
-                .FirstOrDefault();
+                .ToList();
 
-            var receiver = targetUsers
+            var receivers = targetUsers
                 .Where(u => GetDeficit(u, hours[u.UserId]) > receiverDeficitThreshold)
                 .OrderBy(u => ProjectPersonnelProductivityPriority.FillTier(u))
                 .ThenByDescending(u => GetDeficit(u, hours[u.UserId]))
-                .FirstOrDefault();
+                .ToList();
 
-            if (donor == null || receiver == null)
+            if (donors.Count == 0 || receivers.Count == 0)
             {
                 return;
             }
 
             var moved = false;
-            foreach (var assignment in solution.GetUserAllAssignments(donor.UserId)
-                         .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, a))
-                         .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, donor, a))
-                         .OrderBy(a => DonationPriority(a))
-                         .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints, donor)))
+            foreach (var receiver in receivers)
             {
-                if (!CanUserTakeShift(solution, constraints, lookup, receiver, assignment, ignoreShiftId: null))
+                var deficit = GetDeficit(receiver, hours[receiver.UserId]);
+                // کسری بزرگ: فقط کاهش کسری مهم است، نه نرمی نسبت موظفی
+                var requireRatioImprove = deficit <= Math.Max(DeficitToleranceHours * 4, 8.0);
+
+                foreach (var donor in donors.Where(d => d.UserId != receiver.UserId))
                 {
-                    continue;
+                    foreach (var assignment in solution.GetUserAllAssignments(donor.UserId)
+                                 .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, a))
+                                 .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, donor, a))
+                                 .Where(a => ShiftEligibilityResolver.MayEverTakeLabel(receiver, a.ShiftLabel))
+                                 .OrderBy(a => DonationPriorityForReceiver(receiver, a))
+                                 .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints, donor)))
+                    {
+                        if (!CanUserTakeShift(solution, constraints, lookup, receiver, assignment, ignoreShiftId: null))
+                        {
+                            continue;
+                        }
+
+                        var donorShiftHours = EstimateShiftHours(assignment, lookup, constraints, donor);
+                        var donorAfter = hours[donor.UserId] - donorShiftHours;
+                        if (donor.ProductivityRequiredHours.HasValue &&
+                            donorAfter < (double)donor.ProductivityRequiredHours.Value - DeficitToleranceHours)
+                        {
+                            continue;
+                        }
+
+                        if (requireRatioImprove &&
+                            !WouldImproveRatioBalance(
+                                hours, productivityUsers, donor, receiver, assignment, lookup, constraints))
+                        {
+                            continue;
+                        }
+
+                        solution.RemoveAssignment(donor.UserId, assignment.ShiftId, assignment.Date);
+                        solution.AddAssignment(
+                            receiver.UserId,
+                            assignment.ShiftId,
+                            assignment.Date,
+                            assignment.ShiftLabel,
+                            assignment.IsOnCall);
+                        moved = true;
+                        break;
+                    }
+
+                    if (moved)
+                    {
+                        break;
+                    }
                 }
 
-                if (!WouldImproveRatioBalance(hours, productivityUsers, donor, receiver, assignment, lookup, constraints))
+                if (moved)
                 {
-                    continue;
+                    break;
                 }
-
-                solution.RemoveAssignment(donor.UserId, assignment.ShiftId, assignment.Date);
-                solution.AddAssignment(
-                    receiver.UserId,
-                    assignment.ShiftId,
-                    assignment.Date,
-                    assignment.ShiftLabel,
-                    assignment.IsOnCall);
-                moved = true;
-                break;
             }
 
             if (!moved)
@@ -529,6 +577,24 @@ public static class ProductivityHourFillGuard
             ShiftLabel.Evening => 1,
             _ => 2
         };
+
+    /// <summary>
+    /// اولویت اهدا: لیبل‌هایی که گیرنده واقعاً می‌تواند بگیرد (مثلاً عصر برای دونوبتهٔ قفل‌شده روی صبح=۰).
+    /// </summary>
+    private static int DonationPriorityForReceiver(UserConstraint receiver, SaShiftAssignment assignment)
+    {
+        if (!ShiftEligibilityResolver.MayEverTakeLabel(receiver, assignment.ShiftLabel))
+        {
+            return 100;
+        }
+
+        if (DayShiftQuotaEligibility.GetMaxAllowedTotal(receiver, assignment.ShiftLabel) <= 0)
+        {
+            return 90;
+        }
+
+        return DonationPriority(assignment);
+    }
 
     private static double GetSurplusHours(UserConstraint user, double worked)
     {
@@ -551,6 +617,22 @@ public static class ProductivityHourFillGuard
             ? ProjectPersonnelProductivityPriority.CrossTierToleranceHours
             : DeficitToleranceHours;
         return Math.Max(0, worked - (double)user.ProductivityRequiredHours.Value - tolerance);
+    }
+
+    /// <summary>
+    /// مازاد قابل اهدا برای پر کردن کسری — تحمل خیلی کم تا حتی ۱ ساعت اضافه‌کار هم قابل انتقال باشد.
+    /// </summary>
+    private static double GetDonatableSurplusHours(UserConstraint user, double worked)
+    {
+        if (!user.ProductivityRequiredHours.HasValue)
+        {
+            return 0;
+        }
+
+        return Math.Max(
+            0,
+            worked - (double)user.ProductivityRequiredHours.Value
+            - ProjectPersonnelProductivityPriority.CrossTierToleranceHours);
     }
 
     private static double CalculateRatioSpread(
@@ -1123,6 +1205,19 @@ public static class ProductivityHourFillGuard
                     {
                         return false;
                     }
+                }
+            }
+        }
+        else if (assignment.ShiftLabel is ShiftLabel.Morning or ShiftLabel.Evening)
+        {
+            var maxAllowed = DayShiftQuotaEligibility.GetMaxAllowedTotal(user, assignment.ShiftLabel);
+            if (maxAllowed < int.MaxValue)
+            {
+                var current = solution.GetUserAllAssignments(user.UserId)
+                    .Count(a => a.ShiftLabel == assignment.ShiftLabel && !a.IsOnCall);
+                if (current >= maxAllowed)
+                {
+                    return false;
                 }
             }
         }

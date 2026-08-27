@@ -237,6 +237,75 @@ public class ProductivityHourFillTests
             "Approved night request must remain after final balance.");
     }
 
+    [Fact]
+    public void EnforceFinalBalance_FillsEveningOnlyDeficitFromMorningHeavySurplus()
+    {
+        var start = new DateTime(2026, 9, 1);
+        var donor = MakeUser(1, requiredHours: 40);
+        donor.OvertimeConsent = true;
+        donor.MinRestDaysBetweenShifts = 0;
+        var receiver = MakeUser(2, requiredHours: 70);
+        receiver.OvertimeConsent = true;
+        receiver.MinRestDaysBetweenShifts = 0;
+        receiver.ShiftSubType = ShiftSubTypes.TwoShifts;
+        receiver.TwoShiftRotationPattern = TwoShiftRotationPattern.MorningEvening;
+        receiver.AllowedShiftLabels = [ShiftLabel.Morning, ShiftLabel.Evening];
+        receiver.ExactMorningShiftCount = 0;
+        receiver.MorningFallbackParticipation = false;
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(11),
+            UserConstraints = [donor, receiver],
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning),
+                Shift(2, ShiftLabel.Evening)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 }
+        };
+
+        var solution = new ShiftSolution();
+        // تمام ظرفیت عصر روزهای ۰–۹ نزد donor (مازاد) — receiver فقط ۲ عصر دارد
+        for (var i = 0; i < 10; i++)
+        {
+            solution.AddAssignment(donor.UserId, 2, start.AddDays(i), ShiftLabel.Evening, false);
+        }
+
+        for (var i = 10; i < 12; i++)
+        {
+            solution.AddAssignment(receiver.UserId, 2, start.AddDays(i), ShiftLabel.Evening, false);
+        }
+
+        var lookup = ShiftYar.Application.Common.Utilities.ProductivityWorkedHoursCalculator
+            .BuildShiftInfoLookup(constraints.ShiftRequirements);
+        var beforeReceiver = Worked(solution, receiver.UserId, lookup, constraints);
+
+        ProductivityHourFillGuard.EnforceFinalBalance(solution, constraints);
+
+        var afterReceiver = Worked(solution, receiver.UserId, lookup, constraints);
+        var afterDonor = Worked(solution, donor.UserId, lookup, constraints);
+        var receiverMornings = solution.GetUserAllAssignments(receiver.UserId)
+            .Count(a => a.ShiftLabel == ShiftLabel.Morning && !a.IsOnCall);
+        var receiverEvenings = solution.GetUserAllAssignments(receiver.UserId)
+            .Count(a => a.ShiftLabel == ShiftLabel.Evening && !a.IsOnCall);
+
+        Assert.Equal(0, receiverMornings);
+        Assert.True(receiverEvenings >= 6,
+            $"Should move surplus evenings to deficit user; evenings={receiverEvenings}");
+        Assert.True(afterReceiver > beforeReceiver + 15,
+            $"Evening-only deficit should fill; before={beforeReceiver}, after={afterReceiver}");
+        Assert.True(afterDonor >= 35,
+            $"Donor must keep near required; got {afterDonor}");
+    }
+
     private static double RatioSpread(
         ShiftSolution solution,
         List<UserConstraint> users,

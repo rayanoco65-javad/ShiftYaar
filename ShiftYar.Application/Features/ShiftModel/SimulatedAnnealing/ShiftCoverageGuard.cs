@@ -379,6 +379,14 @@ public static class ShiftCoverageGuard
             // تعادل peer برای صبح/عصر — فقط به‌عنوان اولویت نرم داخل پوشش اجباری
             score += totalLabel * 10;
 
+            // اولویت کسری موظفی: کسی که هنوز به هدف نرسیده زودتر شیفت پوشش بگیرد
+            if (user.IncludedInProductivityPlan && user.ProductivityRequiredHours is > 0)
+            {
+                var totalShifts = solution.GetUserAllAssignments(user.UserId).Count(a => !a.IsOnCall);
+                var approxTargetShifts = Math.Max(1, (int)Math.Ceiling((double)user.ProductivityRequiredHours.Value / 8.0));
+                score += (totalShifts - approxTargetShifts) * 35;
+            }
+
             if (constraints.IsHoliday(date))
             {
                 score += HolidayMorningEveningFairnessGuard.CountHolidayLabel(

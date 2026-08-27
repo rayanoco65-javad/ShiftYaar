@@ -1562,6 +1562,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftCoverageGuard.Enforce(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
 
+            // آخرین ترمیم موظفی: بعد از سهمیه/پوشش/Strip تا کسری دوباره از مازاد پر شود
+            ProductivityHourFillGuard.EnforceFinalBalance(solution, _constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+            ExactNightQuotaGuard.Enforce(solution, _constraints);
+            ExactDayShiftQuotaGuard.EnforceAll(solution, _constraints);
+
             // آخرین حرف: ON تأییدشده بعد از همه گاردها دوباره اعمال شود
             ApprovedRequestGuard.ForceApply(solution, _constraints);
 

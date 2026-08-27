@@ -1,0 +1,7 @@
+﻿sqlcmd : Sqlcmd: The -W and the -y/-Y options are mutually exclusive.
+At C:\Users\Paria\AppData\Local\Temp\ps-script-4aa2f193-0b8c-4806-b2c5-dfd654bdf9b7.ps1:116 char:1
++ sqlcmd -S "chogolisa.liara.cloud,34729" -U sa -P "DwOr8efLcjXBVQ10jGY ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Sqlcmd: The -W ...ally exclusive.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
