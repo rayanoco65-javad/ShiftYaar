@@ -384,17 +384,17 @@
 
 | فیلد | معنی |
 |------|------|
-| `enableMorningShiftDistributionBySeniority` | فعال‌سازی توزیع صبح |
-| `morningShiftDistributionType` | `0` اولویت سابقه بیشتر / `1` اولویت سابقه کمتر / `2` خنثی |
-| `morningShiftDistributionWeight` | وزن جریمه نرم (۰ = بی‌اثر) |
-| `enableEveningShiftDistributionBySeniority` + `eveningShiftDistributionType` + `eveningShiftDistributionWeight` | همان برای عصر |
-| `enableNightShiftDistributionBySeniority` + `nightShiftDistributionType` + `nightShiftDistributionWeight` | همان برای شب |
+| `enableMorning/Evening/NightShiftDistributionBySeniority` | فعال‌سازی توزیع همان لیبل |
+| `morning/evening/nightShiftDistributionType` | `0` سابقه بیشتر · `1` سابقه کمتر · `2` خنثی = **سهم برابر** (نه اولویت کم‌سابقه) |
+| `morning/evening/nightShiftDistributionWeight` | وزن اثر (۰ = بی‌اثر؛ پیشنهاد ۲–۳) |
 | `seniorityDistributionSlope` | شیب مشترک شدت اثر سابقه (پیش‌فرض ۱) |
 
 **نکات UI**
 
 - سه بلوک جدا: صبح / عصر / شب + سوئیچ اختیاری «اعمال یکسان برای همه».
 - پیش‌فرض: هر سه غیرفعال؛ صبح/عصر نوع خنثی؛ شب نوع از پروفایل دپارتمان (`IsNightLover`).
+- **مهم:** `type = 2` فقط توزیع **برابر** است. اگر می‌خواهید پرسنل کم‌سابقه شیفت بیشتری بگیرند، `type = 1` بگذارید (نه ۲).
+- برای اثر قابل‌مشاهده: `enable = true` و `weight ≥ 1` (پیشنهاد ۲–۳). الگوریتم بعد از پر کردن موظفی، بازتوزیع مستقیم هم انجام می‌دهد.
 - کاربرانی که سهمیه قطعی همان نوع شیفت دارند از این توزیع نرم کنار گذاشته می‌شوند.
 - تاریخ استخدام (`dateOfEmployment`) باید درست باشد تا سنوات محاسبه شود.
 

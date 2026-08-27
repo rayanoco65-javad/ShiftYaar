@@ -319,11 +319,17 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             score += CalculateExtraShiftRotationPenalty(solution) * _constraints.SoftWeights.ExtraShiftRotationWeight;
             score += CalculateShiftLabelBalancePenalty(solution) * _constraints.SoftWeights.ShiftLabelBalanceWeight;
             score += CalculateShiftLabelSeniorityPenalty(solution, ShiftLabel.Morning)
-                     * _constraints.SoftWeights.MorningShiftDistributionBySeniorityWeight;
+                     * EffectiveSeniorityWeight(
+                         _constraints.EnableMorningShiftDistributionBySeniority,
+                         _constraints.SoftWeights.MorningShiftDistributionBySeniorityWeight);
             score += CalculateShiftLabelSeniorityPenalty(solution, ShiftLabel.Evening)
-                     * _constraints.SoftWeights.EveningShiftDistributionBySeniorityWeight;
+                     * EffectiveSeniorityWeight(
+                         _constraints.EnableEveningShiftDistributionBySeniority,
+                         _constraints.SoftWeights.EveningShiftDistributionBySeniorityWeight);
             score += CalculateShiftLabelSeniorityPenalty(solution, ShiftLabel.Night)
-                     * _constraints.SoftWeights.NightShiftDistributionBySeniorityWeight;
+                     * EffectiveSeniorityWeight(
+                         _constraints.EnableNightShiftDistributionBySeniority,
+                         _constraints.SoftWeights.NightShiftDistributionBySeniorityWeight);
 
             solution.Violations = violations;
 
@@ -788,6 +794,17 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             return penalty;
         }
 
+        private static double EffectiveSeniorityWeight(bool enabled, double configuredWeight)
+        {
+            if (!enabled || configuredWeight <= 0)
+            {
+                return 0;
+            }
+
+            // وزن تنظیم‌شده در برابر جریمه‌های موظفی/عدالت (~۶–۸) ضعیف می‌ماند؛ تقویت حداقلی
+            return Math.Max(configuredWeight * 4.0, 8.0);
+        }
+
         private double CalculateShiftLabelSeniorityPenalty(ShiftSolution solution, ShiftLabel label)
         {
             var (enabled, distributionType, weight) = label switch
@@ -858,18 +875,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             });
         }
 
-        private double GetSeniorityDistributionWeight(UserConstraint user, int distributionType)
-        {
-            var years = Math.Clamp(user.ExperienceYears, 0, 40);
-            var slope = Math.Max(0.1, _constraints.SeniorityDistributionSlope);
-
-            return distributionType switch
-            {
-                0 => Math.Pow(Math.Max(1, years + 1), slope),
-                1 => Math.Pow(Math.Max(1, 40 - years), slope),
-                _ => 1.0
-            };
-        }
+        private double GetSeniorityDistributionWeight(UserConstraint user, int distributionType) =>
+            ShiftSeniorityDistributionGuard.ResolveWeight(
+                user.ExperienceYears,
+                distributionType,
+                _constraints.SeniorityDistributionSlope);
 
         private double CalculateExtraShiftRotationPenalty(ShiftSolution solution)
         {
@@ -1531,6 +1541,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ProductivityHourFillGuard.EnforceFinalBalance(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             MorningEveningBalanceGuard.Enforce(solution, _constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+            // بازتوزیع صبح/عصر/شب طبق سابقه — بعد از موظفی تا اثر تنظیمات دپارتمان حفظ شود
+            ShiftSeniorityDistributionGuard.Enforce(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             // پر کردن موظفی ممکن است صبح/عصر اضافه کند یا شب جابه‌جا کند — سهمیه شب را دوباره قفل کن
             ExactNightQuotaGuard.Enforce(solution, _constraints);
