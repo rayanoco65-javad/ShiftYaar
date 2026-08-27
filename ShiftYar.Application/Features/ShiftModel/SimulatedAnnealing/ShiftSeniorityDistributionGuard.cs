@@ -9,59 +9,169 @@ using static ShiftYar.Domain.Enums.UserModel.UserEnums;
 namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 
 /// <summary>
-/// بازتوزیع نرم صبح/عصر/شب بر اساس تنظیمات سابقهٔ دپارتمان.
-/// بعد از پر کردن موظفی اجرا می‌شود تا اثر جریمهٔ SA زیر گاردهای قوی‌تر از بین نرود.
-/// Type: 0=سابقه بیشتر، 1=سابقه کمتر، 2=خنثی (سهم برابر).
+/// بازتوزیع صبح/عصر/شب بر اساس سابقه.
+/// Type: 0=اولویت سابقه بیشتر، 1=اولویت سابقه کمتر (مازاد روز به کم‌سابقه)، 2=خنثی/سهم متناسب با ظرفیت روز.
+/// وقتی صبح و عصر هر دو با یک Type فعال باشند، روی مجموع صبح+عصر بازتوزیع می‌شود.
 /// </summary>
 public static class ShiftSeniorityDistributionGuard
 {
     private const double SurplusTolerance = 0.75;
-    private const int MaxPassesPerLabel = 96;
+    private const int MaxPasses = 120;
 
     public static void Enforce(ShiftSolution solution, ShiftConstraints constraints)
     {
-        EnforceLabel(
-            solution,
-            constraints,
-            ShiftLabel.Morning,
-            constraints.EnableMorningShiftDistributionBySeniority,
-            constraints.MorningShiftDistributionType,
-            constraints.SoftWeights.MorningShiftDistributionBySeniorityWeight,
-            u => !u.HasExactMorningQuota);
+        var morningOn = constraints.EnableMorningShiftDistributionBySeniority
+                        && constraints.SoftWeights.MorningShiftDistributionBySeniorityWeight > 0;
+        var eveningOn = constraints.EnableEveningShiftDistributionBySeniority
+                        && constraints.SoftWeights.EveningShiftDistributionBySeniorityWeight > 0;
 
-        EnforceLabel(
-            solution,
-            constraints,
-            ShiftLabel.Evening,
-            constraints.EnableEveningShiftDistributionBySeniority,
-            constraints.EveningShiftDistributionType,
-            constraints.SoftWeights.EveningShiftDistributionBySeniorityWeight,
-            u => !u.HasExactEveningQuota);
+        if (morningOn && eveningOn
+            && constraints.MorningShiftDistributionType == constraints.EveningShiftDistributionType)
+        {
+            EnforceDayShiftPool(
+                solution,
+                constraints,
+                constraints.MorningShiftDistributionType,
+                Math.Max(
+                    constraints.SoftWeights.MorningShiftDistributionBySeniorityWeight,
+                    constraints.SoftWeights.EveningShiftDistributionBySeniorityWeight));
+        }
+        else
+        {
+            if (morningOn)
+            {
+                EnforceLabel(
+                    solution,
+                    constraints,
+                    ShiftLabel.Morning,
+                    constraints.MorningShiftDistributionType,
+                    u => !u.HasExactMorningQuota);
+            }
 
-        EnforceLabel(
-            solution,
-            constraints,
-            ShiftLabel.Night,
-            constraints.EnableNightShiftDistributionBySeniority,
-            constraints.NightShiftDistributionType,
-            constraints.SoftWeights.NightShiftDistributionBySeniorityWeight,
-            u => !u.HasExactNightQuota);
+            if (eveningOn)
+            {
+                EnforceLabel(
+                    solution,
+                    constraints,
+                    ShiftLabel.Evening,
+                    constraints.EveningShiftDistributionType,
+                    u => !u.HasExactEveningQuota);
+            }
+        }
+
+        if (constraints.EnableNightShiftDistributionBySeniority
+            && constraints.SoftWeights.NightShiftDistributionBySeniorityWeight > 0)
+        {
+            EnforceLabel(
+                solution,
+                constraints,
+                ShiftLabel.Night,
+                constraints.NightShiftDistributionType,
+                u => !u.HasExactNightQuota);
+        }
+    }
+
+    /// <summary>
+    /// بازتوزیع مجموع صبح+عصر (مازاد شیفت روز).
+    /// </summary>
+    private static void EnforceDayShiftPool(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        int distributionType,
+        double weight)
+    {
+        if (weight <= 0)
+        {
+            return;
+        }
+
+        var morningReq = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftLabel == ShiftLabel.Morning);
+        var eveningReq = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftLabel == ShiftLabel.Evening);
+        if (morningReq == null && eveningReq == null)
+        {
+            return;
+        }
+
+        var eligible = constraints.UserConstraints
+            .Where(u => u.ShiftType != ShiftTypes.FixedShift)
+            .Where(u =>
+                (ShiftEligibilityResolver.MayEverTakeLabel(u, ShiftLabel.Morning) && !u.HasExactMorningQuota)
+                || (ShiftEligibilityResolver.MayEverTakeLabel(u, ShiftLabel.Evening) && !u.HasExactEveningQuota))
+            .ToList();
+        if (eligible.Count < 2)
+        {
+            return;
+        }
+
+        var lookup = ProductivityWorkedHoursCalculator.BuildShiftInfoLookup(constraints.ShiftRequirements);
+        var monthDays = Math.Max(1, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1);
+
+        for (var pass = 0; pass < MaxPasses; pass++)
+        {
+            var counts = eligible.ToDictionary(
+                u => u.UserId,
+                u => CountDayShifts(solution, u.UserId));
+            var total = counts.Values.Sum();
+            if (total == 0)
+            {
+                return;
+            }
+
+            var fair = BuildDayFairShares(
+                solution, eligible, total, distributionType, constraints.SeniorityDistributionSlope, monthDays);
+
+            var donor = eligible
+                .Select(u => (
+                    User: u,
+                    Count: counts[u.UserId],
+                    Fair: fair[u.UserId],
+                    Surplus: counts[u.UserId] - fair[u.UserId]))
+                .Where(x => x.Surplus > SurplusTolerance)
+                .OrderByDescending(x => x.Surplus)
+                .ThenByDescending(x => x.User.ExperienceYears)
+                .FirstOrDefault();
+            if (donor.User == null)
+            {
+                return;
+            }
+
+            var receivers = eligible
+                .Where(u => u.UserId != donor.User.UserId)
+                .Select(u => (
+                    User: u,
+                    Count: counts[u.UserId],
+                    Fair: fair[u.UserId],
+                    Deficit: fair[u.UserId] - counts[u.UserId]))
+                .Where(x => x.Deficit > SurplusTolerance)
+                .OrderByDescending(x => x.Deficit)
+                .ThenBy(x => x.User.ExperienceYears)
+                .ToList();
+
+            var moved = false;
+            foreach (var receiver in receivers)
+            {
+                if (TryTransferDayShift(
+                        solution, constraints, lookup, morningReq, eveningReq, donor.User, receiver.User))
+                {
+                    moved = true;
+                    break;
+                }
+            }
+
+            if (!moved)
+            {
+                return;
+            }
+        }
     }
 
     private static void EnforceLabel(
         ShiftSolution solution,
         ShiftConstraints constraints,
         ShiftLabel label,
-        bool enabled,
         int distributionType,
-        double weight,
         Func<UserConstraint, bool> isEligibleForSoftDistribution)
     {
-        if (!enabled || weight <= 0)
-        {
-            return;
-        }
-
         var shiftReq = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftLabel == label);
         if (shiftReq == null)
         {
@@ -79,8 +189,9 @@ public static class ShiftSeniorityDistributionGuard
         }
 
         var lookup = ProductivityWorkedHoursCalculator.BuildShiftInfoLookup(constraints.ShiftRequirements);
+        var monthDays = Math.Max(1, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1);
 
-        for (var pass = 0; pass < MaxPassesPerLabel; pass++)
+        for (var pass = 0; pass < MaxPasses; pass++)
         {
             var counts = eligible.ToDictionary(
                 u => u.UserId,
@@ -91,60 +202,84 @@ public static class ShiftSeniorityDistributionGuard
                 return;
             }
 
-            var fair = BuildFairShares(eligible, total, distributionType, constraints.SeniorityDistributionSlope);
+            var fair = label == ShiftLabel.Night
+                ? BuildFairShares(eligible, total, distributionType, constraints.SeniorityDistributionSlope)
+                : BuildDayFairShares(
+                    solution, eligible, total, distributionType, constraints.SeniorityDistributionSlope, monthDays);
+
             var donor = eligible
-                .Select(u => (User: u, Count: counts[u.UserId], Fair: fair[u.UserId], Surplus: counts[u.UserId] - fair[u.UserId]))
+                .Select(u => (
+                    User: u,
+                    Count: counts[u.UserId],
+                    Fair: fair[u.UserId],
+                    Surplus: counts[u.UserId] - fair[u.UserId]))
                 .Where(x => x.Surplus > SurplusTolerance)
                 .OrderByDescending(x => x.Surplus)
-                .ThenByDescending(x => x.Count)
+                .ThenByDescending(x => distributionType == 1 ? x.User.ExperienceYears : -x.User.ExperienceYears)
                 .FirstOrDefault();
             if (donor.User == null)
             {
                 return;
             }
 
-            var receiver = eligible
-                .Where(u => u.UserId != donor.User.UserId)
-                .Select(u => (User: u, Count: counts[u.UserId], Fair: fair[u.UserId], Deficit: fair[u.UserId] - counts[u.UserId]))
-                .Where(x => x.Deficit > SurplusTolerance)
-                .OrderByDescending(x => x.Deficit)
-                .ThenBy(x => x.Count)
-                .FirstOrDefault(x =>
-                    TryTransferOne(
-                        solution,
-                        constraints,
-                        lookup,
-                        shiftReq,
-                        label,
-                        donor.User,
-                        x.User));
-
-            if (receiver.User == null)
+            var moved = false;
+            foreach (var receiver in eligible
+                         .Where(u => u.UserId != donor.User.UserId)
+                         .Select(u => (
+                             User: u,
+                             Count: counts[u.UserId],
+                             Fair: fair[u.UserId],
+                             Deficit: fair[u.UserId] - counts[u.UserId]))
+                         .Where(x => x.Deficit > SurplusTolerance)
+                         .OrderByDescending(x => x.Deficit)
+                         .ThenBy(x => distributionType == 1 ? x.User.ExperienceYears : -x.User.ExperienceYears))
             {
-                // اگر گیرندهٔ ایده‌آل پیدا نشد، از donor با بیشترین مازاد حداقل یک انتقال ممکن را امتحان کن
-                var anyMoved = false;
-                foreach (var candidate in eligible
-                             .Where(u => u.UserId != donor.User.UserId)
-                             .OrderBy(u => counts[u.UserId] - fair[u.UserId]))
+                if (TryTransferOne(solution, constraints, lookup, shiftReq, label, donor.User, receiver.User))
                 {
-                    if (counts[candidate.UserId] >= fair[candidate.UserId] + SurplusTolerance)
-                    {
-                        continue;
-                    }
-
-                    if (TryTransferOne(solution, constraints, lookup, shiftReq, label, donor.User, candidate))
-                    {
-                        anyMoved = true;
-                        break;
-                    }
-                }
-
-                if (!anyMoved)
-                {
-                    return;
+                    moved = true;
+                    break;
                 }
             }
+
+            if (!moved)
+            {
+                return;
+            }
         }
+    }
+
+    private static Dictionary<int, double> BuildDayFairShares(
+        ShiftSolution solution,
+        List<UserConstraint> eligible,
+        int total,
+        int distributionType,
+        double slope,
+        int monthDays)
+    {
+        var weights = eligible.ToDictionary(
+            u => u.UserId,
+            u =>
+            {
+                var seniority = ResolveWeight(u.ExperienceYears, distributionType, slope);
+                var nights = CountLabel(solution, u.UserId, ShiftLabel.Night);
+                var dayCapacity = Math.Max(1, monthDays - nights);
+                // خنثی: سهم متناسب با ظرفیت روز بعد از شب‌ها
+                // اولویت سابقه: وزن سابقه × ظرفیت تا هدف غیرواقعی برای شب‌کارها ساخته نشود
+                return distributionType == 2
+                    ? dayCapacity
+                    : seniority * dayCapacity;
+            });
+
+        var totalWeight = weights.Values.Sum();
+        if (totalWeight <= 0)
+        {
+            var equal = total / (double)eligible.Count;
+            return eligible.ToDictionary(u => u.UserId, _ => equal);
+        }
+
+        return eligible.ToDictionary(
+            u => u.UserId,
+            u => total * weights[u.UserId] / totalWeight);
     }
 
     private static Dictionary<int, double> BuildFairShares(
@@ -178,6 +313,66 @@ public static class ShiftSeniorityDistributionGuard
             1 => Math.Pow(Math.Max(1, 40 - years), s),
             _ => 1.0
         };
+    }
+
+    private static bool TryTransferDayShift(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        ShiftRequirement? morningReq,
+        ShiftRequirement? eveningReq,
+        UserConstraint donor,
+        UserConstraint receiver)
+    {
+        foreach (var assignment in solution.GetUserAllAssignments(donor.UserId)
+                     .Where(a => !a.IsOnCall
+                                 && (a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening))
+                     .Where(a => !IsProtected(donor, a))
+                     .OrderBy(a => a.ShiftLabel == ShiftLabel.Evening ? 0 : 1)
+                     .ThenBy(a => a.Date))
+        {
+            var shiftReq = assignment.ShiftLabel == ShiftLabel.Morning ? morningReq : eveningReq;
+            if (shiftReq == null)
+            {
+                continue;
+            }
+
+            if (!ShiftEligibilityResolver.MayEverTakeLabel(receiver, assignment.ShiftLabel))
+            {
+                continue;
+            }
+
+            if (assignment.ShiftLabel == ShiftLabel.Morning && receiver.HasExactMorningQuota)
+            {
+                continue;
+            }
+
+            if (assignment.ShiftLabel == ShiftLabel.Evening && receiver.HasExactEveningQuota)
+            {
+                continue;
+            }
+
+            if (!CanReceive(solution, constraints, lookup, receiver, assignment))
+            {
+                continue;
+            }
+
+            if (!HasSpecialtyRoomIgnoringDonor(solution, constraints, shiftReq, assignment.Date, receiver, donor.UserId))
+            {
+                continue;
+            }
+
+            solution.RemoveAssignment(donor.UserId, assignment.ShiftId, assignment.Date);
+            solution.AddAssignment(
+                receiver.UserId,
+                assignment.ShiftId,
+                assignment.Date,
+                assignment.ShiftLabel,
+                isOnCall: false);
+            return true;
+        }
+
+        return false;
     }
 
     private static bool TryTransferOne(
@@ -320,6 +515,11 @@ public static class ShiftSeniorityDistributionGuard
 
     private static int GetSpecialty(ShiftConstraints constraints, int userId) =>
         constraints.UserConstraints.FirstOrDefault(u => u.UserId == userId)?.SpecialtyId ?? 0;
+
+    private static int CountDayShifts(ShiftSolution solution, int userId) =>
+        solution.GetUserAllAssignments(userId)
+            .Count(a => !a.IsOnCall
+                        && (a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening));
 
     private static int CountLabel(ShiftSolution solution, int userId, ShiftLabel label) =>
         solution.GetUserAllAssignments(userId).Count(a => a.ShiftLabel == label && !a.IsOnCall);

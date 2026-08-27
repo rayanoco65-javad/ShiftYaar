@@ -157,6 +157,17 @@ public class ShiftSeniorityDistributionTests
                     [
                         new SpecialtyRequirement { SpecialtyId = 10, RequiredTotalCount = 1 }
                     ]
+                },
+                new ShiftRequirement
+                {
+                    ShiftId = 2,
+                    ShiftLabel = ShiftLabel.Evening,
+                    DepartmentId = 1,
+                    DurationHours = 7,
+                    SpecialtyRequirements =
+                    [
+                        new SpecialtyRequirement { SpecialtyId = 10, RequiredTotalCount = 1 }
+                    ]
                 }
             ],
             HardRules = new HardRuleSet
@@ -167,12 +178,14 @@ public class ShiftSeniorityDistributionTests
             GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 },
             EnableMorningShiftDistributionBySeniority = true,
             MorningShiftDistributionType = 2,
+            EnableEveningShiftDistributionBySeniority = true,
+            EveningShiftDistributionType = 2,
             SoftWeights = SoftRuleWeights.CreateDefault()
         };
         constraints.SoftWeights.MorningShiftDistributionBySeniorityWeight = 2;
+        constraints.SoftWeights.EveningShiftDistributionBySeniorityWeight = 2;
 
         var solution = new ShiftSolution();
-        // ۸ صبح به ارشد، ۲ به تازه‌کار → با type خنثی باید نزدیک برابر شوند
         for (var i = 0; i < 8; i++)
         {
             solution.AddAssignment(senior.UserId, 1, start.AddDays(i), ShiftLabel.Morning, false);
@@ -185,11 +198,87 @@ public class ShiftSeniorityDistributionTests
 
         ShiftSeniorityDistributionGuard.Enforce(solution, constraints);
 
-        var seniorCount = CountLabel(solution, senior.UserId, ShiftLabel.Morning);
-        var juniorCount = CountLabel(solution, junior.UserId, ShiftLabel.Morning);
+        var seniorCount = CountDay(solution, senior.UserId);
+        var juniorCount = CountDay(solution, junior.UserId);
         Assert.Equal(10, seniorCount + juniorCount);
         Assert.True(Math.Abs(seniorCount - juniorCount) <= 1, $"senior={seniorCount}, junior={juniorCount}");
     }
+
+    [Fact]
+    public void Guard_TypeOne_MovesDayShiftsFromSeniorToJunior()
+    {
+        var start = new DateTime(2026, 9, 1);
+        var senior = MakeUser(1, experienceYears: 13);
+        var junior = MakeUser(2, experienceYears: 1);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(13),
+            UserConstraints = [senior, junior],
+            ShiftRequirements =
+            [
+                new ShiftRequirement
+                {
+                    ShiftId = 1,
+                    ShiftLabel = ShiftLabel.Morning,
+                    DepartmentId = 1,
+                    DurationHours = 7,
+                    SpecialtyRequirements =
+                    [
+                        new SpecialtyRequirement { SpecialtyId = 10, RequiredTotalCount = 1 }
+                    ]
+                },
+                new ShiftRequirement
+                {
+                    ShiftId = 2,
+                    ShiftLabel = ShiftLabel.Evening,
+                    DepartmentId = 1,
+                    DurationHours = 7,
+                    SpecialtyRequirements =
+                    [
+                        new SpecialtyRequirement { SpecialtyId = 10, RequiredTotalCount = 1 }
+                    ]
+                }
+            ],
+            HardRules = new HardRuleSet
+            {
+                EnforceSpecialtyCapacity = true,
+                EnforceMaxShiftsPerDay = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 },
+            EnableMorningShiftDistributionBySeniority = true,
+            MorningShiftDistributionType = 1,
+            EnableEveningShiftDistributionBySeniority = true,
+            EveningShiftDistributionType = 1,
+            SoftWeights = SoftRuleWeights.CreateDefault()
+        };
+        constraints.SoftWeights.MorningShiftDistributionBySeniorityWeight = 2;
+        constraints.SoftWeights.EveningShiftDistributionBySeniorityWeight = 2;
+
+        var solution = new ShiftSolution();
+        for (var i = 0; i < 11; i++)
+        {
+            solution.AddAssignment(senior.UserId, i % 2 == 0 ? 1 : 2, start.AddDays(i),
+                i % 2 == 0 ? ShiftLabel.Morning : ShiftLabel.Evening, false);
+        }
+
+        for (var i = 11; i < 14; i++)
+        {
+            solution.AddAssignment(junior.UserId, 1, start.AddDays(i), ShiftLabel.Morning, false);
+        }
+
+        ShiftSeniorityDistributionGuard.Enforce(solution, constraints);
+
+        var seniorCount = CountDay(solution, senior.UserId);
+        var juniorCount = CountDay(solution, junior.UserId);
+        Assert.True(juniorCount >= seniorCount,
+            $"Type=1 should favor junior day shifts; senior={seniorCount}, junior={juniorCount}");
+    }
+
+    private static int CountDay(ShiftSolution solution, int userId) =>
+        solution.GetUserAllAssignments(userId)
+            .Count(a => !a.IsOnCall
+                        && (a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening));
 
     private static int CountLabel(ShiftSolution solution, int userId, ShiftLabel label) =>
         solution.GetUserAllAssignments(userId).Count(a => a.ShiftLabel == label && !a.IsOnCall);
