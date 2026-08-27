@@ -9,13 +9,14 @@ using static ShiftYar.Domain.Enums.UserModel.UserEnums;
 namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 
 /// <summary>
-/// بازتوزیع صبح/عصر/شب بر اساس سابقه.
-/// Type: 0=اولویت سابقه بیشتر، 1=اولویت سابقه کمتر (مازاد روز به کم‌سابقه)، 2=خنثی/سهم متناسب با ظرفیت روز.
-/// وقتی صبح و عصر هر دو با یک Type فعال باشند، روی مجموع صبح+عصر بازتوزیع می‌شود.
+/// بازتوزیع صبح/عصر/شب بر اساس سابقه — فقط روی مازاد بالای موظفی.
+/// اگر کسی کسری موظفی دارد، اول فقط از اضافه‌کار به کسری منتقل می‌شود؛ بعد نوبت تقسیم آزاد با سابقه است.
+/// Type: 0=اولویت سابقه بیشتر، 1=اولویت سابقه کمتر، 2=خنثی/ظرفیت روز.
 /// </summary>
 public static class ShiftSeniorityDistributionGuard
 {
     private const double SurplusTolerance = 0.75;
+    private const double HourTolerance = 0.25;
     private const int MaxPasses = 120;
 
     public static void Enforce(ShiftSolution solution, ShiftConstraints constraints)
@@ -71,9 +72,6 @@ public static class ShiftSeniorityDistributionGuard
         }
     }
 
-    /// <summary>
-    /// بازتوزیع مجموع صبح+عصر (مازاد شیفت روز).
-    /// </summary>
     private static void EnforceDayShiftPool(
         ShiftSolution solution,
         ShiftConstraints constraints,
@@ -105,12 +103,15 @@ public static class ShiftSeniorityDistributionGuard
 
         var lookup = ProductivityWorkedHoursCalculator.BuildShiftInfoLookup(constraints.ShiftRequirements);
         var monthDays = Math.Max(1, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1);
+        var planLookup = ProductivityWorkedHoursCalculator.BuildProductivityPlanLookup(constraints.UserConstraints);
 
         for (var pass = 0; pass < MaxPasses; pass++)
         {
-            var counts = eligible.ToDictionary(
-                u => u.UserId,
-                u => CountDayShifts(solution, u.UserId));
+            var worked = BuildWorkedLookup(solution, constraints, lookup, planLookup, eligible);
+            var hourDeficitUsers = eligible.Where(u => GetHourDeficit(u, worked[u.UserId]) > HourTolerance).ToList();
+            var fillRequiredFirst = hourDeficitUsers.Count > 0;
+
+            var counts = eligible.ToDictionary(u => u.UserId, u => CountDayShifts(solution, u.UserId));
             var total = counts.Values.Sum();
             if (total == 0)
             {
@@ -120,40 +121,61 @@ public static class ShiftSeniorityDistributionGuard
             var fair = BuildDayFairShares(
                 solution, eligible, total, distributionType, constraints.SeniorityDistributionSlope, monthDays);
 
-            var donor = eligible
+            var donorCandidates = eligible
+                .Where(u => HasDonatableHourSurplus(u, worked[u.UserId]))
                 .Select(u => (
                     User: u,
                     Count: counts[u.UserId],
                     Fair: fair[u.UserId],
-                    Surplus: counts[u.UserId] - fair[u.UserId]))
-                .Where(x => x.Surplus > SurplusTolerance)
-                .OrderByDescending(x => x.Surplus)
-                .ThenByDescending(x => x.User.ExperienceYears)
-                .FirstOrDefault();
-            if (donor.User == null)
+                    CountSurplus: counts[u.UserId] - fair[u.UserId],
+                    HourSurplus: GetHourSurplus(u, worked[u.UserId])))
+                .Where(x => fillRequiredFirst
+                    ? x.HourSurplus > HourTolerance
+                    : x.CountSurplus > SurplusTolerance)
+                .OrderByDescending(x => fillRequiredFirst ? x.HourSurplus : x.CountSurplus)
+                .ThenByDescending(x => distributionType == 1 ? x.User.ExperienceYears : -x.User.ExperienceYears)
+                .ToList();
+
+            if (donorCandidates.Count == 0)
             {
                 return;
             }
 
-            var receivers = eligible
-                .Where(u => u.UserId != donor.User.UserId)
-                .Select(u => (
-                    User: u,
-                    Count: counts[u.UserId],
-                    Fair: fair[u.UserId],
-                    Deficit: fair[u.UserId] - counts[u.UserId]))
-                .Where(x => x.Deficit > SurplusTolerance)
-                .OrderByDescending(x => x.Deficit)
-                .ThenBy(x => x.User.ExperienceYears)
-                .ToList();
-
             var moved = false;
-            foreach (var receiver in receivers)
+            foreach (var donor in donorCandidates)
             {
-                if (TryTransferDayShift(
-                        solution, constraints, lookup, morningReq, eveningReq, donor.User, receiver.User))
+                var receivers = fillRequiredFirst
+                    ? hourDeficitUsers
+                        .Where(u => u.UserId != donor.User.UserId)
+                        .OrderByDescending(u => GetHourDeficit(u, worked[u.UserId]))
+                        .ThenBy(u => distributionType == 1 ? u.ExperienceYears : -u.ExperienceYears)
+                        .ToList()
+                    : eligible
+                        .Where(u => u.UserId != donor.User.UserId)
+                        .Where(u => fair[u.UserId] - counts[u.UserId] > SurplusTolerance)
+                        .OrderByDescending(u => fair[u.UserId] - counts[u.UserId])
+                        .ThenBy(u => distributionType == 1 ? u.ExperienceYears : -u.ExperienceYears)
+                        .ToList();
+
+                foreach (var receiver in receivers)
                 {
-                    moved = true;
+                    if (TryTransferDayShift(
+                            solution,
+                            constraints,
+                            lookup,
+                            morningReq,
+                            eveningReq,
+                            donor.User,
+                            receiver,
+                            worked[donor.User.UserId]))
+                    {
+                        moved = true;
+                        break;
+                    }
+                }
+
+                if (moved)
+                {
                     break;
                 }
             }
@@ -190,12 +212,15 @@ public static class ShiftSeniorityDistributionGuard
 
         var lookup = ProductivityWorkedHoursCalculator.BuildShiftInfoLookup(constraints.ShiftRequirements);
         var monthDays = Math.Max(1, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1);
+        var planLookup = ProductivityWorkedHoursCalculator.BuildProductivityPlanLookup(constraints.UserConstraints);
 
         for (var pass = 0; pass < MaxPasses; pass++)
         {
-            var counts = eligible.ToDictionary(
-                u => u.UserId,
-                u => CountLabel(solution, u.UserId, label));
+            var worked = BuildWorkedLookup(solution, constraints, lookup, planLookup, eligible);
+            var hourDeficitUsers = eligible.Where(u => GetHourDeficit(u, worked[u.UserId]) > HourTolerance).ToList();
+            var fillRequiredFirst = hourDeficitUsers.Count > 0;
+
+            var counts = eligible.ToDictionary(u => u.UserId, u => CountLabel(solution, u.UserId, label));
             var total = counts.Values.Sum();
             if (total == 0)
             {
@@ -207,36 +232,61 @@ public static class ShiftSeniorityDistributionGuard
                 : BuildDayFairShares(
                     solution, eligible, total, distributionType, constraints.SeniorityDistributionSlope, monthDays);
 
-            var donor = eligible
+            var donorCandidates = eligible
+                .Where(u => HasDonatableHourSurplus(u, worked[u.UserId]))
                 .Select(u => (
                     User: u,
                     Count: counts[u.UserId],
                     Fair: fair[u.UserId],
-                    Surplus: counts[u.UserId] - fair[u.UserId]))
-                .Where(x => x.Surplus > SurplusTolerance)
-                .OrderByDescending(x => x.Surplus)
+                    CountSurplus: counts[u.UserId] - fair[u.UserId],
+                    HourSurplus: GetHourSurplus(u, worked[u.UserId])))
+                .Where(x => fillRequiredFirst
+                    ? x.HourSurplus > HourTolerance
+                    : x.CountSurplus > SurplusTolerance)
+                .OrderByDescending(x => fillRequiredFirst ? x.HourSurplus : x.CountSurplus)
                 .ThenByDescending(x => distributionType == 1 ? x.User.ExperienceYears : -x.User.ExperienceYears)
-                .FirstOrDefault();
-            if (donor.User == null)
+                .ToList();
+
+            if (donorCandidates.Count == 0)
             {
                 return;
             }
 
             var moved = false;
-            foreach (var receiver in eligible
-                         .Where(u => u.UserId != donor.User.UserId)
-                         .Select(u => (
-                             User: u,
-                             Count: counts[u.UserId],
-                             Fair: fair[u.UserId],
-                             Deficit: fair[u.UserId] - counts[u.UserId]))
-                         .Where(x => x.Deficit > SurplusTolerance)
-                         .OrderByDescending(x => x.Deficit)
-                         .ThenBy(x => distributionType == 1 ? x.User.ExperienceYears : -x.User.ExperienceYears))
+            foreach (var donor in donorCandidates)
             {
-                if (TryTransferOne(solution, constraints, lookup, shiftReq, label, donor.User, receiver.User))
+                var receivers = fillRequiredFirst
+                    ? hourDeficitUsers
+                        .Where(u => u.UserId != donor.User.UserId)
+                        .OrderByDescending(u => GetHourDeficit(u, worked[u.UserId]))
+                        .ThenBy(u => distributionType == 1 ? u.ExperienceYears : -u.ExperienceYears)
+                        .ToList()
+                    : eligible
+                        .Where(u => u.UserId != donor.User.UserId)
+                        .Where(u => fair[u.UserId] - counts[u.UserId] > SurplusTolerance)
+                        .OrderByDescending(u => fair[u.UserId] - counts[u.UserId])
+                        .ThenBy(u => distributionType == 1 ? u.ExperienceYears : -u.ExperienceYears)
+                        .ToList();
+
+                foreach (var receiver in receivers)
                 {
-                    moved = true;
+                    if (TryTransferOne(
+                            solution,
+                            constraints,
+                            lookup,
+                            shiftReq,
+                            label,
+                            donor.User,
+                            receiver,
+                            worked[donor.User.UserId]))
+                    {
+                        moved = true;
+                        break;
+                    }
+                }
+
+                if (moved)
+                {
                     break;
                 }
             }
@@ -315,6 +365,67 @@ public static class ShiftSeniorityDistributionGuard
         };
     }
 
+    private static Dictionary<int, double> BuildWorkedLookup(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        Func<int, bool> planLookup,
+        List<UserConstraint> eligible)
+    {
+        return eligible.ToDictionary(
+            u => u.UserId,
+            u => ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
+                solution.GetUserAllAssignments(u.UserId),
+                lookup,
+                constraints.IsHoliday,
+                planLookup));
+    }
+
+    private static bool HasDonatableHourSurplus(UserConstraint user, double worked) =>
+        GetHourSurplus(user, worked) > HourTolerance
+        || !user.IncludedInProductivityPlan
+        || !user.ProductivityRequiredHours.HasValue;
+
+    private static double GetHourSurplus(UserConstraint user, double worked)
+    {
+        if (!user.IncludedInProductivityPlan || !user.ProductivityRequiredHours.HasValue)
+        {
+            return 0;
+        }
+
+        return Math.Max(0, worked - (double)user.ProductivityRequiredHours.Value);
+    }
+
+    private static double GetHourDeficit(UserConstraint user, double worked)
+    {
+        if (!user.IncludedInProductivityPlan || !user.ProductivityRequiredHours.HasValue)
+        {
+            return 0;
+        }
+
+        return Math.Max(0, (double)user.ProductivityRequiredHours.Value - worked);
+    }
+
+    private static bool WouldLeaveDonorBelowRequired(
+        UserConstraint donor,
+        double donorWorked,
+        SaShiftAssignment assignment,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        ShiftConstraints constraints)
+    {
+        if (!donor.IncludedInProductivityPlan || !donor.ProductivityRequiredHours.HasValue)
+        {
+            return false;
+        }
+
+        var shiftHours = ProductivityWorkedHoursCalculator.EstimateAssignmentHours(
+            assignment,
+            lookup,
+            constraints.IsHoliday(assignment.Date),
+            donor.IncludedInProductivityPlan);
+        return donorWorked - shiftHours < (double)donor.ProductivityRequiredHours.Value - HourTolerance;
+    }
+
     private static bool TryTransferDayShift(
         ShiftSolution solution,
         ShiftConstraints constraints,
@@ -322,7 +433,8 @@ public static class ShiftSeniorityDistributionGuard
         ShiftRequirement? morningReq,
         ShiftRequirement? eveningReq,
         UserConstraint donor,
-        UserConstraint receiver)
+        UserConstraint receiver,
+        double donorWorked)
     {
         foreach (var assignment in solution.GetUserAllAssignments(donor.UserId)
                      .Where(a => !a.IsOnCall
@@ -348,6 +460,11 @@ public static class ShiftSeniorityDistributionGuard
             }
 
             if (assignment.ShiftLabel == ShiftLabel.Evening && receiver.HasExactEveningQuota)
+            {
+                continue;
+            }
+
+            if (WouldLeaveDonorBelowRequired(donor, donorWorked, assignment, lookup, constraints))
             {
                 continue;
             }
@@ -382,7 +499,8 @@ public static class ShiftSeniorityDistributionGuard
         ShiftRequirement shiftReq,
         ShiftLabel label,
         UserConstraint donor,
-        UserConstraint receiver)
+        UserConstraint receiver,
+        double donorWorked)
     {
         foreach (var assignment in solution.GetUserAllAssignments(donor.UserId)
                      .Where(a => a.ShiftLabel == label && !a.IsOnCall)
@@ -390,6 +508,11 @@ public static class ShiftSeniorityDistributionGuard
                      .OrderByDescending(a => constraints.IsHoliday(a.Date) ? 0 : 1)
                      .ThenBy(a => a.Date))
         {
+            if (WouldLeaveDonorBelowRequired(donor, donorWorked, assignment, lookup, constraints))
+            {
+                continue;
+            }
+
             if (!CanReceive(solution, constraints, lookup, receiver, assignment))
             {
                 continue;

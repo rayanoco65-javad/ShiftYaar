@@ -1538,11 +1538,18 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             ShiftCoverageGuard.EnforceCapacityCeiling(solution, _constraints);
+            // ۱) اول موظفی‌ها را پر کن / کسری را از مازاد جبران کن
             ProductivityHourFillGuard.EnforceFinalBalance(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             MorningEveningBalanceGuard.Enforce(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
-            // بازتوزیع صبح/عصر/شب طبق سابقه — بعد از موظفی تا اثر تنظیمات دپارتمان حفظ شود
+            // ۲) فقط شیفت‌های آزادِ بالای موظفی را طبق سابقه بازتوزیع کن (بدون ایجاد کسری)
+            ShiftSeniorityDistributionGuard.Enforce(solution, _constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+            // ۳) اگر بازتوزیع سابقه جایی کسری ساخت، دوباره موظفی را ترمیم کن
+            ProductivityHourFillGuard.EnforceFinalBalance(solution, _constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+            // ۴) مازاد باقی‌مانده را یک‌بار دیگر با سابقه تنظیم کن
             ShiftSeniorityDistributionGuard.Enforce(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             // پر کردن موظفی ممکن است صبح/عصر اضافه کند یا شب جابه‌جا کند — سهمیه شب را دوباره قفل کن

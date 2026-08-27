@@ -1,3 +1,4 @@
+using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
 using Xunit;
@@ -273,6 +274,85 @@ public class ShiftSeniorityDistributionTests
         var juniorCount = CountDay(solution, junior.UserId);
         Assert.True(juniorCount >= seniorCount,
             $"Type=1 should favor junior day shifts; senior={seniorCount}, junior={juniorCount}");
+    }
+
+    [Fact]
+    public void Guard_FillsHourDeficitFromSurplusBeforeSeniorityRedistribution()
+    {
+        var start = new DateTime(2026, 9, 1);
+        // سابقه زیاد + اضافه‌کار — Type=0 می‌خواهد سهم بیشتری به او بدهد
+        var seniorOver = MakeUser(1, experienceYears: 20);
+        seniorOver.IncludedInProductivityPlan = true;
+        seniorOver.ProductivityRequiredHours = 28;
+        seniorOver.OvertimeConsent = true;
+
+        // سابقه کم + کسری موظفی
+        var juniorShort = MakeUser(2, experienceYears: 1);
+        juniorShort.IncludedInProductivityPlan = true;
+        juniorShort.ProductivityRequiredHours = 42;
+        juniorShort.OvertimeConsent = true;
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(13),
+            UserConstraints = [seniorOver, juniorShort],
+            ShiftRequirements =
+            [
+                new ShiftRequirement
+                {
+                    ShiftId = 1,
+                    ShiftLabel = ShiftLabel.Morning,
+                    DepartmentId = 1,
+                    DurationHours = 7,
+                    SpecialtyRequirements =
+                    [
+                        new SpecialtyRequirement { SpecialtyId = 10, RequiredTotalCount = 1 }
+                    ]
+                }
+            ],
+            HardRules = new HardRuleSet
+            {
+                EnforceSpecialtyCapacity = true,
+                EnforceMaxShiftsPerDay = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 },
+            EnableMorningShiftDistributionBySeniority = true,
+            MorningShiftDistributionType = 0, // بدون محافظت موظفی، از کسری junior به senior می‌برد
+            SoftWeights = SoftRuleWeights.CreateDefault()
+        };
+        constraints.SoftWeights.MorningShiftDistributionBySeniorityWeight = 2;
+
+        var solution = new ShiftSolution();
+        for (var i = 0; i < 8; i++)
+        {
+            solution.AddAssignment(seniorOver.UserId, 1, start.AddDays(i), ShiftLabel.Morning, false);
+        }
+
+        for (var i = 8; i < 10; i++)
+        {
+            solution.AddAssignment(juniorShort.UserId, 1, start.AddDays(i), ShiftLabel.Morning, false);
+        }
+
+        ShiftSeniorityDistributionGuard.Enforce(solution, constraints);
+
+        var lookup = ProductivityWorkedHoursCalculator.BuildShiftInfoLookup(constraints.ShiftRequirements);
+        var plan = ProductivityWorkedHoursCalculator.BuildProductivityPlanLookup(constraints.UserConstraints);
+        var seniorHours = ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
+            solution.GetUserAllAssignments(seniorOver.UserId), lookup, constraints.IsHoliday, plan);
+        var juniorHours = ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
+            solution.GetUserAllAssignments(juniorShort.UserId), lookup, constraints.IsHoliday, plan);
+
+        Assert.True(
+            juniorHours >= (double)juniorShort.ProductivityRequiredHours.Value - 0.5,
+            $"Junior shortfall must be filled before seniority; got {juniorHours} (required {juniorShort.ProductivityRequiredHours})");
+        Assert.True(
+            seniorHours >= (double)seniorOver.ProductivityRequiredHours.Value - 0.5,
+            $"Senior donor must keep required hours; got {seniorHours}");
+        Assert.True(
+            CountLabel(solution, juniorShort.UserId, ShiftLabel.Morning)
+            > CountLabel(solution, seniorOver.UserId, ShiftLabel.Morning),
+            "While deficit exists, surplus must move to shortfall — not the other way");
     }
 
     private static int CountDay(ShiftSolution solution, int userId) =>

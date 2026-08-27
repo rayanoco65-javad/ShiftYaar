@@ -16,7 +16,7 @@ public static class ProductivityHourFillGuard
 {
     private const double DeficitToleranceHours = 2.0;
     private const int ReassignmentPasses = 96;
-    private const int FinalBalancePasses = 3;
+    private const int FinalBalancePasses = 5;
     private const int CrossTierReassignmentPasses = 128;
 
     public static void Enforce(ShiftSolution solution, ShiftConstraints constraints)
