@@ -28,6 +28,19 @@ public static class AdjacentShiftRestGuard
                 }
 
                 var (earlier, later) = pairs[0];
+                // اگر فقط به‌خاطر تنظیمات عصر/شب بعد از شب ممنوع است و شیفت بعدی ON تأییدشده است،
+                // انتساب غیرمحافظت‌شدهٔ قبلی را حذف کن؛ هر دو محافظت‌شده → نگه دار.
+                if (IsWaivedByApprovedLaterSlot(user, earlier, later))
+                {
+                    if (IsRequestProtected(user, earlier))
+                    {
+                        break;
+                    }
+
+                    solution.RemoveAssignment(earlier.UserId, earlier.ShiftId, earlier.Date);
+                    continue;
+                }
+
                 var remove = ChooseRemovable(user, earlier, later, solution);
                 if (remove == null)
                 {
@@ -45,7 +58,8 @@ public static class AdjacentShiftRestGuard
         var violations = new List<string>();
         foreach (var user in constraints.UserConstraints)
         {
-            foreach (var (earlier, later) in AdjacentShiftRestRules.FindForbiddenPairs(
+            foreach (var (earlier, later) in FindReportableForbiddenPairs(
+                         user,
                          solution.GetUserAllAssignments(user.UserId),
                          constraints.HardRules))
             {
@@ -73,6 +87,43 @@ public static class AdjacentShiftRestGuard
         }
 
         return violations;
+    }
+
+    /// <summary>
+    /// جفت‌های ممنوع برای feasibility/گزارش؛ محدودیت عصر/شب بعد از شب
+    /// اگر انتساب بعدی از درخواست تأییدشده باشد، به‌خاطر اولویت ON نادیده گرفته می‌شود.
+    /// </summary>
+    public static bool HasReportableForbiddenPair(
+        UserConstraint user,
+        IEnumerable<SaShiftAssignment> assignments,
+        HardRuleSet rules) =>
+        FindReportableForbiddenPairs(user, assignments, rules).Count > 0;
+
+    public static List<(SaShiftAssignment Earlier, SaShiftAssignment Later)> FindReportableForbiddenPairs(
+        UserConstraint user,
+        IEnumerable<SaShiftAssignment> assignments,
+        HardRuleSet rules)
+    {
+        return AdjacentShiftRestRules.FindForbiddenPairs(assignments, rules)
+            .Where(p => !IsWaivedByApprovedLaterSlot(user, p.Earlier, p.Later))
+            .ToList();
+    }
+
+    /// <summary>
+    /// درخواست تأییدشدهٔ شیفت بعدی (عصر یا شب روز بعد از شب) بر تنظیمات دپارتمان اولویت دارد.
+    /// </summary>
+    public static bool IsWaivedByApprovedLaterSlot(
+        UserConstraint user,
+        SaShiftAssignment earlier,
+        SaShiftAssignment later)
+    {
+        if (!AdjacentShiftRestRules.IsSettingsControlledAfterNightPair(
+                earlier.ShiftLabel, earlier.Date, later.ShiftLabel, later.Date))
+        {
+            return false;
+        }
+
+        return IsRequestProtected(user, later);
     }
 
     private static SaShiftAssignment? ChooseRemovable(

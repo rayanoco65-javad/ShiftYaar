@@ -114,6 +114,127 @@ public class AdjacentShiftRestRulesTests
     }
 
     [Fact]
+    public void ApprovedConsecutiveNights_OverrideDisabledNightAfterNightSetting()
+    {
+        var d0 = new DateTime(2026, 8, 25);
+        var d1 = d0.AddDays(1);
+        var user = new UserConstraint
+        {
+            UserId = 1,
+            UserName = "u1",
+            SpecialtyId = 10,
+            Gender = UserGender.Female,
+            RequiredShiftSlots =
+            {
+                new ShiftSlotConstraint { Date = d0, ShiftLabel = ShiftLabel.Night },
+                new ShiftSlotConstraint { Date = d1, ShiftLabel = ShiftLabel.Night }
+            }
+        };
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = d0,
+            EndDate = d1,
+            UserConstraints = { user },
+            ShiftRequirements =
+            {
+                new ShiftRequirement
+                {
+                    ShiftId = 3,
+                    ShiftLabel = ShiftLabel.Night,
+                    DepartmentId = 1,
+                    DurationHours = 12,
+                    SpecialtyRequirements =
+                    {
+                        new SpecialtyRequirement { SpecialtyId = 10, RequiredTotalCount = 1 }
+                    }
+                }
+            },
+            HardRules = new HardRuleSet
+            {
+                AllowEveningAfterNightShift = false,
+                AllowNightShiftAfterNightShift = false,
+                EnforceSpecialtyCapacity = true
+            }
+        };
+
+        var solution = new ShiftSolution();
+        ApprovedRequestGuard.ForceApply(solution, constraints);
+
+        Assert.True(solution.HasAssignment(1, 3, d0));
+        Assert.True(solution.HasAssignment(1, 3, d1));
+        Assert.Empty(AdjacentShiftRestGuard.GetViolations(solution, constraints));
+        Assert.Empty(ApprovedRequestGuard.GetUnmetViolations(solution, constraints));
+        Assert.False(AdjacentShiftRestGuard.HasReportableForbiddenPair(
+            user, solution.GetUserAllAssignments(1), constraints.HardRules));
+    }
+
+    [Fact]
+    public void ApprovedEveningAfterNight_OverridesDisabledEveningSetting()
+    {
+        var d0 = new DateTime(2026, 8, 25);
+        var d1 = d0.AddDays(1);
+        var user = new UserConstraint
+        {
+            UserId = 2,
+            UserName = "u2",
+            SpecialtyId = 10,
+            Gender = UserGender.Male,
+            RequiredShiftSlots =
+            {
+                new ShiftSlotConstraint { Date = d0, ShiftLabel = ShiftLabel.Night },
+                new ShiftSlotConstraint { Date = d1, ShiftLabel = ShiftLabel.Evening }
+            }
+        };
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = d0,
+            EndDate = d1,
+            UserConstraints = { user },
+            ShiftRequirements =
+            {
+                new ShiftRequirement
+                {
+                    ShiftId = 2,
+                    ShiftLabel = ShiftLabel.Evening,
+                    DepartmentId = 1,
+                    DurationHours = 7,
+                    SpecialtyRequirements =
+                    {
+                        new SpecialtyRequirement { SpecialtyId = 10, RequiredTotalCount = 1 }
+                    }
+                },
+                new ShiftRequirement
+                {
+                    ShiftId = 3,
+                    ShiftLabel = ShiftLabel.Night,
+                    DepartmentId = 1,
+                    DurationHours = 12,
+                    SpecialtyRequirements =
+                    {
+                        new SpecialtyRequirement { SpecialtyId = 10, RequiredTotalCount = 1 }
+                    }
+                }
+            },
+            HardRules = new HardRuleSet
+            {
+                AllowEveningAfterNightShift = false,
+                AllowNightShiftAfterNightShift = false,
+                EnforceSpecialtyCapacity = true
+            }
+        };
+
+        var solution = new ShiftSolution();
+        ApprovedRequestGuard.ForceApply(solution, constraints);
+
+        Assert.True(solution.HasAssignment(2, 3, d0));
+        Assert.True(solution.HasAssignment(2, 2, d1));
+        Assert.Empty(AdjacentShiftRestGuard.GetViolations(solution, constraints));
+        Assert.Empty(ApprovedRequestGuard.GetUnmetViolations(solution, constraints));
+    }
+
+    [Fact]
     public void Optimize_NeverAssignsForbiddenAdjacencies()
     {
         var start = new DateTime(2026, 8, 23);

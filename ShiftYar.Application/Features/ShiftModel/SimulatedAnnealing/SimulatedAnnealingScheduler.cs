@@ -1108,10 +1108,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
             }
 
-            // ممنوعیت توالی عصر→شب و شب→صبح بدون فاصله
+            // ممنوعیت توالی عصر→شب و شب→صبح؛ عصر/شب بعد از شب با ON تأییدشده مستثنی می‌شود
             foreach (var userConstraint in _constraints.UserConstraints)
             {
-                if (AdjacentShiftRestRules.HasForbiddenAdjacentPair(
+                if (AdjacentShiftRestGuard.HasReportableForbiddenPair(
+                        userConstraint,
                         solution.GetUserAllAssignments(userConstraint.UserId),
                         _constraints.HardRules))
                 {

@@ -486,17 +486,6 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             {
                 if (required.ShiftLabel == ShiftLabel.Night)
                 {
-                    var prev = required.Date.Date.AddDays(-1);
-                    var protectedPrevNight = solution.GetUserAssignments(user.UserId, prev)
-                        .Any(a => !a.IsOnCall &&
-                                  a.ShiftLabel == ShiftLabel.Night &&
-                                  IsHardProtectedAssignment(user, a));
-                    if (protectedPrevNight && !constraints.HardRules.AllowNightShiftAfterNightShift)
-                    {
-                        return baseMsg +
-                               $" علت: درخواست شب تأییدشده در {prev:yyyy-MM-dd} با قانون «شب روز بعد از شب» (غیرفعال در تنظیمات دپارتمان) تداخل دارد.";
-                    }
-
                     var next = required.Date.Date.AddDays(1);
                     var protectedNextMorning = solution.GetUserAssignments(user.UserId, next)
                         .Any(a => !a.IsOnCall &&
@@ -507,20 +496,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         return baseMsg +
                                $" علت: درخواست صبح تأییدشده در {next:yyyy-MM-dd} با استراحت بعد از شب (شب→صبح ممنوع) تداخل دارد.";
                     }
-
-                    var protectedNextEvening = solution.GetUserAssignments(user.UserId, next)
-                        .Any(a => !a.IsOnCall &&
-                                  a.ShiftLabel == ShiftLabel.Evening &&
-                                  IsHardProtectedAssignment(user, a));
-                    if (protectedNextEvening && !constraints.HardRules.AllowEveningAfterNightShift)
-                    {
-                        return baseMsg +
-                               $" علت: درخواست عصر تأییدشده در {next:yyyy-MM-dd} با قانون «عصر روز بعد از شب» (غیرفعال در تنظیمات دپارتمان) تداخل دارد.";
-                    }
                 }
 
                 return baseMsg +
-                       " علت: قوانین توالی شیفت (شب→صبح روز بعد / شب متوالی) یا سقف شیفت روزانه مانع تخصیص است.";
+                       " علت: قوانین توالی شیفت (شب→صبح روز بعد / عصر→شب همان روز) یا سقف شیفت روزانه مانع تخصیص است.";
             }
 
             return baseMsg;
@@ -794,7 +773,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     solution.GetUserAllAssignments(user.UserId),
                     date,
                     shiftLabel,
-                    constraints))
+                    constraints,
+                    ignoreShiftId: null,
+                    ignoreSettingsControlledAfterNight: true))
             {
                 return false;
             }

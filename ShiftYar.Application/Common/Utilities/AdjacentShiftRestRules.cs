@@ -24,6 +24,29 @@ public static class AdjacentShiftRestRules
     };
 
     /// <summary>
+    /// محدودیت‌های وابسته به تنظیمات دپارتمان (نه سختِ فیزیکی):
+    /// عصر یا شب در روز بعد از شب. درخواست تأییدشده می‌تواند این‌ها را دور بزند.
+    /// </summary>
+    public static bool IsSettingsControlledAfterNightPair(
+        ShiftLabel earlierLabel,
+        DateTime earlierDate,
+        ShiftLabel laterLabel,
+        DateTime laterDate)
+    {
+        if (earlierLabel != ShiftLabel.Night)
+        {
+            return false;
+        }
+
+        if (laterDate.Date != earlierDate.Date.AddDays(1))
+        {
+            return false;
+        }
+
+        return laterLabel is ShiftLabel.Evening or ShiftLabel.Night;
+    }
+
+    /// <summary>
     /// آیا دو انتساب متوالی از نظر زمانی (بدون نوبت میانی) ممنوع‌اند؟
     /// </summary>
     public static bool IsForbiddenBackToBack(
@@ -152,14 +175,15 @@ public static class AdjacentShiftRestRules
         DateTime date,
         ShiftLabel label,
         ShiftConstraints constraints,
-        int? ignoreShiftId = null) =>
+        int? ignoreShiftId = null,
+        bool ignoreSettingsControlledAfterNight = false) =>
         WouldConflict(
             existingAssignments,
             date,
             label,
             ignoreShiftId,
-            constraints.HardRules.AllowEveningAfterNightShift,
-            constraints.HardRules.AllowNightShiftAfterNightShift);
+            ignoreSettingsControlledAfterNight || constraints.HardRules.AllowEveningAfterNightShift,
+            ignoreSettingsControlledAfterNight || constraints.HardRules.AllowNightShiftAfterNightShift);
 
     public static List<(SaShiftAssignment Earlier, SaShiftAssignment Later)> FindForbiddenPairs(
         IEnumerable<SaShiftAssignment> assignments,
