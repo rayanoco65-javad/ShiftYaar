@@ -73,6 +73,8 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools.Models
         public int? ExactHolidayWeekendNightShiftCount { get; set; }
         public int MinDaysBetweenNightShifts { get; set; } = 1;
         public bool CanBeShiftManager { get; set; } // توانایی مدیر شیفت بودن
+        /// <summary>null = مسئول نیست؛ 1 = سطح ۱؛ 2 = سطح ۲</summary>
+        public byte? ShiftManagerLevel { get; set; }
         public ShiftTypes ShiftType { get; set; } // نوع شیفت
         public ShiftSubTypes ShiftSubType { get; set; } // زیرنوع شیفت
         public TwoShiftRotationPattern? TwoShiftRotationPattern { get; set; } // الگوی چرخش دوشیفته

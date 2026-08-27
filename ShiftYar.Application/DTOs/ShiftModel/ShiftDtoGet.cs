@@ -22,6 +22,10 @@ namespace ShiftYar.Application.DTOs.ShiftModel
         public double? HolidayNonProductivityHours { get; set; }
         public double? WeekdayProductivityPlanHours { get; set; }
         public double? HolidayProductivityPlanHours { get; set; }
+        /// <summary>حداقل تعداد مسئول شیفت در این نوبت</summary>
+        public int ManagerRequiredCount { get; set; }
+        /// <summary>حداقل تعداد مسئول سطح ۱ در این نوبت</summary>
+        public int ManagerMinLevel1Count { get; set; }
         public List<ShiftRequiredSpecialtyDto>? RequiredSpecialties { get; set; }
     }
 

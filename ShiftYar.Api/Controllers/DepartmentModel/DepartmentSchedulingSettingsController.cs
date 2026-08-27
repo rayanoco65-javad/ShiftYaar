@@ -165,8 +165,6 @@ namespace ShiftYar.Api.Controllers.DepartmentModel
             EnableNightShiftPreference = s.EnableNightShiftPreference,
             NightShiftPreferenceType = s.NightShiftPreferenceType,
             NightShiftPreferenceWeight = s.NightShiftPreferenceWeight,
-            RequireManagerForEveningShift = s.RequireManagerForEveningShift,
-            RequireManagerForNightShift = s.RequireManagerForNightShift,
             ShiftManagerRequirementWeight = s.ShiftManagerRequirementWeight,
             EnableMorningShiftDistributionBySeniority = s.EnableMorningShiftDistributionBySeniority,
             MorningShiftDistributionType = s.MorningShiftDistributionType,

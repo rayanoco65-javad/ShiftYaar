@@ -121,6 +121,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public bool? MorningNightHolidayFallback { get; set; }
 
         public bool CanBeShiftManager { get; set; }
+        /// <summary>null = مسئول نیست؛ 1 = سطح ۱؛ 2 = سطح ۲</summary>
+        public byte? ShiftManagerLevel { get; set; }
         public bool IsActive { get; set; } = true; // وضعیت فعال بودن کاربر
         public ShiftTypes ShiftType { get; set; }
         public ShiftSubTypes ShiftSubType { get; set; }
@@ -176,6 +178,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public double? HolidayNonProductivityHours { get; set; }
         public double? WeekdayProductivityPlanHours { get; set; }
         public double? HolidayProductivityPlanHours { get; set; }
+
+        /// <summary>حداقل تعداد مسئول شیفت در این نوبت (۰ = بدون الزام).</summary>
+        public int ManagerRequiredCount { get; set; }
+        /// <summary>حداقل تعداد مسئول سطح ۱ در این نوبت.</summary>
+        public int ManagerMinLevel1Count { get; set; }
 
         public List<SpecialtyRequirement> SpecialtyRequirements { get; set; } = new List<SpecialtyRequirement>();
     }
@@ -248,9 +255,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public bool PreferSpecialtyMatch { get; set; } = true;  //مطابقت با تخصص
         public int MaxShiftsPerDay { get; set; } = 2;   // حداکثر شیفت در روز (صبح+عصر مجاز)
         public bool AllowWeekendShifts { get; set; } = true;    //مجاز کردن شیفت‌های آخر هفته
-        public bool RequireShiftManager { get; set; } = true;   //نیاز به مدیر شیفت (legacy)
-        public bool RequireManagerForEveningShift { get; set; } // الزام حضور مدیر در شیفت عصر
-        public bool RequireManagerForNightShift { get; set; }   // الزام حضور مدیر در شیفت شب
+        public bool RequireShiftManager { get; set; } = true;   //نیاز به مدیر شیفت (legacy؛ الزام واقعی از ShiftRequirement)
     }
 
     /// <summary>
@@ -344,6 +349,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public double NightShiftDistributionBySeniorityWeight { get; set; } = 1.0; // وزن توزیع شیفت‌های شب بر اساس سابقه
         public double ProductivityOvertimeWeight { get; set; } = 6.0; // وزن جریمه مازاد ساعات موظفی
         public double ProductivityShortfallWeight { get; set; } = 8.0; // وزن جریمه کمبود ساعات موظفی
+        public double ShiftManagerRequirementWeight { get; set; } = 2.0; // وزن الزام ترکیب مسئول شیفت
 
         public static SoftRuleWeights CreateDefault()
         {

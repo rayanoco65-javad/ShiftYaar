@@ -63,10 +63,8 @@ namespace ShiftYar.Domain.Entities.DepartmentModel
         public int? NightShiftPreferenceType { get; set; } // نوع تنظیمات شب: 0=شب‌دوست، 1=شب‌گریز، 2=خنثی
         public double? NightShiftPreferenceWeight { get; set; } // وزن تنظیمات شب‌دوست/شب‌گریز
 
-        // تنظیمات الزام مسئول شیفت
-        public bool? RequireManagerForEveningShift { get; set; } // الزام حضور مسئول در شیفت عصر
-        public bool? RequireManagerForNightShift { get; set; } // الزام حضور مسئول در شیفت شب
-        public double? ShiftManagerRequirementWeight { get; set; } // وزن الزام حضور مسئول در شیفت‌ها
+        /// <summary>وزن نرم الزام حضور مسئول شیفت (تعداد مسئول روی تعریف شیفت است).</summary>
+        public double? ShiftManagerRequirementWeight { get; set; }
 
         // تنظیمات توزیع شیفت‌های باقی‌مانده بر اساس سابقه (تفکیک صبح / عصر / شب)
         public bool? EnableMorningShiftDistributionBySeniority { get; set; }

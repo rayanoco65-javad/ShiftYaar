@@ -45,7 +45,10 @@ public static class DepartmentSchedulingProfileFactory
             RotatingUserCount = rotatingUsers.Count,
             ThreeShiftRotatingUserCount = rotatingUsers.Count(u => u.ShiftSubType == ShiftSubTypes.ThreeShifts),
             TwoShiftRotatingUserCount = rotatingUsers.Count(u => u.ShiftSubType == ShiftSubTypes.TwoShifts),
-            ShiftManagerCount = activeUsers.Count(u => u.CanBeShiftManager == true),
+            ShiftManagerCount = activeUsers.Count(u =>
+                u.CanBeShiftManager == true
+                || u.ShiftManagerLevel == 1
+                || u.ShiftManagerLevel == 2),
             HasMixedGenderStaff = genders > 1,
             HasNightShift = departmentShifts.Any(s => s.Label == ShiftLabel.Night),
             NightHeadcountPerShift = Math.Max(0, nightHeadcount),

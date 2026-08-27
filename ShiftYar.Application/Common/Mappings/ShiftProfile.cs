@@ -4,11 +4,6 @@ using ShiftYar.Domain.Entities.DepartmentModel;
 using ShiftYar.Domain.Entities.HospitalModel;
 using ShiftYar.Domain.Entities.ShiftModel;
 using ShiftYar.Domain.Entities.UserModel;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace ShiftYar.Application.Common.Mappings
 {
@@ -26,7 +21,11 @@ namespace ShiftYar.Application.Common.Mappings
             CreateMap<ShiftRequiredSpecialty, ShiftRequiredSpecialtyDto>()
                 .ForMember(dest => dest.SpecialtyName, opt => opt.MapFrom(src => src.Specialty.SpecialtyName));
 
-            CreateMap<ShiftDtoAdd, Shift>();
+            // Manager counts are applied explicitly in ShiftService after NormalizeShiftDto
+            // so partial updates don't wipe values via AutoMapper.
+            CreateMap<ShiftDtoAdd, Shift>()
+                .ForMember(dest => dest.ManagerRequiredCount, opt => opt.Ignore())
+                .ForMember(dest => dest.ManagerMinLevel1Count, opt => opt.Ignore());
         }
     }
 }

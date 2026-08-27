@@ -32,7 +32,12 @@ namespace ShiftYar.Domain.Entities.UserModel
         public string? City { get; set; }
         public string? Address { get; set; }
         public bool? IsActive { get; set; }
-        public bool? CanBeShiftManager { get; set; }   //آیا میتونه مسئول شیفت باشه؟
+        /// <summary>آیا می‌تواند مسئول شیفت باشد؟ (سازگاری؛ ترجیحاً از ShiftManagerLevel استفاده شود)</summary>
+        public bool? CanBeShiftManager { get; set; }
+        /// <summary>
+        /// سطح مسئول شیفت: null = مسئول نیست؛ 1 = سطح ۱ (سابقه/صلاحیت بالاتر)؛ 2 = سطح ۲.
+        /// </summary>
+        public byte? ShiftManagerLevel { get; set; }
         public bool? IncludedProductivityPlan { get; set; }  //آیا مشمول طرح بهره وری هست؟ (برای محاسبه درست ساعت شیفت شب و تعطیلات) ر
         
         public decimal? HardshipPercent { get; set; }   //درصد صعوبت (سختی) کار (۰–۱۰۰) برای کاهش ساعت موظفی هفتگی
@@ -95,6 +100,7 @@ namespace ShiftYar.Domain.Entities.UserModel
             this.IsProjectPersonnel = null;
             this.IsActive = null;
             this.CanBeShiftManager = null;
+            this.ShiftManagerLevel = null;
             this.Email = null;
             this.OtherPhoneNumbers = new List<UserPhoneNumber>();
             this.Province = null;

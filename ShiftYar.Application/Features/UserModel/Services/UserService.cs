@@ -143,6 +143,8 @@ namespace ShiftYar.Application.Features.UserModel.Services
                     return ApiResponse<UserDtoAdd>.Fail(permissionsError);
                 }
 
+                NormalizeShiftManagerFields(dto);
+
                 var user = _mapper.Map<User>(dto);
                 // تبدیل تاریخ استخدام از شمسی به میلادی واقعی (مپر DateOfEmployment را Ignore می‌کند)
                 if (!string.IsNullOrWhiteSpace(dto.DateOfEmployment))
@@ -254,6 +256,8 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 {
                     return ApiResponse<UserDtoAdd>.Fail(permissionsError);
                 }
+
+                NormalizeShiftManagerFields(dto);
 
                 // Handle phone numbers
                 if (dto.OtherPhoneNumbers != null)
@@ -461,6 +465,17 @@ namespace ShiftYar.Application.Features.UserModel.Services
             }
 
             return null;
+        }
+
+        private static void NormalizeShiftManagerFields(UserDtoAdd dto)
+        {
+            ShiftManagerRules.NormalizeUserDto(
+                dto.ShiftManagerLevel,
+                dto.CanBeShiftManager,
+                out var level,
+                out var canBe);
+            dto.ShiftManagerLevel = level;
+            dto.CanBeShiftManager = canBe;
         }
     }
 }

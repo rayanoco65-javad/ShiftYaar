@@ -1,3 +1,4 @@
+using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
 using Xunit;
@@ -180,7 +181,8 @@ public class SimulatedAnnealingSchedulerTests
                 });
 
             constraints.ShiftRequirements[0].ShiftLabel = ShiftLabel.Evening;
-            constraints.GlobalConstraints.RequireManagerForEveningShift = true;
+            constraints.ShiftRequirements[0].ManagerRequiredCount = 1;
+            constraints.ShiftRequirements[0].ManagerMinLevel1Count = 0;
 
             var solution = new SimulatedAnnealingScheduler(constraints, FastParameters).Optimize();
 
@@ -515,6 +517,8 @@ public class SimulatedAnnealingSchedulerTests
                         ShiftLabel = ShiftLabel.Night,
                         DepartmentId = 1,
                         DurationHours = 12,
+                        ManagerRequiredCount = 1,
+                        ManagerMinLevel1Count = 0,
                         SpecialtyRequirements = new List<SpecialtyRequirement> { CloneSpecialty(specialty) }
                     }
                 },
@@ -526,8 +530,7 @@ public class SimulatedAnnealingSchedulerTests
                 },
                 GlobalConstraints = new GlobalConstraints
                 {
-                    MaxShiftsPerDay = 1,
-                    RequireManagerForNightShift = true
+                    MaxShiftsPerDay = 1
                 }
             };
 
@@ -947,6 +950,7 @@ public class SimulatedAnnealingSchedulerTests
         SpecialtyId = 10,
         IsActive = true,
         CanBeShiftManager = canBeShiftManager,
+        ShiftManagerLevel = canBeShiftManager ? ShiftManagerRules.Level1 : null,
         MaxConsecutiveShifts = 7,
         MinRestDaysBetweenShifts = 0,
         MaxShiftsPerWeek = 7

@@ -268,12 +268,6 @@ namespace ShiftYar.Infrastructure.Migrations
                     b.Property<double?>("NightShiftPreferenceWeight")
                         .HasColumnType("float");
 
-                    b.Property<bool?>("RequireManagerForEveningShift")
-                        .HasColumnType("bit");
-
-                    b.Property<bool?>("RequireManagerForNightShift")
-                        .HasColumnType("bit");
-
                     b.Property<double?>("SeniorityDistributionSlope")
                         .HasColumnType("float");
 
@@ -849,6 +843,12 @@ namespace ShiftYar.Infrastructure.Migrations
                         .HasColumnType("float");
 
                     b.Property<int?>("Label")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ManagerMinLevel1Count")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ManagerRequiredCount")
                         .HasColumnType("int");
 
                     b.Property<TimeSpan?>("StartTime")

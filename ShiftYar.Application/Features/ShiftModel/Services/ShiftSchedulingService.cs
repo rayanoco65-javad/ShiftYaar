@@ -1667,8 +1667,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         Math.Max(0.0, deptSettingEarly.NightShiftDistributionWeight ?? 0.0);
                     constraints.HardRules.EnforceProductivityHours = true;
 
-                    constraints.GlobalConstraints.RequireManagerForEveningShift = deptSettingEarly.RequireManagerForEveningShift ?? false;
-                    constraints.GlobalConstraints.RequireManagerForNightShift = deptSettingEarly.RequireManagerForNightShift ?? false;
+                    constraints.SoftWeights.ShiftManagerRequirementWeight =
+                        Math.Max(0.0, deptSettingEarly.ShiftManagerRequirementWeight ?? 0.0);
 
                     // سقف روزانه از تنظیمات دپارتمان (۱ یا ۲)؛ دیگر override به ۲ نمی‌شود
                     constraints.HardRules.ForbidDuplicateDailyAssignments = true;
@@ -1786,7 +1786,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         Gender = user.Gender ?? UserGender.Male,
                         SpecialtyId = user.SpecialtyId ?? 0,
                         SpecialtyName = user.Specialty?.SpecialtyName ?? "",
-                        CanBeShiftManager = user.CanBeShiftManager ?? false,
+                        CanBeShiftManager = (user.CanBeShiftManager ?? false)
+                            || ShiftManagerRules.NormalizeLevel(user.ShiftManagerLevel).HasValue,
+                        ShiftManagerLevel = ShiftManagerRules.NormalizeLevel(user.ShiftManagerLevel)
+                            ?? ((user.CanBeShiftManager == true) ? ShiftManagerRules.Level1 : null),
                         IsActive = user.IsActive ?? true,
                         ShiftType = user.ShiftType ?? ShiftTypes.FixedShift,
                         ShiftSubType = user.ShiftSubType ?? ShiftSubTypes.FixedMorning,
@@ -1956,7 +1959,12 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         WeekdayNonProductivityHours = shift.WeekdayNonProductivityHours,
                         HolidayNonProductivityHours = shift.HolidayNonProductivityHours,
                         WeekdayProductivityPlanHours = shift.WeekdayProductivityPlanHours,
-                        HolidayProductivityPlanHours = shift.HolidayProductivityPlanHours
+                        HolidayProductivityPlanHours = shift.HolidayProductivityPlanHours,
+                        ManagerRequiredCount = Math.Max(0, shift.ManagerRequiredCount),
+                        ManagerMinLevel1Count = Math.Clamp(
+                            Math.Max(0, shift.ManagerMinLevel1Count),
+                            0,
+                            Math.Max(0, shift.ManagerRequiredCount))
                     };
                     var durationHours = CalculateShiftDurationHours(shiftRequirement.StartTime, shiftRequirement.EndTime);
                     shiftRequirement.DurationHours = durationHours;
@@ -2657,6 +2665,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     ExactHolidayWeekendNightShiftCount = user.ExactHolidayWeekendNightShiftCount,
                     MinDaysBetweenNightShifts = user.MinDaysBetweenNightShifts,
                     CanBeShiftManager = user.CanBeShiftManager,
+                    ShiftManagerLevel = user.ShiftManagerLevel,
                     ShiftType = user.ShiftType,
                     ShiftSubType = user.ShiftSubType,
                     TwoShiftRotationPattern = user.TwoShiftRotationPattern,

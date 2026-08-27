@@ -234,6 +234,101 @@
 
 **اقدام UI (اختیاری):** در جزئیات درخواست OFF صبح/کل‌روز تأییدشده، tooltip: «شب روز قبل به‌صورت خودکار مسدود می‌شود».
 
+### مسئول شیفت سطح‌دار
+
+دو بخش جدا دارید: **صلاحیت فرد** روی کاربر، و **تعداد لازم در هر نوبت** روی تعریف شیفت.
+
+#### ۱) روی کاربر — صلاحیت مسئول
+
+| فیلد API | معنی | UI پیشنهادی |
+|----------|------|-------------|
+| `shiftManagerLevel` | `null` = مسئول نیست · `1` = سطح ۱ · `2` = سطح ۲ | سلکت سه‌حالتی (نه چک‌باکس ساده) |
+| `canBeShiftManager` | سازگاری عقب‌رو | ترجیحاً مخفی؛ از `shiftManagerLevel` مشتق شود |
+
+قواعد ذخیره (بک‌اند خودکار اعمال می‌کند):
+
+- اگر `shiftManagerLevel` = `1` یا `2` → `canBeShiftManager = true`
+- اگر فقط `canBeShiftManager = true` و level خالی باشد → level می‌شود `1`
+- اگر هیچ‌کدام ست نشود → مسئول نیست
+
+**نمونه در `UserDtoAdd` / به‌روزرسانی کاربر:**
+
+```json
+{
+  "shiftManagerLevel": 1
+}
+```
+
+#### ۲) روی تعریف شیفت (`Shift`) — تعداد مسئول هر نوبت (منبع الزام)
+
+تعداد مسئول **دیگر روی تنظیمات دپارتمان نیست**. برای هر شیفت صبح / عصر / شب جداگانه روی همان رکورد `Shift` تنظیم می‌شود.
+
+| فیلد API | نوع | معنی | اعتبارسنجی |
+|----------|-----|------|------------|
+| `managerRequiredCount` | `int?` در Add؛ در Get همیشه `int` | حداقل تعداد مسئول در آن نوبت (`0`/`null` = بدون الزام) | `0…20` |
+| `managerMinLevel1Count` | `int?` در Add؛ در Get همیشه `int` | حداقل چند نفر از مسئول‌ها باید **سطح ۱** باشند | `0…20` و **≤** `managerRequiredCount` |
+
+**API (`ShiftController`):**
+
+| اکشن | روش | توضیح |
+|------|------|--------|
+| `GetShifts` | GET | لیست؛ فیلدهای `managerRequiredCount` / `managerMinLevel1Count` در پاسخ هستند |
+| `GetShift` | GET | جزئیات یک شیفت |
+| `CreateShift` | POST | ایجاد — فیلدهای مسئول را بفرستید |
+| `UpdateShift` | PUT | ویرایش — اگر فیلد مسئول را نفرستید (`null`)، مقدار قبلی حفظ می‌شود |
+
+**نمونه ایجاد/ویرایش شیفت عصر اطفال (۲ مسئول، حداقل ۱ سطح‌۱):**
+
+```json
+{
+  "departmentId": 2,
+  "label": 1,
+  "startTime": "14:00:00",
+  "endTime": "20:00:00",
+  "weekdayNonProductivityHours": 6,
+  "holidayNonProductivityHours": 6,
+  "weekdayProductivityPlanHours": 6,
+  "holidayProductivityPlanHours": 6,
+  "managerRequiredCount": 2,
+  "managerMinLevel1Count": 1
+}
+```
+
+| لیبل (`label`) | معنی | پیشنهاد اطفال |
+|----------------|------|----------------|
+| `0` Morning | صبح | معمولاً `0` / `0` |
+| `1` Evening | عصر | `2` / `1` |
+| `2` Night | شب | `2` / `1` |
+
+**پیام خطای رایج:** «حداقل مسئول سطح ۱ نمی‌تواند از تعداد کل مسئول بیشتر باشد.»
+
+#### ۳) تنظیمات دپارتمان — چه چیزی حذف شده؟
+
+این فیلدها از API تنظیمات دپارتمان **حذف شده‌اند**؛ از فرم/مدل فرانت پاک کنید:
+
+- `requireManagerForMorningShift` / `requireManagerForEveningShift` / `requireManagerForNightShift`
+- `morningShiftManagerRequiredCount` / `morningShiftManagerMinLevel1Count`
+- `eveningShiftManagerRequiredCount` / `eveningShiftManagerMinLevel1Count`
+- `nightShiftManagerRequiredCount` / `nightShiftManagerMinLevel1Count`
+
+فقط این مورد روی تنظیمات دپارتمان باقی مانده:
+
+| فیلد | معنی |
+|------|------|
+| `shiftManagerRequirementWeight` | وزن نرم الگوریتم (اختیاری) — **تعداد نفر نیست** |
+
+#### ۴) رفتار الگوریتم و درخواست شیفت
+
+- در Optimize، برای هر نوبت که `managerRequiredCount > 0` باشد، ترکیب مسئول (تعداد + حداقل سطح ۱) **اجباری** است.
+- هنگام تأیید درخواست حضور روی شیفت **تک‌نفره**، اگر آن شیفت مسئول لازم داشته باشد و کاربر صلاحیت مسئول نداشته باشد، API ممکن است با پیام فارسی رد کند؛ `message` را عیناً نشان دهید.
+
+#### ۵) اقدام لازم در فرانت
+
+1. فرم **کاربر:** سلکت «مسئول نیست / سطح ۱ / سطح ۲» به‌جای چک‌باکس `canBeShiftManager`.
+2. فرم **تعریف شیفت:** دو فیلد عددی `managerRequiredCount` و `managerMinLevel1Count` (برای صبح، عصر، شب هر کدام روی رکورد خودش).
+3. فرم **تنظیمات دپارتمان:** بلوک‌های تعداد مسئول صبح/عصر/شب را **حذف** کنید؛ فقط وزن نرم (اختیاری) بماند.
+4. Validation کلاینت: `0 ≤ minLevel1 ≤ required ≤ 20`.
+
 ### فیلدهای DTO کاربر (باقی‌مانده)
 
 در `UserDtoAdd` / `UserDtoGet`:
@@ -241,6 +336,8 @@
 - `HardshipPercent: decimal?`
 - `OvertimeConsent: bool?`
 - `MaxProductivityRequiredHours: decimal?` — **حداکثر ساعت موظفی (دستی)**
+- `ShiftManagerLevel: byte?` — سطح مسئول شیفت (`null`/`1`/`2`)
+- `CanBeShiftManager: bool?` — سازگاری؛ ترجیحاً از `ShiftManagerLevel` استفاده شود
 
 #### فیلد «حداکثر ساعت موظفی» (`MaxProductivityRequiredHours`)
 
@@ -331,7 +428,7 @@
 
 ### اکشن تنظیمات پیش‌فرض بهینه (`ApplyDefaultDepartmentSchedulingSettings`)
 
-برای پر کردن خودکار تنظیمات بهینه بر اساس شرایط دپارتمان (تعداد پرسنل، شیفت شب، مسئول شیفت، نوع گردشی، `IsNightLover` و …).
+برای پر کردن خودکار تنظیمات بهینه بر اساس شرایط دپارتمان (تعداد پرسنل، شیفت شب، نوع گردشی، `IsNightLover` و …).
 
 | اکشن | روش | توضیح |
 |------|------|--------|
@@ -354,7 +451,7 @@
 | هر دپارتمان | `allowEveningAfterNightShift = false`، `allowNightShiftAfterNightShift = false` |
 | دارد شیفت شب | `maxConsecutiveNightShifts = 1` |
 | توزیع بر اساس سابقه | صبح/عصر/شب جدا؛ پیش‌فرض همه `enable* = false`، نوع صبح/عصر `2` (خنثی)، نوع شب از `IsNightLover` |
-| نیاز مدیر شیفت | `requireManagerForEveningShift = false`، `requireManagerForNightShift = false` (پیش‌فرض) |
+| مسئول شیفت | `shiftManagerRequirementWeight = 0`؛ **تعداد مسئول اینجا ست نمی‌شود** — روی فرم تعریف شیفت (`managerRequiredCount` / `managerMinLevel1Count`) تنظیم کنید (مثلاً اطفال عصر/شب: `2` / `1`) |
 | `IsNightLover = false` (شب‌گریز) | `nightShiftDistributionType = 1` (فقط اگر توزیع سابقه شب را فعال کنید) |
 | production | `allowCurrentMonthScheduling = false`، `allowMonthlyRescheduleWithAutoDelete = false` |
 
@@ -959,6 +1056,7 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - `OvertimeConsent`
 - `IsProjectPersonnel` — پرسنل طرحی (`true`) / غیرطرحی (`false` یا خالی)
 - `MaxProductivityRequiredHours` — حداکثر ساعت موظفی (دستی؛ اختیاری)
+- `ShiftManagerLevel` — سطح مسئول شیفت (`null`/`1`/`2`)؛ به‌جای چک‌باکس `CanBeShiftManager`
 - `AllowedShiftPermissions` — مجوزهای نوع شیفت (۵ checkbox؛ `null` = مشتق از ShiftType)
 - `ShiftType`
 - `ShiftSubType`
@@ -997,6 +1095,10 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - اضافه کردن `OvertimeConsent` به فرم و مدل کاربر
 - اضافه کردن `IsProjectPersonnel` و `MaxProductivityRequiredHours` به فرم کاربر
 - **پنج checkbox `AllowedShiftPermissions`** (صبح/عصر/شب/صبح‌عصر/صبح‌شب) در فرم کاربر
+- **مسئول شیفت سطح‌دار:**
+  - فرم کاربر: سلکت `shiftManagerLevel` (`null`/`1`/`2`) به‌جای چک‌باکس ساده
+  - فرم تعریف شیفت: فیلدهای `managerRequiredCount` و `managerMinLevel1Count`
+  - فرم تنظیمات دپارتمان: **حذف** فیلدهای `requireManagerFor*` و `*ShiftManagerRequiredCount` / `*MinLevel1Count`؛ فقط `shiftManagerRequirementWeight` (اختیاری)
 - tooltip برای OFF صبح/کل‌روز تأییدشده: «شب روز قبل مسدود می‌شود»
 - **حذف** سهمیه شب از فرم کاربر؛ ساخت UI ماهانه با `UserMonthlyNightQuota` APIها
 - قبل از Optimize، تنظیم سهمیه شب برای ماه شمسی موردنظر
@@ -1019,6 +1121,7 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - اضافه کردن فیلدهای `Holiday*` به فرم `ShiftRequiredSpecialty`
 - تفکیک UI روز عادی و روز تعطیل در نیازمندی تخصص
 - **چهار فیلد ساعت محاسبه‌شده روی فرم تعریف شیفت** (`weekday/holiday` × `nonPlan/plan`)
+- **دو فیلد مسئول روی فرم تعریف شیفت** (`managerRequiredCount` / `managerMinLevel1Count`)
 - نمایش آمار بهره‌وری در خروجی شیفت‌بندی
 - بررسی صحیح بودن استفاده از `ShiftLabel` در فرانت
 
@@ -1028,6 +1131,8 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 
 - `ShiftYar.Domain/Entities/ShiftModel/Shift.cs`
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftDtoAdd.cs` / `ShiftDtoGet.cs`
+- `ShiftYar.Api/Controllers/ShiftModel/ShiftController.cs`
+- `ShiftYar.Application/Common/Utilities/ShiftManagerRules.cs`
 - `ShiftYar.Application/Common/Utilities/ProductivityWorkedHoursCalculator.cs`
 - `ShiftYar.Api/Controllers/ShiftRequestModel/ShiftRequestController.cs`
 - `ShiftYar.Application/Features/ShiftRequestModel/Services/ShiftRequestService.cs`

@@ -454,33 +454,13 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 return null;
             }
 
-            if (entity.User.CanBeShiftManager == true)
+            if (ShiftManagerRules.NormalizeLevel(entity.User.ShiftManagerLevel).HasValue
+                || entity.User.CanBeShiftManager == true)
             {
                 return null;
             }
 
             if (!entity.User.DepartmentId.HasValue)
-            {
-                return null;
-            }
-
-            var (settings, _) = await _deptSettingsRepository.GetByFilterAsync(
-                new DepartmentSchedulingSettingsFilter
-                {
-                    DepartmentId = entity.User.DepartmentId.Value,
-                    PageNumber = 1,
-                    PageSize = 1
-                });
-
-            var deptSettings = settings.FirstOrDefault();
-            var managerRequired = entity.ShiftLabel.Value switch
-            {
-                ShiftEnums.ShiftLabel.Evening => deptSettings?.RequireManagerForEveningShift == true,
-                ShiftEnums.ShiftLabel.Night => deptSettings?.RequireManagerForNightShift == true,
-                _ => false
-            };
-
-            if (!managerRequired || !entity.User.SpecialtyId.HasValue)
             {
                 return null;
             }
@@ -494,14 +474,22 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 },
                 "RequiredSpecialties");
 
-            foreach (var shift in shifts.Where(s => s.Label == entity.ShiftLabel))
+            var matchingShifts = shifts.Where(s => s.Label == entity.ShiftLabel).ToList();
+            var anyShiftRequiresManager = matchingShifts.Any(s => s.ManagerRequiredCount > 0);
+
+            if (!anyShiftRequiresManager || !entity.User.SpecialtyId.HasValue)
+            {
+                return null;
+            }
+
+            foreach (var shift in matchingShifts)
             {
                 var specialtyRequirement = shift.RequiredSpecialties?
                     .FirstOrDefault(rs => rs.SpecialtyId == entity.User.SpecialtyId);
 
                 if (specialtyRequirement != null && (specialtyRequirement.RequiredTottalCount ?? 0) == 1)
                 {
-                    return "این شیفت تک‌نفره است و طبق تنظیمات دپارتمان باید توسط فردی با صلاحیت مدیریت شیفت پوشش داده شود. لطفاً درخواست را رد کنید یا ابتدا صلاحیت «مدیر شیفت» را برای این کاربر فعال کنید.";
+                    return "این شیفت تک‌نفره است و طبق تعریف شیفت باید توسط فردی با صلاحیت مدیریت شیفت پوشش داده شود. لطفاً درخواست را رد کنید یا ابتدا صلاحیت «مدیر شیفت» را برای این کاربر فعال کنید.";
                 }
             }
 

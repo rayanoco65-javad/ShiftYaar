@@ -33,6 +33,8 @@ namespace ShiftYar.Application.DTOs.UserModel
         public string? Address { get; set; }
         public bool? IsActive { get; set; }
         public bool? CanBeShiftManager { get; set; }
+        /// <summary>null = مسئول نیست؛ 1 = سطح ۱؛ 2 = سطح ۲</summary>
+        public byte? ShiftManagerLevel { get; set; }
         public bool? IncludedProductivityPlan { get; set; }
         public string? Image { get; set; }
 

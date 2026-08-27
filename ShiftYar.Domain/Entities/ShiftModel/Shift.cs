@@ -39,6 +39,12 @@ namespace ShiftYar.Domain.Entities.ShiftModel
         /// <summary>ساعات محاسبه‌شدهٔ عملکرد در روز تعطیل برای کاربر داخل طرح بهره‌وری.</summary>
         public double? HolidayProductivityPlanHours { get; set; }
 
+        /// <summary>حداقل تعداد مسئول شیفت در این نوبت (۰ = بدون الزام).</summary>
+        public int ManagerRequiredCount { get; set; }
+
+        /// <summary>حداقل تعداد مسئول سطح ۱ در این نوبت (نباید از ManagerRequiredCount بیشتر باشد).</summary>
+        public int ManagerMinLevel1Count { get; set; }
+
         public ICollection<ShiftRequiredSpecialty>? RequiredSpecialties { get; set; }
     }
 }

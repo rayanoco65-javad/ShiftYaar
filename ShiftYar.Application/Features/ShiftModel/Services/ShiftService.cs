@@ -2,18 +2,15 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using ShiftYar.Application.Common.Models.ResponseModel;
+using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.DTOs.ShiftModel;
 using ShiftYar.Application.Features.ShiftModel.Filters;
 using ShiftYar.Application.Interfaces.Persistence;
 using ShiftYar.Application.Interfaces.ShiftModel;
-using ShiftYar.Domain.Entities.DepartmentModel;
 using ShiftYar.Domain.Entities.ShiftModel;
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace ShiftYar.Application.Features.ShiftModel.Services
 {
@@ -38,7 +35,6 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             {
                 _logger.LogInformation("Getting filtered shifts");
 
-                //var (items, totalCount) = await _repository.GetByFilterAsync(filter, "Department");
                 var (items, totalCount) = await _repository.GetByFilterAsync(filter,
                     "Department",
                     "Department.Hospital",
@@ -98,16 +94,30 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             {
                 _logger.LogInformation("Creating new shift");
 
-                var shift = _mapper.Map<Shift>(dto);
+                var managerError = ShiftManagerRules.ValidateShiftManagerCounts(
+                    dto.ManagerRequiredCount,
+                    dto.ManagerMinLevel1Count);
+                if (managerError != null)
+                {
+                    return ApiResponse<ShiftDtoGet>.Fail(managerError);
+                }
 
+                ShiftManagerRules.NormalizeShiftDto(
+                    dto.ManagerRequiredCount,
+                    dto.ManagerMinLevel1Count,
+                    out var required,
+                    out var minL1);
+
+                var shift = _mapper.Map<Shift>(dto);
+                shift.ManagerRequiredCount = required;
+                shift.ManagerMinLevel1Count = minL1;
                 shift.CreateDate = DateTime.Now;
                 shift.TheUserId = Convert.ToInt16(_httpContextAccessor.HttpContext.User.FindFirst(ClaimTypes.NameIdentifier));
 
                 await _repository.AddAsync(shift);
                 await _repository.SaveAsync();
 
-                var result = await GetShift(shift.Id.Value);
-                return result;
+                return await GetShift(shift.Id.Value);
             }
             catch (Exception ex)
             {
@@ -128,7 +138,22 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     return ApiResponse<ShiftDtoGet>.Fail("شیفت مورد نظر یافت نشد.");
                 }
 
+                var effectiveRequired = dto.ManagerRequiredCount ?? shift.ManagerRequiredCount;
+                var effectiveMinL1 = dto.ManagerMinLevel1Count ?? shift.ManagerMinLevel1Count;
+                var managerError = ShiftManagerRules.ValidateShiftManagerCounts(effectiveRequired, effectiveMinL1);
+                if (managerError != null)
+                {
+                    return ApiResponse<ShiftDtoGet>.Fail(managerError);
+                }
+
                 _mapper.Map(dto, shift);
+
+                if (dto.ManagerRequiredCount.HasValue || dto.ManagerMinLevel1Count.HasValue)
+                {
+                    ShiftManagerRules.NormalizeShiftDto(effectiveRequired, effectiveMinL1, out var required, out var minL1);
+                    shift.ManagerRequiredCount = required;
+                    shift.ManagerMinLevel1Count = minL1;
+                }
 
                 shift.UpdateDate = DateTime.Now;
                 shift.TheUserId = Convert.ToInt16(_httpContextAccessor.HttpContext.User.FindFirst(ClaimTypes.NameIdentifier));
@@ -136,8 +161,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 _repository.Update(shift);
                 await _repository.SaveAsync();
 
-                var result = await GetShift(id);
-                return result;
+                return await GetShift(id);
             }
             catch (Exception ex)
             {
@@ -167,6 +191,6 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             {
                 throw new Exception("سرویس حذف شیفت با خطا مواجه شد : " + ex.Message);
             }
-        } 
+        }
     }
 }

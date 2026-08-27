@@ -37,5 +37,13 @@ namespace ShiftYar.Application.DTOs.ShiftModel
         /// <summary>ساعات عملکرد — روز تعطیل، داخل طرح بهره‌وری</summary>
         [Range(0.25, 48, ErrorMessage = "ساعات شیفت باید بین ۰٫۲۵ تا ۴۸ باشد.")]
         public double? HolidayProductivityPlanHours { get; set; }
+
+        /// <summary>حداقل تعداد مسئول شیفت در این نوبت (۰/null = بدون الزام)</summary>
+        [Range(0, 20, ErrorMessage = "تعداد مسئول شیفت باید بین ۰ تا ۲۰ باشد.")]
+        public int? ManagerRequiredCount { get; set; }
+
+        /// <summary>حداقل تعداد مسئول سطح ۱ در این نوبت</summary>
+        [Range(0, 20, ErrorMessage = "تعداد مسئول سطح ۱ باید بین ۰ تا ۲۰ باشد.")]
+        public int? ManagerMinLevel1Count { get; set; }
     }
 }

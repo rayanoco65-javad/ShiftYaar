@@ -45,6 +45,9 @@
 
 ### 2.4) تعریف شیفت‌ها (Shift)
 - برای هر دپارتمان، شیفت‌های Morning/Evening/Night با StartTime/EndTime.
+- **الزام مسئول شیفت روی خود شیفت:** `ManagerRequiredCount` (تعداد کل) و `ManagerMinLevel1Count` (حداقل سطح ۱).
+  - مثال اطفال عصر/شب: Required=2، MinLevel1=1
+  - صبح معمولاً 0/0
 - ترتیب اجرای اکشن/سرویس: مشابه الگوی CRUD (ShiftController/Service/Repository).
 
 ### 2.5) تعریف ظرفیت تخصصی هر شیفت (ShiftRequiredSpecialty)
@@ -57,7 +60,7 @@
   - Repository: IEfRepository<ShiftRequiredSpecialty>
 
 ### 2.6) تعریف کاربران (User)
-- اطلاعات: نام کامل، کد پرسنلی، جنسیت، DepartmentId، SpecialtyId، IsActive، CanBeShiftManager، نوع/الگوی شیفت، `AllowedShiftPermissions` (flags)، `IncludedProductivityPlan`، …
+- اطلاعات: نام کامل، کد پرسنلی، جنسیت، DepartmentId، SpecialtyId، IsActive، CanBeShiftManager، ShiftManagerLevel (null/1/2)، نوع/الگوی شیفت، `AllowedShiftPermissions` (flags)، `IncludedProductivityPlan`، …
 - **IsProjectPersonnel:** طرحی = فقط تا موظفی؛ غیرطرحی = اولویت پر کردن موظفی.
 - **AllowedShiftPermissions:** flags نوع شیفت (صبح/عصر/شب/صبح‌عصر/صبح‌شب).
 - **MaxProductivityRequiredHours:** موظفی دستی ماهانه (اختیاری؛ null/0 = خودکار).
