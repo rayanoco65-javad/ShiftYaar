@@ -78,8 +78,8 @@ public class ExactNightQuotaTests
         for (var i = 1; i < ordered.Count; i++)
         {
             Assert.True(
-                Math.Abs((ordered[i].Date.Date - ordered[i - 1].Date.Date).Days) > 2,
-                "Night shifts must be spaced at least 2 days apart");
+                Math.Abs((ordered[i].Date.Date - ordered[i - 1].Date.Date).Days) > 1,
+                "Night shifts must not be on consecutive days when night-after-night is disabled");
         }
     }
 
@@ -784,9 +784,53 @@ public class ExactNightQuotaTests
     }
 
     [Fact]
+    public void ExactNightQuotaGuard_FillsHighQuotaWhenAfterNightSettingsDisabled()
+    {
+        // با فاصلهٔ صحیح ۱ (نه ۲)، در ۳۱ روز سهمیه ۹ شب با خاموش بودن شب/عصر بعد از شب قابل پرکردن است.
+        var start = new DateTime(2026, 8, 1);
+        var user = MakeUser(25, exactNights: 9, exactHolidayNights: null);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(30),
+            UserConstraints = [user],
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning),
+                Shift(2, ShiftLabel.Evening),
+                Shift(3, ShiftLabel.Night)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true,
+                AllowEveningAfterNightShift = false,
+                AllowNightShiftAfterNightShift = false
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 }
+        };
+
+        var solution = new ShiftSolution();
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+
+        var nights = solution.GetUserAllAssignments(25)
+            .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall)
+            .OrderBy(a => a.Date)
+            .ToList();
+        Assert.True(nights.Count >= 9, $"Expected >= 9 nights, got {nights.Count}");
+        for (var i = 1; i < nights.Count; i++)
+        {
+            Assert.True(
+                (nights[i].Date.Date - nights[i - 1].Date.Date).Days > 1,
+                "Consecutive nights must remain forbidden when night-after-night is disabled");
+        }
+    }
+
+    [Fact]
     public void ExactNightQuotaGuard_AllowsConsecutiveNightsWhenDepartmentFlagEnabled()
     {
-        // در ۱۰ روز با فاصلهٔ اجباری ۲ فقط حدود ۴ شب جا می‌شود؛ با شب متوالی باید به ۶ برسد.
+        // در ۱۰ روز با فاصلهٔ اجباری ۱ حدود ۵ شب جا می‌شود؛ با شب متوالی باید به ۶ برسد.
         var start = new DateTime(2026, 8, 1);
         var user = MakeUser(1, exactNights: 6, exactHolidayNights: null);
         var constraints = new ShiftConstraints
@@ -855,7 +899,7 @@ public class ExactNightQuotaTests
         ExactNightShiftCount = exactNights,
         ExactHolidayWeekendNightShiftCount = exactHolidayNights,
         MaxNightShiftsPerMonth = exactNights ?? 8,
-        MinDaysBetweenNightShifts = 2,
+        MinDaysBetweenNightShifts = 1,
         MaxConsecutiveShifts = 30,
         MinRestDaysBetweenShifts = 0,
         MaxShiftsPerWeek = 7

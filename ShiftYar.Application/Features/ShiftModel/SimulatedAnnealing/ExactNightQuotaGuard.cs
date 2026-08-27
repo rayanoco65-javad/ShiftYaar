@@ -1683,9 +1683,9 @@ public static class ExactNightQuotaGuard
         constraints.UserConstraints.FirstOrDefault(u => u.UserId == userId)?.SpecialtyId ?? 0;
 
     /// <summary>
-    /// فاصلهٔ حداقل بین شب‌ها.
-    /// اگر «شب روز بعد از شب» مجاز باشد، فاصلهٔ صفر (شب متوالی مجاز) تا سقف MaxConsecutiveNightShifts.
-    /// در غیر این صورت حداقل ۱ (و معمولاً ۲ از تنظیمات کاربر) اعمال می‌شود.
+    /// فاصلهٔ حداقل بین شب‌ها (بر حسب اختلاف روز تقویمی که هنوز مجاز نیست).
+    /// اگر «شب روز بعد از شب» مجاز باشد → ۰ (شب متوالی تا سقف MaxConsecutiveNightShifts).
+    /// در غیر این صورت حداقل ۱: شب‌های مجاور ممنوع؛ الگوی N / استراحت / N مجاز است.
     /// </summary>
     private static int ResolveNightSpacingGap(ShiftConstraints constraints, UserConstraint user)
     {

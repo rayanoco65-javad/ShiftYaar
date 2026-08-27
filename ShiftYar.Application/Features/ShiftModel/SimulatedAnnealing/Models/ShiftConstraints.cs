@@ -75,7 +75,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         /// <summary>null = مشارکت در مازاد شب تعطیل/آخرهفته (پیش‌فرض)؛ false = بدون مازاد.</summary>
         public bool? HolidayWeekendNightFallbackParticipation { get; set; }
         /// <summary>حداقل فاصله روزهای تقویمی بین دو شیفت شب (۱ = بدون شب متوالی).</summary>
-        public int MinDaysBetweenNightShifts { get; set; } = 2;
+        public int MinDaysBetweenNightShifts { get; set; } = 1;
         public bool HasExactNightQuota => ExactNightShiftCount.HasValue;
         /// <summary>حداقل تعداد شیفت صبح در بازه.</summary>
         public int? ExactMorningShiftCount { get; set; }

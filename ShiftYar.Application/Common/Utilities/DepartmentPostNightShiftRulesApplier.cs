@@ -39,5 +39,17 @@ public static class DepartmentPostNightShiftRulesApplier
                 user.MinDaysBetweenNightShifts = 0;
             }
         }
+        else
+        {
+            constraints.GlobalConstraints.AllowConsecutiveNightShifts = false;
+            // فقط شب متوالی ممنوع؛ یک روز استراحت بین دو شب کافی است
+            foreach (var user in constraints.UserConstraints)
+            {
+                if (user.MinDaysBetweenNightShifts == 0 || user.MinDaysBetweenNightShifts > 1)
+                {
+                    user.MinDaysBetweenNightShifts = 1;
+                }
+            }
+        }
     }
 }

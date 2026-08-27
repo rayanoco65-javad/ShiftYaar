@@ -48,6 +48,28 @@ public class DepartmentPostNightShiftRulesApplierTests
     }
 
     [Fact]
+    public void Apply_WhenNightAfterNightDisabled_SetsUserNightSpacingGapToOne()
+    {
+        var constraints = new ShiftConstraints
+        {
+            UserConstraints =
+            [
+                new UserConstraint { UserId = 1, MinDaysBetweenNightShifts = 2 },
+                new UserConstraint { UserId = 2, MinDaysBetweenNightShifts = 0 }
+            ]
+        };
+        var settings = new DepartmentSchedulingSettings
+        {
+            AllowNightShiftAfterNightShift = false,
+            MaxConsecutiveNightShifts = 1
+        };
+
+        DepartmentPostNightShiftRulesApplier.Apply(constraints, settings);
+
+        Assert.All(constraints.UserConstraints, u => Assert.Equal(1, u.MinDaysBetweenNightShifts));
+    }
+
+    [Fact]
     public void Apply_WhenNightAfterNightDisabled_KeepsMaxConsecutiveNightShifts()
     {
         var constraints = new ShiftConstraints();
