@@ -1992,7 +1992,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(x => !IsProtectedAssignment(solution, x.Assignment))
                 .Where(x => IsUserAvailableForManagerInstall(
                     x.User!, date, targetShift.ShiftLabel, solution, x.Assignment.ShiftId))
-                .OrderByDescending(x => ShiftManagerRules.IsLevel1(x.User!))
+                .OrderBy(x => ShiftManagerRules.GetRequirement(x.ShiftReq!).RequiredTotal)
+                .ThenBy(x => WouldDonorRemovalBreakManagerMix(solution, x.ShiftReq!, date, x.User!) ? 1 : 0)
+                .ThenByDescending(x => needLevel1 && ShiftManagerRules.IsLevel1(x.User!))
+                .ThenByDescending(x => ShiftManagerRules.IsLevel1(x.User!))
                 .ThenBy(x => solution.GetUserAllAssignments(x.User!.UserId).Count)
                 .ToList();
 
@@ -2011,11 +2014,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
                 else
                 {
-                    backfill = RankManagerCandidates(
+                    backfill = RankBackfillCandidates(
                             solution,
                             donorShiftReq,
                             date,
-                            needLevel1: false,
                             occupantSpecialty,
                             donorGenderLocked ? GetUserGender(donor.Assignment.UserId) : occupantGender,
                             donorGenderLocked)
@@ -2069,6 +2071,46 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .OrderByDescending(u => ShiftManagerRules.IsLevel1(u))
                 .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
                 .ThenBy(u => u.UserId);
+
+        /// <summary>
+        /// پر کردن جای خالی پس از انتقال مسئول — هر پرسنل واجد شرایط (نه فقط مسئول).
+        /// </summary>
+        private IEnumerable<UserConstraint> RankBackfillCandidates(
+            ShiftSolution solution,
+            ShiftRequirement shiftReq,
+            DateTime date,
+            int specialtyId,
+            UserGender requiredGender,
+            bool genderLocked,
+            int? ignoreShiftIdForAvailability = null) =>
+            _constraints.UserConstraints
+                .Where(u => u.IsActive)
+                .Where(u => u.SpecialtyId == specialtyId)
+                .Where(u => !genderLocked || u.Gender == requiredGender)
+                .Where(u => IsUserAvailableForManagerInstall(
+                    u, date, shiftReq.ShiftLabel, solution, ignoreShiftIdForAvailability))
+                .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
+                .OrderBy(u => ShiftManagerRules.IsManager(u) ? 1 : 0)
+                .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
+                .ThenBy(u => u.UserId);
+
+        private bool WouldDonorRemovalBreakManagerMix(
+            ShiftSolution solution,
+            ShiftRequirement shiftReq,
+            DateTime date,
+            UserConstraint donor)
+        {
+            var (requiredTotal, minLevel1) = ShiftManagerRules.GetRequirement(shiftReq);
+            if (requiredTotal <= 0)
+            {
+                return false;
+            }
+
+            var remaining = GetRegularAssignees(solution, shiftReq, date)
+                .Where(u => u.UserId != donor.UserId)
+                .ToList();
+            return !ShiftManagerRules.IsSatisfied(remaining, requiredTotal, minLevel1);
+        }
 
         private bool IsGenderLockedShift(ShiftRequirement shiftReq, DateTime date, int specialtyId)
         {
