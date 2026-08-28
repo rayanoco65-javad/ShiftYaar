@@ -271,7 +271,7 @@ namespace ShiftYar.Api.Controllers.ShiftModel
             {
                 jobId = job.Id,
                 status = job.Status.ToString(),
-                statusUrl = $"/GetSchedulingJob/scheduling-jobs/{job.Id}"
+                statusUrl = $"/scheduling-jobs/{job.Id}"
             };
 
             return Accepted(ApiResponse<object>.Success(payload, "Scheduling job queued. Poll the status URL for the result."));

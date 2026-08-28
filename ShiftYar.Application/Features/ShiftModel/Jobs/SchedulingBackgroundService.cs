@@ -15,8 +15,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
     public class SchedulingBackgroundService : BackgroundService
     {
         private static readonly TimeSpan StaleJobThreshold = TimeSpan.FromMinutes(35);
+        private static readonly TimeSpan StaleQueuedJobThreshold = TimeSpan.FromMinutes(15);
         private static readonly TimeSpan JobExecutionTimeout = TimeSpan.FromMinutes(30);
         private static readonly TimeSpan StaleCheckInterval = TimeSpan.FromMinutes(2);
+        private static readonly TimeSpan QueuedRecoveryInterval = TimeSpan.FromSeconds(30);
         private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromMinutes(2);
 
         private readonly ISchedulingJobQueue _queue;
@@ -43,9 +45,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
             await RecoverJobsOnStartupAsync(stoppingToken);
 
             var staleCheckTask = RunStaleCheckLoopAsync(stoppingToken);
+            var queuedRecoveryTask = RunQueuedRecoveryLoopAsync(stoppingToken);
             var dequeueTask = DequeueLoopAsync(stoppingToken);
 
-            await Task.WhenAll(staleCheckTask, dequeueTask);
+            await Task.WhenAll(staleCheckTask, queuedRecoveryTask, dequeueTask);
 
             _logger.LogInformation("SchedulingBackgroundService stopping.");
         }
@@ -78,10 +81,35 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
 
         private async Task MarkStaleJobsAsync()
         {
-            var recovered = await _store.MarkStaleRunningJobsAsFailedAsync(StaleJobThreshold);
-            if (recovered > 0)
+            var staleRunning = await _store.MarkStaleRunningJobsAsFailedAsync(StaleJobThreshold);
+            if (staleRunning > 0)
             {
-                _logger.LogWarning("Marked {Count} stale scheduling job(s) as Failed during periodic check.", recovered);
+                _logger.LogWarning("Marked {Count} stale scheduling job(s) as Failed during periodic check.", staleRunning);
+            }
+
+            var staleQueued = await _store.MarkStaleQueuedJobsAsFailedAsync(StaleQueuedJobThreshold);
+            if (staleQueued > 0)
+            {
+                _logger.LogWarning("Marked {Count} orphaned Queued scheduling job(s) as Failed.", staleQueued);
+            }
+        }
+
+        private async Task RunQueuedRecoveryLoopAsync(CancellationToken stoppingToken)
+        {
+            using var timer = new PeriodicTimer(QueuedRecoveryInterval);
+            while (await timer.WaitForNextTickAsync(stoppingToken))
+            {
+                await RecoverQueuedJobsAsync(stoppingToken);
+            }
+        }
+
+        private async Task RecoverQueuedJobsAsync(CancellationToken stoppingToken)
+        {
+            var queuedJobIds = await _store.GetQueuedJobIdsAsync();
+            foreach (var jobId in queuedJobIds)
+            {
+                stoppingToken.ThrowIfCancellationRequested();
+                await _queue.EnqueueAsync(jobId, stoppingToken);
             }
         }
 
@@ -119,6 +147,14 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
                 job.Message = "Stored job request is invalid or missing.";
                 job.CompletedAtUtc = DateTime.UtcNow;
                 await _store.UpdateAsync(job);
+                return;
+            }
+
+            if (job.Status != SchedulingJobStatus.Queued)
+            {
+                _logger.LogDebug(
+                    "Scheduling job {JobId} skipped because status is {Status}.",
+                    jobId, job.Status);
                 return;
             }
 

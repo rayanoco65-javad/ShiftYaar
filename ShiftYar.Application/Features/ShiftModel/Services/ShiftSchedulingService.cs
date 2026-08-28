@@ -888,7 +888,6 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             var solution = scheduler.Optimize();
             var statistics = scheduler.GetStatistics();
 
-            scheduler.ApplyMandatoryConstraints(solution);
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
             EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
@@ -2889,7 +2888,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             var solution = scheduler.Optimize();
             var statistics = scheduler.GetStatistics();
 
-            scheduler.ApplyMandatoryConstraints(solution);
+            // Optimize() already runs ApplyMandatoryConstraints once at the end.
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
             EnsureExactDayShiftQuotasOrThrow(scheduler, solution);

@@ -1776,7 +1776,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// </summary>
         private void ReconcileShiftManagersAndNightQuotas(ShiftSolution solution)
         {
-            for (var round = 0; round < 10; round++)
+            for (var round = 0; round < 5; round++)
             {
                 ExactNightQuotaGuard.Enforce(solution, _constraints);
                 AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
@@ -1788,34 +1788,14 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                 if (!HasUnmetManagerMix(solution) && GetExactNightQuotaViolations(solution).Count == 0)
                 {
-                    break;
+                    return;
                 }
             }
 
-            if (!HasUnmetManagerMix(solution))
-            {
-                for (var pass = 0; pass < 6; pass++)
-                {
-                    ExactNightQuotaGuard.Enforce(solution, _constraints);
-                    AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
-                    DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
-                    ApprovedRequestGuard.ForceApply(solution, _constraints);
-                    if (GetExactNightQuotaViolations(solution).Count == 0)
-                    {
-                        break;
-                    }
-                }
-            }
-
-            RunShiftManagerRepairPasses(solution);
-            ApprovedRequestGuard.ForceApply(solution, _constraints);
-            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
-
-            for (var finalize = 0; finalize < 8; finalize++)
+            for (var finalize = 0; finalize < 3; finalize++)
             {
                 ExactNightQuotaGuard.Enforce(solution, _constraints);
                 AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
-                DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
                 ApprovedRequestGuard.ForceApply(solution, _constraints);
                 RunShiftManagerRepairPasses(solution);
                 ApprovedRequestGuard.ForceApply(solution, _constraints);
@@ -1864,7 +1844,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private void RunShiftManagerRepairPasses(ShiftSolution solution)
         {
-            for (var pass = 0; pass < 12; pass++)
+            for (var pass = 0; pass < 6; pass++)
             {
                 var progress = false;
                 foreach (var date in OrderDatesForManagerRepair(solution))

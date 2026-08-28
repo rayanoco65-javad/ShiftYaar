@@ -22,6 +22,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
         /// کارهای Running که بیش از آستانه در حال اجرا بوده‌اند را Failed می‌کند (بازیابی پس از کرش/ری‌استارت).
         Task<int> MarkStaleRunningJobsAsFailedAsync(TimeSpan staleThreshold);
 
+        /// کارهای Queued که هرگز شروع نشده‌اند (مثلاً پس از ری‌استارت بدون dequeue) را Failed می‌کند.
+        Task<int> MarkStaleQueuedJobsAsFailedAsync(TimeSpan staleThreshold);
+
         /// شناسهٔ کارهای Queued ذخیره‌شده در DB (برای بازیابی صف پس از ری‌استارت).
         Task<IReadOnlyList<string>> GetQueuedJobIdsAsync();
     }
