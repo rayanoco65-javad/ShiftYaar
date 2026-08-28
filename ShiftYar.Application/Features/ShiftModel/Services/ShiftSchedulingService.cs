@@ -889,6 +889,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             var statistics = scheduler.GetStatistics();
 
             scheduler.ApplyMandatoryConstraints(solution);
+            solution.Violations.AddRange(scheduler.RepairShiftManagers(solution));
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
             EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
@@ -2835,6 +2836,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         {
             var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters());
             scheduler.ApplyMandatoryConstraints(solution);
+            solution.Violations.AddRange(scheduler.RepairShiftManagers(solution));
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
             EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
@@ -2890,6 +2892,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             var statistics = scheduler.GetStatistics();
 
             scheduler.ApplyMandatoryConstraints(solution);
+            solution.Violations.AddRange(scheduler.RepairShiftManagers(solution));
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
             EnsureExactDayShiftQuotasOrThrow(scheduler, solution);

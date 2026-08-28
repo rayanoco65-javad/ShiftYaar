@@ -1573,7 +1573,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ApprovedRequestGuard.ForceApply(solution, _constraints);
 
             // مسئول شیفت بعد از همه گاردها — وگرنه Coverage/موظفی/سابقه ترکیب را می‌شکنند
-            var managerWarnings = EnsureShiftManagers(solution);
+            var managerWarnings = RepairShiftManagers(solution);
 
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
@@ -1762,11 +1762,16 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// <summary>
         /// تأمین ترکیب مسئول شیفت: حداقل تعداد مسئول + حداقل سطح ۱ برای صبح/عصر/شب.
         /// </summary>
+        /// <summary>
+        /// تأمین ترکیب مسئول شیفت پس از همه گاردها. قابل فراخوانی مجدد از سرویس زمان‌بندی.
+        /// </summary>
+        public List<string> RepairShiftManagers(ShiftSolution solution) => EnsureShiftManagers(solution);
+
         private List<string> EnsureShiftManagers(ShiftSolution solution)
         {
             var warnings = new List<string>();
 
-            for (var pass = 0; pass < 5; pass++)
+            for (var pass = 0; pass < 8; pass++)
             {
                 var progress = false;
                 foreach (var date in GetDateRange())
@@ -1851,6 +1856,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 var level1Count = assignees.Count(ShiftManagerRules.IsLevel1);
                 var needLevel1 = level1Count < Math.Min(minLevel1, requiredTotal);
                 var needAnyManager = managerCount < requiredTotal;
+                var onlyNeedLevel1 = needLevel1 && !needAnyManager;
 
                 if (!needLevel1 && !needAnyManager)
                 {
@@ -1872,6 +1878,21 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     .OrderBy(x =>
                     {
                         var level = ShiftManagerRules.EffectiveLevel(x.User!);
+                        if (onlyNeedLevel1)
+                        {
+                            if (level == ShiftManagerRules.Level2)
+                            {
+                                return 0;
+                            }
+
+                            if (level == 0)
+                            {
+                                return 1;
+                            }
+
+                            return 2;
+                        }
+
                         if (level == 0)
                         {
                             return 0;
@@ -2003,10 +2024,38 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             {
                 var donorShiftReq = donor.ShiftReq!;
                 var donorGenderLocked = IsGenderLockedShift(donorShiftReq, date, occupantSpecialty);
+                var donorBreaksManagerMix = WouldDonorRemovalBreakManagerMix(
+                    solution, donorShiftReq, date, donor.User!);
 
                 UserConstraint? backfill = null;
 
-                if (IsUserAvailableForManagerInstall(
+                if (donorBreaksManagerMix)
+                {
+                    var remaining = GetRegularAssignees(solution, donorShiftReq, date)
+                        .Where(u => u.UserId != donor.User!.UserId)
+                        .ToList();
+                    var (_, donorMinL1) = ShiftManagerRules.GetRequirement(donorShiftReq);
+                    var needDonorL1 = remaining.Count(ShiftManagerRules.IsLevel1) < donorMinL1;
+
+                    backfill = RankManagerCandidates(
+                            solution,
+                            donorShiftReq,
+                            date,
+                            needDonorL1,
+                            occupantSpecialty,
+                            donorGenderLocked ? GetUserGender(donor.Assignment.UserId) : occupantGender,
+                            donorGenderLocked)
+                        .FirstOrDefault()
+                        ?? RankBackfillCandidates(
+                            solution,
+                            donorShiftReq,
+                            date,
+                            occupantSpecialty,
+                            donorGenderLocked ? GetUserGender(donor.Assignment.UserId) : occupantGender,
+                            donorGenderLocked)
+                            .FirstOrDefault();
+                }
+                else if (IsUserAvailableForManagerInstall(
                         occupantUser, date, donorShiftReq.ShiftLabel, solution, occupantAssignment.ShiftId) &&
                     (!donorGenderLocked || occupantUser.Gender == GetUserGender(donor.Assignment.UserId)))
                 {
@@ -2182,12 +2231,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return false;
             }
 
-            if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
-                    solution, _constraints, user, date))
-            {
-                return false;
-            }
-
+            // الزام مسئول شیفت سخت‌تر از سقف روزهای کاری متوالی است
             if (shiftLabel == ShiftLabel.Night)
             {
                 var nights = solution.GetUserAllAssignments(user.UserId)

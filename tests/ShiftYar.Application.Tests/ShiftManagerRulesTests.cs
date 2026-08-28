@@ -342,10 +342,207 @@ public class ShiftManagerRulesTests
     }
 
     [Fact]
+    public void EnsureShiftManagers_FixesAug23Night_TwoL2Only()
+    {
+        var start = new DateTime(2026, 8, 23);
+        var u12 = MakeFixedMorning(12, level: 1);
+        var u14 = Make(14, level: 1);
+        u14.RequiredShiftSlots.Add(new ShiftSlotConstraint { Date = start, ShiftLabel = ShiftLabel.Morning, ShiftId = 4 });
+        var u15 = MakeFixedMorning(15, level: 1);
+        var u18 = Make(18, level: 1);
+        u18.UnavailableShiftSlots.Add(new ShiftSlotConstraint { Date = start, ShiftLabel = ShiftLabel.Evening, ShiftId = 5 });
+        u18.UnavailableShiftSlots.Add(new ShiftSlotConstraint { Date = start, ShiftLabel = ShiftLabel.Night, ShiftId = 6 });
+        var u17 = Make(17, level: 1);
+        var u19 = Make(19, level: 1);
+        var u22 = Make(22, level: 2);
+        var u23 = Make(23, level: 2);
+        var u25 = Make(25, level: 2);
+        var u27 = Make(27, level: null);
+        var u29 = Make(29, level: null);
+        var u30 = Make(30, level: null);
+
+        var constraints = BuildPediatricsConstraints(start);
+        constraints.UserConstraints = [u12, u14, u15, u18, u17, u19, u22, u23, u25, u27, u29, u30];
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(12, 4, start, ShiftLabel.Morning, false);
+        solution.AddAssignment(14, 4, start, ShiftLabel.Morning, false);
+        solution.AddAssignment(15, 4, start, ShiftLabel.Morning, false);
+        solution.AddAssignment(18, 4, start, ShiftLabel.Morning, false);
+        solution.AddAssignment(17, 5, start, ShiftLabel.Evening, false);
+        solution.AddAssignment(25, 5, start, ShiftLabel.Evening, false);
+        solution.AddAssignment(29, 5, start, ShiftLabel.Evening, false);
+        solution.AddAssignment(22, 6, start, ShiftLabel.Night, false);
+        solution.AddAssignment(23, 6, start, ShiftLabel.Night, false);
+        solution.AddAssignment(27, 6, start, ShiftLabel.Night, false);
+        solution.AddAssignment(30, 6, start, ShiftLabel.Night, false);
+
+        ApplyManagers(constraints, solution);
+
+        var nightUsers = GetAssignees(constraints, solution, 6, start);
+        Assert.True(ShiftManagerRules.IsSatisfied(nightUsers, 2, 1));
+        Assert.DoesNotContain(solution.Violations, v => v.Contains("Shift manager mix unmet"));
+    }
+
+    [Fact]
+    public void EnsureShiftManagers_FixesAug28Night_OneL2Only()
+    {
+        var start = new DateTime(2026, 8, 28);
+        var u17 = Make(17, level: 1);
+        var u19 = Make(19, level: 1);
+        var u21 = Make(21, level: 1);
+        var u20 = Make(20, level: 1);
+        u20.RequiredShiftSlots.Add(new ShiftSlotConstraint { Date = start, ShiftLabel = ShiftLabel.Evening, ShiftId = 5 });
+        var u22 = Make(22, level: 2);
+        var u23 = Make(23, level: 2);
+        var u24 = Make(24, level: 2);
+        var u27 = Make(27, level: null);
+        var u28 = Make(28, level: null);
+        var u31 = Make(31, level: null);
+
+        var constraints = BuildPediatricsConstraints(start);
+        constraints.UserConstraints = [u17, u19, u21, u20, u22, u23, u24, u27, u28, u31];
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(17, 4, start, ShiftLabel.Morning, false);
+        solution.AddAssignment(19, 4, start, ShiftLabel.Morning, false);
+        solution.AddAssignment(21, 4, start, ShiftLabel.Morning, false);
+        solution.AddAssignment(20, 5, start, ShiftLabel.Evening, false);
+        solution.AddAssignment(22, 5, start, ShiftLabel.Evening, false);
+        solution.AddAssignment(24, 5, start, ShiftLabel.Evening, false);
+        solution.AddAssignment(23, 6, start, ShiftLabel.Night, false);
+        solution.AddAssignment(27, 6, start, ShiftLabel.Night, false);
+        solution.AddAssignment(28, 6, start, ShiftLabel.Night, false);
+        solution.AddAssignment(31, 6, start, ShiftLabel.Night, false);
+
+        ApplyManagers(constraints, solution);
+
+        var nightUsers = GetAssignees(constraints, solution, 6, start);
+        Assert.True(ShiftManagerRules.IsSatisfied(nightUsers, 2, 1));
+        Assert.DoesNotContain(solution.Violations, v => v.Contains("Shift manager mix unmet"));
+    }
+
+    [Fact]
+    public void EnsureShiftManagers_SwapEveningL1ToNight_WithFreeL1BackfillEvening()
+    {
+        var start = new DateTime(2026, 8, 23);
+        var u17 = Make(17, level: 1);
+        var u19 = Make(19, level: 1);
+        var u22 = Make(22, level: 2);
+        var u23 = Make(23, level: 2);
+        var u25 = Make(25, level: 2);
+        var u27 = Make(27, level: null);
+        var u29 = Make(29, level: null);
+        var u30 = Make(30, level: null);
+
+        var constraints = BuildPediatricsConstraints(start);
+        constraints.UserConstraints = [u17, u19, u22, u23, u25, u27, u29, u30];
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(17, 5, start, ShiftLabel.Evening, false);
+        solution.AddAssignment(25, 5, start, ShiftLabel.Evening, false);
+        solution.AddAssignment(29, 5, start, ShiftLabel.Evening, false);
+        solution.AddAssignment(22, 6, start, ShiftLabel.Night, false);
+        solution.AddAssignment(23, 6, start, ShiftLabel.Night, false);
+        solution.AddAssignment(27, 6, start, ShiftLabel.Night, false);
+        solution.AddAssignment(30, 6, start, ShiftLabel.Night, false);
+
+        ApplyManagers(constraints, solution);
+
+        var nightUsers = GetAssignees(constraints, solution, 6, start);
+        var eveningUsers = GetAssignees(constraints, solution, 5, start);
+        Assert.True(ShiftManagerRules.IsSatisfied(nightUsers, 2, 1));
+        Assert.True(ShiftManagerRules.IsSatisfied(eveningUsers, 2, 1));
+    }
+
+    [Fact]
     public void ValidateShiftManagerCounts_RejectsMinLevel1AboveRequired()
     {
         var error = ShiftManagerRules.ValidateShiftManagerCounts(1, 2);
         Assert.NotNull(error);
+    }
+
+    private static void ApplyManagers(ShiftConstraints constraints, ShiftSolution solution)
+    {
+        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            MaxIterations = 1,
+            InitialTemperature = 1,
+            FinalTemperature = 0.1
+        });
+        scheduler.ApplyMandatoryConstraints(solution);
+    }
+
+    private static List<UserConstraint> GetAssignees(
+        ShiftConstraints constraints, ShiftSolution solution, int shiftId, DateTime date) =>
+        solution.GetShiftAssignments(shiftId, date)
+            .Where(a => !a.IsOnCall)
+            .Select(a => constraints.UserConstraints.First(u => u.UserId == a.UserId))
+            .ToList();
+
+    private static ShiftConstraints BuildPediatricsConstraints(DateTime start) => new()
+    {
+        StartDate = start,
+        EndDate = start,
+        ShiftRequirements =
+        [
+            new ShiftRequirement
+            {
+                ShiftId = 4,
+                ShiftLabel = ShiftLabel.Morning,
+                DepartmentId = 2,
+                DurationHours = 12,
+                ManagerRequiredCount = 0,
+                SpecialtyRequirements =
+                [
+                    new SpecialtyRequirement { SpecialtyId = 2, RequiredTotalCount = 4 }
+                ]
+            },
+            new ShiftRequirement
+            {
+                ShiftId = 5,
+                ShiftLabel = ShiftLabel.Evening,
+                DepartmentId = 2,
+                DurationHours = 12,
+                ManagerRequiredCount = 2,
+                ManagerMinLevel1Count = 1,
+                SpecialtyRequirements =
+                [
+                    new SpecialtyRequirement { SpecialtyId = 2, RequiredTotalCount = 3 }
+                ]
+            },
+            new ShiftRequirement
+            {
+                ShiftId = 6,
+                ShiftLabel = ShiftLabel.Night,
+                DepartmentId = 2,
+                DurationHours = 12,
+                ManagerRequiredCount = 2,
+                ManagerMinLevel1Count = 1,
+                SpecialtyRequirements =
+                [
+                    new SpecialtyRequirement { SpecialtyId = 2, RequiredTotalCount = 4 }
+                ]
+            }
+        ],
+        GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 },
+        HardRules = new HardRuleSet
+        {
+            EnforceSpecialtyCapacity = true,
+            EnforceMaxShiftsPerDay = true,
+            AllowEveningAfterNightShift = false,
+            AllowNightShiftAfterNightShift = false
+        }
+    };
+
+    private static UserConstraint MakeFixedMorning(int id, byte? level)
+    {
+        var u = Make(id, level);
+        u.ShiftType = ShiftTypes.FixedShift;
+        u.ShiftSubType = ShiftSubTypes.FixedMorning;
+        u.AllowedShiftPermissions = UserShiftPermission.Morning;
+        u.AllowedShiftLabels = [ShiftLabel.Morning];
+        return u;
     }
 
     private static UserConstraint Make(int id, byte? level) => new()
@@ -353,7 +550,7 @@ public class ShiftManagerRulesTests
         UserId = id,
         UserName = $"u{id}",
         Gender = UserGender.Female,
-        SpecialtyId = 10,
+        SpecialtyId = 2,
         IsActive = true,
         ShiftType = ShiftTypes.RotatingShift,
         ShiftSubType = ShiftSubTypes.ThreeShifts,
