@@ -1785,7 +1785,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// </summary>
         public void EnforceMandatoryNightQuotasUntilSatisfied(ShiftSolution solution)
         {
-            for (var round = 0; round < 16; round++)
+            for (var round = 0; round < 8; round++)
             {
                 if (GetExactNightQuotaViolations(solution).Count == 0
                     && !HasUnmetManagerMix(solution))
@@ -1799,8 +1799,6 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
                 ExactNightQuotaGuard.Enforce(solution, _constraints);
                 RestoreDeficitNightQuotas(solution);
-                ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
-                ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, _constraints);
             }
         }
 
@@ -1891,15 +1889,22 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         }
 
         /// <summary>
-        /// پس از جابجایی برای مسئول شیفت، فقط در صورت بازگشت همه سهمیه‌های شب تغییر را می‌پذیرد.
+        /// پس از جابجایی برای مسئول شیفت، فقط سهمیهٔ کاربر جابه‌جاشده را سریع بررسی می‌کند (بدون پاس سراسری سنگین).
         /// </summary>
-        private bool CommitManagerReplaceIfQuotasRestored(ShiftSolution solution)
+        private bool CommitManagerReplaceIfQuotasRestored(ShiftSolution solution, UserConstraint displacedUser)
         {
-            var backup = solution.Clone();
-            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
-            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, _constraints);
+            if (displacedUser?.ExactNightShiftCount == null)
+            {
+                return true;
+            }
 
-            if (AreExactNightQuotasSatisfied(solution, out _))
+            var required = displacedUser.ExactNightShiftCount.Value;
+            var backup = solution.Clone();
+            ExactNightQuotaGuard.EnforceExactNightQuotaForUser(solution, _constraints, displacedUser);
+
+            var nights = solution.GetUserAllAssignments(displacedUser.UserId)
+                .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+            if (nights >= required)
             {
                 return true;
             }
@@ -1913,7 +1918,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// </summary>
         private void FinalizeNightQuotasAndManagerMix(ShiftSolution solution)
         {
-            for (var round = 0; round < 4; round++)
+            for (var round = 0; round < 2; round++)
             {
                 RunShiftManagerRepairPasses(solution);
                 ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
@@ -1992,7 +1997,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private void RunShiftManagerRepairPasses(ShiftSolution solution)
         {
-            for (var pass = 0; pass < 6; pass++)
+            for (var pass = 0; pass < 4; pass++)
             {
                 var progress = false;
                 foreach (var date in OrderDatesForManagerRepair(solution))
@@ -2180,7 +2185,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                 if (TryInstallShiftManager(solution, shiftReq, date, needLevel1, occupant.Assignment, occupant.User!))
                 {
-                    if (!CommitManagerReplaceIfQuotasRestored(solution))
+                    if (!CommitManagerReplaceIfQuotasRestored(solution, occupant.User!))
                     {
                         continue;
                     }

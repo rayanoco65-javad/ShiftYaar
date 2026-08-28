@@ -101,7 +101,7 @@ public static class ExactNightQuotaGuard
         }
 
         var stalePasses = 0;
-        for (var pass = 0; pass < 32 && stalePasses < 4; pass++)
+        for (var pass = 0; pass < 16 && stalePasses < 3; pass++)
         {
             var deficits = OrderUsersByDeficit(solution, constraints).ToList();
             if (deficits.Count == 0)
@@ -149,7 +149,7 @@ public static class ExactNightQuotaGuard
             return;
         }
 
-        for (var pass = 0; pass < 20; pass++)
+        for (var pass = 0; pass < 8; pass++)
         {
             var deficits = OrderUsersByDeficit(solution, constraints).ToList();
             if (deficits.Count == 0)
@@ -400,7 +400,15 @@ public static class ExactNightQuotaGuard
             return false;
         }
 
-        foreach (var donorDate in AllCandidateDates(constraints, holidayOnly: false))
+        var minGap = ResolveNightSpacingGap(constraints, donor);
+        var candidateDates = PickSpreadDates(
+                AllCandidateDates(constraints, holidayOnly: false).ToList(),
+                GetNights(solution, donor.UserId).Select(a => a.Date.Date).ToList(),
+                needed: 6,
+                minGap)
+            .Take(12);
+
+        foreach (var donorDate in candidateDates)
         {
             if (TryClaimNightForDeficitUser(
                     solution, constraints, donor, nightShift, donorDate, depth + 1, allowCriticalDonor)
