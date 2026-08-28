@@ -1765,6 +1765,27 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         private List<string> EnsureShiftManagers(ShiftSolution solution)
         {
             var warnings = new List<string>();
+
+            for (var pass = 0; pass < 5; pass++)
+            {
+                var progress = false;
+                foreach (var date in GetDateRange())
+                {
+                    foreach (var shiftReq in _constraints.ShiftRequirements)
+                    {
+                        if (EnsureShiftManagerMixForSlot(solution, shiftReq, date))
+                        {
+                            progress = true;
+                        }
+                    }
+                }
+
+                if (!progress)
+                {
+                    break;
+                }
+            }
+
             foreach (var date in GetDateRange())
             {
                 foreach (var shiftReq in _constraints.ShiftRequirements)
@@ -1775,131 +1796,384 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
-                    for (var attempt = 0; attempt < requiredTotal + minLevel1 + 4; attempt++)
+                    var assignees = GetRegularAssignees(solution, shiftReq, date);
+                    if (assignees.Count == 0)
                     {
-                        var regulars = solution.GetShiftAssignments(shiftReq.ShiftId, date)
-                            .Where(a => !a.IsOnCall)
-                            .ToList();
-                        if (regulars.Count == 0)
-                        {
-                            break;
-                        }
+                        continue;
+                    }
 
-                        var assignees = regulars
-                            .Select(a => _constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId))
-                            .Where(u => u != null)
-                            .Cast<UserConstraint>()
-                            .ToList();
-
-                        if (ShiftManagerRules.IsSatisfied(assignees, requiredTotal, minLevel1))
-                        {
-                            break;
-                        }
-
-                        var managerCount = assignees.Count(ShiftManagerRules.IsManager);
-                        var level1Count = assignees.Count(ShiftManagerRules.IsLevel1);
-                        var needLevel1 = level1Count < Math.Min(minLevel1, requiredTotal);
-                        var needAnyManager = managerCount < requiredTotal;
-
-                        if (!needLevel1 && !needAnyManager)
-                        {
-                            break;
-                        }
-
-                        var occupants = regulars
-                            .Where(a => !IsProtectedAssignment(solution, a))
-                            .Select(a => new
-                            {
-                                Assignment = a,
-                                User = _constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)
-                            })
-                            .Where(x => x.User != null)
-                            .OrderBy(x =>
-                            {
-                                var level = ShiftManagerRules.EffectiveLevel(x.User!);
-                                if (level == 0)
-                                {
-                                    return 0;
-                                }
-
-                                if (needLevel1 && level == ShiftManagerRules.Level2)
-                                {
-                                    return 1;
-                                }
-
-                                return 2;
-                            })
-                            .ToList();
-
-                        var replaced = false;
-                        foreach (var occupant in occupants)
-                        {
-                            if (needLevel1 && ShiftManagerRules.IsLevel1(occupant.User!))
-                            {
-                                continue;
-                            }
-
-                            if (!needLevel1 && needAnyManager && ShiftManagerRules.IsManager(occupant.User!))
-                            {
-                                continue;
-                            }
-
-                            var occupantSpecialty = GetUserSpecialty(occupant.Assignment.UserId);
-                            var occupantGender = GetUserGender(occupant.Assignment.UserId);
-                            var specialtyReq = shiftReq.SpecialtyRequirements
-                                .FirstOrDefault(r => r.SpecialtyId == occupantSpecialty);
-                            var day = specialtyReq?.ForDay(_constraints.IsHoliday(date));
-                            var genderLocked = day != null &&
-                                (day.Value.RequiredMaleCount > 0 || day.Value.RequiredFemaleCount > 0);
-
-                            var candidate = _constraints.UserConstraints
-                                .Where(u => u.IsActive && ShiftManagerRules.IsManager(u))
-                                .Where(u => !needLevel1 || ShiftManagerRules.IsLevel1(u))
-                                .Where(u => u.SpecialtyId == occupantSpecialty)
-                                .Where(u => !genderLocked || u.Gender == occupantGender)
-                                .Where(u => IsUserAvailableForShift(u, date, shiftReq.ShiftLabel, solution))
-                                .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
-                                .OrderByDescending(u => ShiftManagerRules.IsLevel1(u))
-                                .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
-                                .FirstOrDefault();
-
-                            if (candidate == null)
-                            {
-                                continue;
-                            }
-
-                            solution.RemoveAssignment(
-                                occupant.Assignment.UserId,
-                                occupant.Assignment.ShiftId,
-                                occupant.Assignment.Date);
-                            RemoveConflictingDailyAssignments(
-                                solution,
-                                candidate.UserId,
-                                date,
-                                shiftReq.ShiftId,
-                                shiftReq.ShiftLabel);
-                            solution.AddAssignment(
-                                candidate.UserId,
-                                shiftReq.ShiftId,
-                                date,
-                                shiftReq.ShiftLabel,
-                                isOnCall: false);
-                            replaced = true;
-                            break;
-                        }
-
-                        if (!replaced)
-                        {
-                            warnings.Add(
-                                $"Shift manager mix unmet for {shiftReq.ShiftLabel} on {date:yyyy-MM-dd} " +
-                                $"(need total≥{requiredTotal}, level1≥{minLevel1}).");
-                            break;
-                        }
+                    if (!ShiftManagerRules.IsSatisfied(assignees, requiredTotal, minLevel1))
+                    {
+                        warnings.Add(
+                            $"Shift manager mix unmet for {shiftReq.ShiftLabel} on {date:yyyy-MM-dd} " +
+                            $"(need total≥{requiredTotal}, level1≥{minLevel1}).");
                     }
                 }
             }
 
             return warnings;
+        }
+
+        private List<UserConstraint> GetRegularAssignees(ShiftSolution solution, ShiftRequirement shiftReq, DateTime date) =>
+            solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                .Where(a => !a.IsOnCall)
+                .Select(a => _constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId))
+                .Where(u => u != null)
+                .Cast<UserConstraint>()
+                .ToList();
+
+        /// <returns>true if at least one replacement/swap succeeded this call.</returns>
+        private bool EnsureShiftManagerMixForSlot(ShiftSolution solution, ShiftRequirement shiftReq, DateTime date)
+        {
+            var (requiredTotal, minLevel1) = ShiftManagerRules.GetRequirement(shiftReq);
+            if (requiredTotal <= 0)
+            {
+                return false;
+            }
+
+            var maxAttempts = Math.Max(8, requiredTotal * 3 + minLevel1 * 2);
+            var progress = false;
+
+            for (var attempt = 0; attempt < maxAttempts; attempt++)
+            {
+                var assignees = GetRegularAssignees(solution, shiftReq, date);
+                if (assignees.Count == 0)
+                {
+                    break;
+                }
+
+                if (ShiftManagerRules.IsSatisfied(assignees, requiredTotal, minLevel1))
+                {
+                    break;
+                }
+
+                var managerCount = assignees.Count(ShiftManagerRules.IsManager);
+                var level1Count = assignees.Count(ShiftManagerRules.IsLevel1);
+                var needLevel1 = level1Count < Math.Min(minLevel1, requiredTotal);
+                var needAnyManager = managerCount < requiredTotal;
+
+                if (!needLevel1 && !needAnyManager)
+                {
+                    break;
+                }
+
+                var regulars = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                    .Where(a => !a.IsOnCall)
+                    .ToList();
+
+                var occupants = regulars
+                    .Where(a => !IsProtectedAssignment(solution, a))
+                    .Select(a => new
+                    {
+                        Assignment = a,
+                        User = _constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)
+                    })
+                    .Where(x => x.User != null)
+                    .OrderBy(x =>
+                    {
+                        var level = ShiftManagerRules.EffectiveLevel(x.User!);
+                        if (level == 0)
+                        {
+                            return 0;
+                        }
+
+                        if (needLevel1 && level == ShiftManagerRules.Level2)
+                        {
+                            return 1;
+                        }
+
+                        return 2;
+                    })
+                    .ToList();
+
+                var replaced = false;
+                foreach (var occupant in occupants)
+                {
+                    if (needLevel1 && ShiftManagerRules.IsLevel1(occupant.User!))
+                    {
+                        continue;
+                    }
+
+                    if (!needLevel1 && needAnyManager && ShiftManagerRules.IsManager(occupant.User!))
+                    {
+                        continue;
+                    }
+
+                    if (TryInstallShiftManager(solution, shiftReq, date, needLevel1, occupant.Assignment, occupant.User!))
+                    {
+                        replaced = true;
+                        progress = true;
+                        break;
+                    }
+                }
+
+                if (!replaced)
+                {
+                    break;
+                }
+            }
+
+            return progress;
+        }
+
+        private bool TryInstallShiftManager(
+            ShiftSolution solution,
+            ShiftRequirement shiftReq,
+            DateTime date,
+            bool needLevel1,
+            SaShiftAssignment occupantAssignment,
+            UserConstraint occupantUser)
+        {
+            if (TryDirectManagerInstall(solution, shiftReq, date, needLevel1, occupantAssignment, occupantUser))
+            {
+                return true;
+            }
+
+            return TrySwapManagerFromOtherShiftSameDay(
+                solution, shiftReq, date, needLevel1, occupantAssignment, occupantUser);
+        }
+
+        private bool TryDirectManagerInstall(
+            ShiftSolution solution,
+            ShiftRequirement shiftReq,
+            DateTime date,
+            bool needLevel1,
+            SaShiftAssignment occupantAssignment,
+            UserConstraint occupantUser)
+        {
+            var occupantSpecialty = GetUserSpecialty(occupantAssignment.UserId);
+            var occupantGender = GetUserGender(occupantAssignment.UserId);
+            var genderLocked = IsGenderLockedShift(shiftReq, date, occupantSpecialty);
+
+            var candidate = RankManagerCandidates(
+                    solution, shiftReq, date, needLevel1, occupantSpecialty, occupantGender, genderLocked)
+                .FirstOrDefault();
+
+            if (candidate == null)
+            {
+                return false;
+            }
+
+            solution.RemoveAssignment(
+                occupantAssignment.UserId,
+                occupantAssignment.ShiftId,
+                occupantAssignment.Date);
+            AddShiftAssignmentForManagerInstall(solution, candidate, shiftReq, date);
+            return true;
+        }
+
+        /// <summary>
+        /// با MaxShiftsPerDay=1: مسئول L1 از شیفت دیگر همان روز (مثلاً صبح) به عصر/شب منتقل می‌شود و جای خالی با فرد آزاد پر می‌شود.
+        /// </summary>
+        private bool TrySwapManagerFromOtherShiftSameDay(
+            ShiftSolution solution,
+            ShiftRequirement targetShift,
+            DateTime date,
+            bool needLevel1,
+            SaShiftAssignment occupantAssignment,
+            UserConstraint occupantUser)
+        {
+            var occupantSpecialty = GetUserSpecialty(occupantAssignment.UserId);
+            var occupantGender = GetUserGender(occupantAssignment.UserId);
+
+            var donorEntries = solution.Assignments.Values
+                .Where(a => a.Date.Date == date.Date &&
+                            a.ShiftId != targetShift.ShiftId &&
+                            !a.IsOnCall)
+                .Select(a => new
+                {
+                    Assignment = a,
+                    User = _constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId),
+                    ShiftReq = _constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftId == a.ShiftId)
+                })
+                .Where(x => x.User != null && x.ShiftReq != null)
+                .Where(x => ShiftManagerRules.IsManager(x.User!))
+                .Where(x => !needLevel1 || ShiftManagerRules.IsLevel1(x.User!))
+                .Where(x => !IsProtectedAssignment(solution, x.Assignment))
+                .Where(x => IsUserAvailableForManagerInstall(
+                    x.User!, date, targetShift.ShiftLabel, solution, x.Assignment.ShiftId))
+                .OrderByDescending(x => ShiftManagerRules.IsLevel1(x.User!))
+                .ThenBy(x => solution.GetUserAllAssignments(x.User!.UserId).Count)
+                .ToList();
+
+            foreach (var donor in donorEntries)
+            {
+                var donorShiftReq = donor.ShiftReq!;
+                var donorGenderLocked = IsGenderLockedShift(donorShiftReq, date, occupantSpecialty);
+
+                UserConstraint? backfill = null;
+
+                if (IsUserAvailableForManagerInstall(
+                        occupantUser, date, donorShiftReq.ShiftLabel, solution, occupantAssignment.ShiftId) &&
+                    (!donorGenderLocked || occupantUser.Gender == GetUserGender(donor.Assignment.UserId)))
+                {
+                    backfill = occupantUser;
+                }
+                else
+                {
+                    backfill = RankManagerCandidates(
+                            solution,
+                            donorShiftReq,
+                            date,
+                            needLevel1: false,
+                            occupantSpecialty,
+                            donorGenderLocked ? GetUserGender(donor.Assignment.UserId) : occupantGender,
+                            donorGenderLocked)
+                        .FirstOrDefault();
+                }
+
+                if (backfill == null)
+                {
+                    continue;
+                }
+
+                solution.RemoveAssignment(
+                    occupantAssignment.UserId,
+                    occupantAssignment.ShiftId,
+                    occupantAssignment.Date);
+                solution.RemoveAssignment(
+                    donor.Assignment.UserId,
+                    donor.Assignment.ShiftId,
+                    donor.Assignment.Date);
+
+                AddShiftAssignmentForManagerInstall(solution, donor.User!, targetShift, date);
+
+                if (backfill.UserId != donor.User!.UserId)
+                {
+                    AddShiftAssignmentForManagerInstall(solution, backfill, donorShiftReq, date);
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+
+        private IEnumerable<UserConstraint> RankManagerCandidates(
+            ShiftSolution solution,
+            ShiftRequirement shiftReq,
+            DateTime date,
+            bool needLevel1,
+            int specialtyId,
+            UserGender occupantGender,
+            bool genderLocked,
+            int? ignoreShiftIdForAvailability = null) =>
+            _constraints.UserConstraints
+                .Where(u => u.IsActive && ShiftManagerRules.IsManager(u))
+                .Where(u => !needLevel1 || ShiftManagerRules.IsLevel1(u))
+                .Where(u => u.SpecialtyId == specialtyId)
+                .Where(u => !genderLocked || u.Gender == occupantGender)
+                .Where(u => IsUserAvailableForManagerInstall(
+                    u, date, shiftReq.ShiftLabel, solution, ignoreShiftIdForAvailability))
+                .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
+                .OrderByDescending(u => ShiftManagerRules.IsLevel1(u))
+                .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
+                .ThenBy(u => u.UserId);
+
+        private bool IsGenderLockedShift(ShiftRequirement shiftReq, DateTime date, int specialtyId)
+        {
+            var specialtyReq = shiftReq.SpecialtyRequirements.FirstOrDefault(r => r.SpecialtyId == specialtyId);
+            var day = specialtyReq?.ForDay(_constraints.IsHoliday(date));
+            return day != null &&
+                   (day.Value.RequiredMaleCount > 0 || day.Value.RequiredFemaleCount > 0);
+        }
+
+        private void AddShiftAssignmentForManagerInstall(
+            ShiftSolution solution,
+            UserConstraint user,
+            ShiftRequirement shiftReq,
+            DateTime date)
+        {
+            RemoveConflictingDailyAssignments(
+                solution,
+                user.UserId,
+                date,
+                shiftReq.ShiftId,
+                shiftReq.ShiftLabel);
+            solution.AddAssignment(
+                user.UserId,
+                shiftReq.ShiftId,
+                date,
+                shiftReq.ShiftLabel,
+                isOnCall: false);
+        }
+
+        /// <summary>
+        /// برای نصب مسئول: مثل IsUserAvailableForShift ولی بدون سقف موظفی (الزام مسئول سخت‌تر است).
+        /// ignoreShiftId: شیفت همان روز که کاربر از آن جابجا می‌شود (برای MaxShiftsPerDay=1).
+        /// </summary>
+        private bool IsUserAvailableForManagerInstall(
+            UserConstraint user,
+            DateTime date,
+            ShiftLabel shiftLabel,
+            ShiftSolution solution,
+            int? ignoreShiftId = null)
+        {
+            if (user.UnavailableDates.Any(d => d.Date == date.Date))
+            {
+                return false;
+            }
+
+            if (user.UnavailableShiftSlots.Any(s =>
+                    s.Date.Date == date.Date && s.ShiftLabel == shiftLabel))
+            {
+                return false;
+            }
+
+            var maxPerDay = _constraints.HardRules.EnforceMaxShiftsPerDay
+                ? Math.Max(1, _constraints.GlobalConstraints.MaxShiftsPerDay)
+                : 2;
+            var existingLabels = solution.GetUserAssignments(user.UserId, date)
+                .Where(a => !ignoreShiftId.HasValue || a.ShiftId != ignoreShiftId.Value)
+                .Select(a => a.ShiftLabel);
+            if (!ShiftEligibilityResolver.IsAssignmentAllowed(
+                    user, existingLabels, shiftLabel, maxPerDay,
+                    _constraints.HardRules.ForbidDuplicateDailyAssignments))
+            {
+                return false;
+            }
+
+            if (AdjacentShiftRestRules.WouldConflict(
+                    solution.GetUserAllAssignments(user.UserId),
+                    date, shiftLabel, _constraints, ignoreShiftId))
+            {
+                return false;
+            }
+
+            if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
+                    solution, _constraints, user, date))
+            {
+                return false;
+            }
+
+            if (shiftLabel == ShiftLabel.Night)
+            {
+                var nights = solution.GetUserAllAssignments(user.UserId)
+                    .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall)
+                    .Where(a => !ignoreShiftId.HasValue ||
+                                a.ShiftId != ignoreShiftId.Value ||
+                                a.Date.Date != date.Date)
+                    .ToList();
+
+                if (_constraints.HardRules.EnforceNightShiftMonthlyCap &&
+                    nights.Count >= user.MaxNightShiftsPerMonth)
+                {
+                    return false;
+                }
+
+                if (user.MinDaysBetweenNightShifts > 0)
+                {
+                    foreach (var n in nights)
+                    {
+                        if (Math.Abs((date.Date - n.Date.Date).Days) <= user.MinDaysBetweenNightShifts)
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            return true;
         }
 
         private void RemoveConflictingDailyAssignments(
