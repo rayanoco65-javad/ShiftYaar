@@ -1778,17 +1778,32 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         }
 
         /// <summary>
-        /// حلقه نهایی: سهمیه شب نباید ترکیب مسئول را بشکند؛ پس از هر Enforce دوباره ترمیم می‌شود.
+        /// حلقه نهایی متقارن: سهمیه شب و ترکیب مسئول هر دو باید برقرار باشند؛
+        /// هرگز یکی را به قیمت دیگری رها نمی‌کند.
         /// </summary>
         public void StabilizeManagerMixAndNightQuotas(ShiftSolution solution)
         {
-            for (var round = 0; round < 8; round++)
+            for (var round = 0; round < 12; round++)
             {
                 ExactNightQuotaGuard.Enforce(solution, _constraints);
                 AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
                 DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
                 ApprovedRequestGuard.ForceApply(solution, _constraints);
                 RunShiftManagerRepairPasses(solution);
+                ApprovedRequestGuard.ForceApply(solution, _constraints);
+                RestoreDeficitNightQuotas(solution);
+
+                if (!HasUnmetManagerMix(solution) && GetExactNightQuotaViolations(solution).Count == 0)
+                {
+                    return;
+                }
+            }
+
+            for (var round = 0; round < 8; round++)
+            {
+                ExactNightQuotaGuard.Enforce(solution, _constraints);
+                RunShiftManagerRepairPasses(solution);
+                RestoreDeficitNightQuotas(solution);
                 ApprovedRequestGuard.ForceApply(solution, _constraints);
 
                 if (!HasUnmetManagerMix(solution) && GetExactNightQuotaViolations(solution).Count == 0)
@@ -1797,22 +1812,52 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
             }
 
-            for (var pass = 0; pass < 10 && HasUnmetManagerMix(solution); pass++)
+            for (var round = 0; round < 6; round++)
             {
-                RunShiftManagerRepairPasses(solution);
-                ApprovedRequestGuard.ForceApply(solution, _constraints);
-            }
-
-            for (var round = 0; round < 4; round++)
-            {
-                ExactNightQuotaGuard.Enforce(solution, _constraints);
-                if (!HasUnmetManagerMix(solution))
+                if (GetExactNightQuotaViolations(solution).Count == 0 && !HasUnmetManagerMix(solution))
                 {
-                    break;
+                    return;
                 }
 
+                ExactNightQuotaGuard.Enforce(solution, _constraints);
                 RunShiftManagerRepairPasses(solution);
+                RestoreDeficitNightQuotas(solution);
                 ApprovedRequestGuard.ForceApply(solution, _constraints);
+            }
+        }
+
+        /// <summary>
+        /// پس از جابجایی برای مسئول شیفت، سهمیه شب کاربرانی که زیر حداقل مانده‌اند را فوری جبران می‌کند.
+        /// </summary>
+        private void RestoreDeficitNightQuotas(ShiftSolution solution)
+        {
+            var progress = true;
+            for (var pass = 0; pass < 4 && progress; pass++)
+            {
+                progress = false;
+                foreach (var user in _constraints.UserConstraints.Where(u => u.ExactNightShiftCount.HasValue))
+                {
+                    var nights = solution.GetUserAllAssignments(user.UserId)
+                        .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+                    if (nights >= user.ExactNightShiftCount.Value)
+                    {
+                        continue;
+                    }
+
+                    var before = nights;
+                    ExactNightQuotaGuard.EnforceExactNightQuotaForUser(solution, _constraints, user);
+                    var after = solution.GetUserAllAssignments(user.UserId)
+                        .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+                    if (after > before)
+                    {
+                        progress = true;
+                    }
+                }
+            }
+
+            if (GetExactNightQuotaViolations(solution).Count > 0)
+            {
+                ExactNightQuotaGuard.Enforce(solution, _constraints);
             }
         }
 
@@ -1830,6 +1875,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 ApprovedRequestGuard.ForceApply(solution, _constraints);
                 RunShiftManagerRepairPasses(solution);
                 ApprovedRequestGuard.ForceApply(solution, _constraints);
+                RestoreDeficitNightQuotas(solution);
 
                 if (!HasUnmetManagerMix(solution) && GetExactNightQuotaViolations(solution).Count == 0)
                 {
@@ -1844,6 +1890,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 ApprovedRequestGuard.ForceApply(solution, _constraints);
                 RunShiftManagerRepairPasses(solution);
                 ApprovedRequestGuard.ForceApply(solution, _constraints);
+                RestoreDeficitNightQuotas(solution);
 
                 if (!HasUnmetManagerMix(solution) && GetExactNightQuotaViolations(solution).Count == 0)
                 {
@@ -1880,6 +1927,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     break;
                 }
             }
+
+            RestoreDeficitNightQuotas(solution);
         }
 
         private IEnumerable<DateTime> OrderDatesForManagerRepair(ShiftSolution solution)
@@ -2050,6 +2099,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     {
                         ExactNightQuotaGuard.EnforceExactNightQuotaForUser(
                             solution, _constraints, occupant.User!);
+                        RestoreDeficitNightQuotas(solution);
                     }
 
                     return true;

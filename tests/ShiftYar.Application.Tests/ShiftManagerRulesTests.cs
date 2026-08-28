@@ -722,6 +722,96 @@ public class ShiftManagerRulesTests
     }
 
     [Fact]
+    public void ApplyMandatoryConstraints_FillsNightQuotaDeficits_WithoutBreakingManagerMix()
+    {
+        var start = new DateTime(2026, 8, 23);
+        var end = new DateTime(2026, 9, 22);
+
+        var u17 = Make(17, level: 1);
+        var u19 = Make(19, level: 1);
+        var u20 = Make(20, level: 1);
+        var u21 = Make(21, level: 1);
+        var u22 = Make(22, level: 2);
+        u22.ExactNightShiftCount = 8;
+        var u23 = Make(23, level: 2);
+        u23.ExactNightShiftCount = 8;
+        var u26 = Make(26, level: 2);
+        u26.ExactNightShiftCount = 9;
+        var u27 = Make(27, level: null);
+        u27.ExactNightShiftCount = 8;
+        var u31 = Make(31, level: null);
+        u31.ExactNightShiftCount = 9;
+        var u29 = Make(29, level: null);
+
+        var constraints = BuildPediatricsConstraints(start);
+        constraints.EndDate = end;
+        constraints.UserConstraints = [u17, u19, u20, u21, u22, u23, u26, u27, u31, u29];
+
+        var solution = new ShiftSolution();
+        var offsets = new[] { 0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 29 };
+        foreach (var offset in offsets)
+        {
+            var d = start.AddDays(offset);
+            solution.AddAssignment(19, 6, d, ShiftLabel.Night, false);
+            solution.AddAssignment(22, 6, d, ShiftLabel.Night, false);
+            solution.AddAssignment(27, 6, d, ShiftLabel.Night, false);
+            solution.AddAssignment(29, 6, d, ShiftLabel.Night, false);
+        }
+
+        foreach (var offset in offsets.Where(o => o < 28))
+        {
+            var d = start.AddDays(offset + 1);
+            solution.AddAssignment(17, 6, d, ShiftLabel.Night, false);
+            solution.AddAssignment(23, 6, d, ShiftLabel.Night, false);
+            solution.AddAssignment(31, 6, d, ShiftLabel.Night, false);
+            solution.AddAssignment(29, 6, d, ShiftLabel.Night, false);
+        }
+
+        foreach (var offset in offsets)
+        {
+            var d = start.AddDays(offset + 2);
+            solution.AddAssignment(20, 6, d, ShiftLabel.Night, false);
+            solution.AddAssignment(26, 6, d, ShiftLabel.Night, false);
+            solution.AddAssignment(27, 6, d, ShiftLabel.Night, false);
+            solution.AddAssignment(22, 6, d, ShiftLabel.Night, false);
+        }
+
+        // سهمیه‌های ناقص مطابق گزارش production (مسئول شیفت روی همه شب‌ها برقرار است)
+        foreach (var a in solution.GetUserAllAssignments(23).Where(a => a.ShiftLabel == ShiftLabel.Night).Take(1).ToList())
+        {
+            solution.RemoveAssignment(a.UserId, a.ShiftId, a.Date);
+        }
+
+        foreach (var a in solution.GetUserAllAssignments(26).Where(a => a.ShiftLabel == ShiftLabel.Night).Take(3).ToList())
+        {
+            solution.RemoveAssignment(a.UserId, a.ShiftId, a.Date);
+        }
+
+        foreach (var a in solution.GetUserAllAssignments(27).Where(a => a.ShiftLabel == ShiftLabel.Night).Take(1).ToList())
+        {
+            solution.RemoveAssignment(a.UserId, a.ShiftId, a.Date);
+        }
+
+        foreach (var a in solution.GetUserAllAssignments(31).Where(a => a.ShiftLabel == ShiftLabel.Night).Take(1).ToList())
+        {
+            solution.RemoveAssignment(a.UserId, a.ShiftId, a.Date);
+        }
+
+        ApplyManagers(constraints, solution);
+
+        Assert.True(CountNights(solution, 23) >= 8, $"User 23: {CountNights(solution, 23)}");
+        Assert.True(CountNights(solution, 26) >= 9, $"User 26: {CountNights(solution, 26)}");
+        Assert.True(CountNights(solution, 27) >= 8, $"User 27: {CountNights(solution, 27)}");
+        Assert.True(CountNights(solution, 31) >= 9, $"User 31: {CountNights(solution, 31)}");
+        Assert.DoesNotContain(
+            solution.Violations,
+            v => v.Contains("Shift manager mix unmet", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(
+            solution.Violations,
+            v => v.Contains("سهمیه حداقل شیفت شب", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void ExactNightQuotaGuard_DoesNotRemoveCriticalManagerFromNight()
     {
         var start = new DateTime(2026, 8, 23);

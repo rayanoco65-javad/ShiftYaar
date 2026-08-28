@@ -969,7 +969,8 @@ public static class ExactNightQuotaGuard
             })
             .Where(x => x.Donor != null && CanDonateNight(solution, constraints, x.Donor!, x.Assignment, forHolidayClaim: holidayClaim))
             .Where(x => !ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, x.Assignment))
-            .OrderBy(x => DonorPriority(solution, constraints, x.Donor!, x.Assignment, holidayClaim))
+            .OrderBy(x => ShiftManagerRules.IsManager(x.Donor!) ? 1 : 0)
+            .ThenBy(x => DonorPriority(solution, constraints, x.Donor!, x.Assignment, holidayClaim))
             .Select(x => x.Assignment)
             .FirstOrDefault();
     }
