@@ -1773,14 +1773,14 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// </summary>
         private void ReconcileShiftManagersAndNightQuotas(ShiftSolution solution)
         {
-            for (var round = 0; round < 8; round++)
+            for (var round = 0; round < 10; round++)
             {
-                RunShiftManagerRepairPasses(solution);
                 ExactNightQuotaGuard.Enforce(solution, _constraints);
                 AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
                 DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
                 ShiftCoverageGuard.Enforce(solution, _constraints);
                 ApprovedRequestGuard.ForceApply(solution, _constraints);
+                RunShiftManagerRepairPasses(solution);
 
                 if (!HasUnmetManagerMix(solution) && GetExactNightQuotaViolations(solution).Count == 0)
                 {
@@ -1788,7 +1788,6 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
             }
 
-            // ترکیب مسئول برقرار است — فقط سهمیه شب را بدون دست‌زدن دوباره به مسئول‌ها جبران کن
             if (!HasUnmetManagerMix(solution))
             {
                 for (var pass = 0; pass < 6; pass++)
@@ -1843,12 +1842,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private void RunShiftManagerRepairPasses(ShiftSolution solution)
         {
-            for (var pass = 0; pass < 8; pass++)
+            for (var pass = 0; pass < 12; pass++)
             {
                 var progress = false;
-                foreach (var date in GetDateRange())
+                foreach (var date in OrderDatesForManagerRepair(solution))
                 {
-                    foreach (var shiftReq in _constraints.ShiftRequirements)
+                    foreach (var shiftReq in _constraints.ShiftRequirements
+                                 .OrderByDescending(s => ShiftManagerRules.GetRequirement(s).RequiredTotal))
                     {
                         if (EnsureShiftManagerMixForSlot(solution, shiftReq, date))
                         {
@@ -1862,6 +1862,34 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     break;
                 }
             }
+        }
+
+        private IEnumerable<DateTime> OrderDatesForManagerRepair(ShiftSolution solution)
+        {
+            var dates = GetDateRange().ToList();
+            return dates
+                .OrderByDescending(date =>
+                {
+                    var broken = 0;
+                    foreach (var shiftReq in _constraints.ShiftRequirements)
+                    {
+                        var (requiredTotal, minLevel1) = ShiftManagerRules.GetRequirement(shiftReq);
+                        if (requiredTotal <= 0)
+                        {
+                            continue;
+                        }
+
+                        var assignees = GetRegularAssignees(solution, shiftReq, date);
+                        if (assignees.Count > 0 &&
+                            !ShiftManagerRules.IsSatisfied(assignees, requiredTotal, minLevel1))
+                        {
+                            broken++;
+                        }
+                    }
+
+                    return broken;
+                })
+                .ThenBy(d => d);
         }
 
         private List<string> EnsureShiftManagers(ShiftSolution solution)
@@ -2013,6 +2041,92 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             return false;
         }
 
+        /// <summary>
+        /// L1 را از شب غیرمجاور (فاصله ≥ ۲) به شب هدف منتقل می‌کند تا قوانین شب→شب نشکند.
+        /// </summary>
+        private bool TrySwapManagerFromNonAdjacentNight(
+            ShiftSolution solution,
+            ShiftRequirement targetShift,
+            DateTime date,
+            bool needLevel1,
+            SaShiftAssignment occupantAssignment,
+            UserConstraint occupantUser)
+        {
+            if (targetShift.ShiftLabel != ShiftLabel.Night || !needLevel1)
+            {
+                return false;
+            }
+
+            if (IsProtectedAssignment(solution, occupantAssignment, forManagerInstall: true))
+            {
+                return false;
+            }
+
+            var specialtyId = GetUserSpecialty(occupantAssignment.UserId);
+            var minGap = _constraints.UserConstraints
+                .Where(u => ShiftManagerRules.IsLevel1(u))
+                .Select(u => Math.Max(1, u.MinDaysBetweenNightShifts))
+                .DefaultIfEmpty(1)
+                .Max();
+
+            foreach (var l1 in _constraints.UserConstraints
+                         .Where(u => u.IsActive && ShiftManagerRules.IsLevel1(u) && u.SpecialtyId == specialtyId)
+                         .OrderBy(u => solution.GetUserAllAssignments(u.UserId).Count))
+            {
+                foreach (var donorNight in solution.GetUserAllAssignments(l1.UserId)
+                             .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall)
+                             .OrderByDescending(a => Math.Abs((a.Date.Date - date.Date).Days)))
+                {
+                    var gap = Math.Abs((donorNight.Date.Date - date.Date).Days);
+                    if (gap < minGap + 1)
+                    {
+                        continue;
+                    }
+
+                    if (IsProtectedAssignment(solution, donorNight, forManagerInstall: true))
+                    {
+                        continue;
+                    }
+
+                    if (!IsUserAvailableForManagerInstall(
+                            l1, date, ShiftLabel.Night, solution, donorNight.ShiftId,
+                            ignoreSameDayAssignments: true, relaxNightSpacing: true))
+                    {
+                        continue;
+                    }
+
+                    if (!IsUserAvailableForManagerInstall(
+                            occupantUser, donorNight.Date, ShiftLabel.Night, solution, occupantAssignment.ShiftId,
+                            ignoreSameDayAssignments: true, relaxNightSpacing: true))
+                    {
+                        continue;
+                    }
+
+                    solution.RemoveAssignment(
+                        occupantAssignment.UserId,
+                        occupantAssignment.ShiftId,
+                        occupantAssignment.Date);
+                    solution.RemoveAssignment(l1.UserId, donorNight.ShiftId, donorNight.Date);
+                    AddShiftAssignmentForManagerInstall(solution, l1, targetShift, date);
+                    AddShiftAssignmentForManagerInstall(solution, occupantUser, targetShift, donorNight.Date);
+
+                    if (occupantUser.HasExactNightQuota)
+                    {
+                        ExactNightQuotaGuard.EnforceExactNightQuotaForUser(solution, _constraints, occupantUser);
+                    }
+
+                    if (l1.HasExactNightQuota)
+                    {
+                        ExactNightQuotaGuard.EnforceExactNightQuotaForUser(solution, _constraints, l1);
+                    }
+
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private bool CanDonateNightForManagerReplace(
             ShiftSolution solution,
             UserConstraint user,
@@ -2034,7 +2148,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return true;
             }
 
-            return TrySwapManagerFromOtherShiftSameDay(
+            if (TrySwapManagerFromOtherShiftSameDay(
+                    solution, shiftReq, date, needLevel1, occupantAssignment, occupantUser))
+            {
+                return true;
+            }
+
+            return TrySwapManagerFromNonAdjacentNight(
                 solution, shiftReq, date, needLevel1, occupantAssignment, occupantUser);
         }
 
@@ -2052,7 +2172,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             var candidate = RankManagerCandidates(
                     solution, shiftReq, date, needLevel1, occupantSpecialty, occupantGender, genderLocked)
-                .FirstOrDefault();
+                .FirstOrDefault()
+                ?? RankManagerCandidates(
+                    solution, shiftReq, date, needLevel1, occupantSpecialty, occupantGender, genderLocked,
+                    relaxNightSpacing: true)
+                    .FirstOrDefault();
 
             if (candidate == null)
             {
@@ -2096,7 +2220,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(x => !needLevel1 || ShiftManagerRules.IsLevel1(x.User!))
                 .Where(x => !IsProtectedAssignment(solution, x.Assignment, forManagerInstall: true))
                 .Where(x => IsUserAvailableForManagerInstall(
-                    x.User!, date, targetShift.ShiftLabel, solution, x.Assignment.ShiftId))
+                    x.User!, date, targetShift.ShiftLabel, solution, x.Assignment.ShiftId, ignoreSameDayAssignments: true)
+                    || IsUserAvailableForManagerInstall(
+                        x.User!, date, targetShift.ShiftLabel, solution, x.Assignment.ShiftId,
+                        ignoreSameDayAssignments: true, relaxNightSpacing: true))
                 .OrderBy(x => ShiftManagerRules.GetRequirement(x.ShiftReq!).RequiredTotal)
                 .ThenBy(x => WouldDonorRemovalBreakManagerMix(solution, x.ShiftReq!, date, x.User!) ? 1 : 0)
                 .ThenByDescending(x => needLevel1 && ShiftManagerRules.IsLevel1(x.User!))
@@ -2192,14 +2319,16 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             int specialtyId,
             UserGender occupantGender,
             bool genderLocked,
-            int? ignoreShiftIdForAvailability = null) =>
+            int? ignoreShiftIdForAvailability = null,
+            bool relaxNightSpacing = false) =>
             _constraints.UserConstraints
                 .Where(u => u.IsActive && ShiftManagerRules.IsManager(u))
                 .Where(u => !needLevel1 || ShiftManagerRules.IsLevel1(u))
                 .Where(u => u.SpecialtyId == specialtyId)
                 .Where(u => !genderLocked || u.Gender == occupantGender)
                 .Where(u => IsUserAvailableForManagerInstall(
-                    u, date, shiftReq.ShiftLabel, solution, ignoreShiftIdForAvailability, ignoreSameDayAssignments: true))
+                    u, date, shiftReq.ShiftLabel, solution, ignoreShiftIdForAvailability,
+                    ignoreSameDayAssignments: true, relaxNightSpacing: relaxNightSpacing))
                 .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
                 .OrderByDescending(u => ShiftManagerRules.IsLevel1(u))
                 .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
@@ -2283,7 +2412,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftLabel shiftLabel,
             ShiftSolution solution,
             int? ignoreShiftId = null,
-            bool ignoreSameDayAssignments = false)
+            bool ignoreSameDayAssignments = false,
+            bool relaxNightSpacing = false)
         {
             if (user.UnavailableDates.Any(d => d.Date == date.Date))
             {
@@ -2314,7 +2444,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             if (AdjacentShiftRestRules.WouldConflict(
                     solution.GetUserAllAssignments(user.UserId),
-                    date, shiftLabel, _constraints, ignoreShiftId))
+                    date, shiftLabel, _constraints, ignoreShiftId,
+                    ignoreSettingsControlledAfterNight: relaxNightSpacing))
             {
                 return false;
             }
@@ -2335,7 +2466,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     return false;
                 }
 
-                if (user.MinDaysBetweenNightShifts > 0)
+                if (!relaxNightSpacing && user.MinDaysBetweenNightShifts > 0)
                 {
                     foreach (var n in nights)
                     {

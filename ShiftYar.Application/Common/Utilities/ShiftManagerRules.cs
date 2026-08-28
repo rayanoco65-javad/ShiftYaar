@@ -122,4 +122,46 @@ public static class ShiftManagerRules
         required = Math.Max(0, requiredCount ?? 0);
         minL1 = Math.Clamp(Math.Max(0, minLevel1Count ?? 0), 0, required);
     }
+
+    /// <summary>
+    /// آیا حذف این انتساب ترکیب مسئول شیفت همان روز/شیفت را می‌شکند؟
+    /// </summary>
+    public static bool IsCriticalForManagerMix(
+        ShiftConstraints constraints,
+        ShiftSolution solution,
+        SaShiftAssignment assignment)
+    {
+        var shiftReq = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftId == assignment.ShiftId);
+        if (shiftReq == null)
+        {
+            return false;
+        }
+
+        var (requiredTotal, minLevel1) = GetRequirement(shiftReq);
+        if (requiredTotal <= 0)
+        {
+            return false;
+        }
+
+        var assignees = solution.GetShiftAssignments(assignment.ShiftId, assignment.Date)
+            .Where(a => !a.IsOnCall)
+            .Select(a => constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId))
+            .Where(u => u != null)
+            .Cast<UserConstraint>()
+            .ToList();
+
+        if (!IsSatisfied(assignees, requiredTotal, minLevel1))
+        {
+            return false;
+        }
+
+        var user = assignees.FirstOrDefault(u => u.UserId == assignment.UserId);
+        if (user == null || !IsManager(user))
+        {
+            return false;
+        }
+
+        var without = assignees.Where(u => u.UserId != assignment.UserId).ToList();
+        return !IsSatisfied(without, requiredTotal, minLevel1);
+    }
 }

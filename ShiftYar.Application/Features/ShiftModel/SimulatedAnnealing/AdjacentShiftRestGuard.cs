@@ -41,7 +41,7 @@ public static class AdjacentShiftRestGuard
                     continue;
                 }
 
-                var remove = ChooseRemovable(user, earlier, later, solution);
+                var remove = ChooseRemovable(user, earlier, later, solution, constraints);
                 if (remove == null)
                 {
                     // هر دو محافظت‌شده‌اند — بن‌بست؛ حلقه را قطع کن
@@ -130,8 +130,37 @@ public static class AdjacentShiftRestGuard
         UserConstraint user,
         SaShiftAssignment earlier,
         SaShiftAssignment later,
-        ShiftSolution solution)
+        ShiftSolution solution,
+        ShiftConstraints constraints)
     {
+        var earlierManagerCritical = ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, earlier);
+        var laterManagerCritical = ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, later);
+
+        if (earlierManagerCritical && laterManagerCritical)
+        {
+            return null;
+        }
+
+        if (laterManagerCritical)
+        {
+            if (IsRequestProtected(user, earlier))
+            {
+                return null;
+            }
+
+            return earlier;
+        }
+
+        if (earlierManagerCritical)
+        {
+            if (IsRequestProtected(user, later))
+            {
+                return null;
+            }
+
+            return later;
+        }
+
         // اولویت ۱: درخواست تأییدشده از سهمیهٔ شب Soft قوی‌تر است
         var earlierRequest = IsRequestProtected(user, earlier);
         var laterRequest = IsRequestProtected(user, later);
