@@ -812,6 +812,74 @@ public class ShiftManagerRulesTests
     }
 
     [Fact]
+    public void ForceSatisfyAllDeficits_RebalancesFullMonthCapacity()
+    {
+        var start = new DateTime(2026, 8, 23);
+        var end = new DateTime(2026, 9, 22);
+
+        var users = new List<UserConstraint>();
+        foreach (var id in new[] { 17, 19, 20, 21 })
+        {
+            users.Add(Make(id, 1));
+        }
+
+        foreach (var (id, nights, level) in new (int, int, byte?)[] { (22, 8, 2), (23, 8, 2), (26, 9, 2), (27, 8, null), (31, 9, null) })
+        {
+            var u = Make(id, level);
+            u.ExactNightShiftCount = nights;
+            u.MaxConsecutiveShifts = 3;
+            users.Add(u);
+        }
+
+        users.Add(Make(29, null));
+
+        var constraints = BuildPediatricsConstraints(start);
+        constraints.EndDate = end;
+        constraints.UserConstraints = users;
+        constraints.HardRules.EnforceMaxConsecutiveShifts = true;
+
+        var solution = new ShiftSolution();
+        var day = 0;
+        for (var d = start; d <= end; d = d.AddDays(1))
+        {
+            var ids = (day % 5) switch
+            {
+                0 => new[] { 22, 23, 27, 29 },
+                1 => new[] { 22, 26, 27, 31 },
+                2 => new[] { 23, 26, 31, 29 },
+                3 => new[] { 22, 26, 27, 29 },
+                _ => new[] { 23, 27, 31, 29 }
+            };
+            foreach (var id in ids)
+            {
+                solution.AddAssignment(id, 6, d, ShiftLabel.Night, false);
+            }
+
+            day++;
+        }
+
+        foreach (var id in new[] { 22, 26, 27 })
+        {
+            var remove = solution.GetUserAllAssignments(id)
+                .Where(a => a.ShiftLabel == ShiftLabel.Night)
+                .Take(id == 26 ? 2 : 1);
+            foreach (var a in remove.ToList())
+            {
+                solution.RemoveAssignment(a.UserId, a.ShiftId, a.Date);
+            }
+        }
+
+        ApplyManagers(constraints, solution);
+
+        Assert.True(CountNights(solution, 22) >= 8);
+        Assert.True(CountNights(solution, 26) >= 9);
+        Assert.True(CountNights(solution, 27) >= 8);
+        Assert.DoesNotContain(
+            solution.Violations,
+            v => v.Contains("سهمیه حداقل شیفت شب", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void ExactNightQuotaGuard_DoesNotRemoveCriticalManagerFromNight()
     {
         var start = new DateTime(2026, 8, 23);

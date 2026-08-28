@@ -2837,6 +2837,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
             {
                 scheduler.EnforceMandatoryNightQuotasUntilSatisfied(solution);
+                ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+                ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
             }
 
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);

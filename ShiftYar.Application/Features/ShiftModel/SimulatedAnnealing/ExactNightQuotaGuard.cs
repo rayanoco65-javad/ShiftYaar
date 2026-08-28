@@ -89,6 +89,372 @@ public static class ExactNightQuotaGuard
         user.ExactNightShiftCount.HasValue
         && CountNights(solution, user.UserId) < user.ExactNightShiftCount.Value;
 
+    /// <summary>
+    /// آخرین مرحله: تکمیل اجباری حداقل سهمیه با جابجایی زنجیره‌ای (حتی وقتی ظرفیت ماه پر است).
+    /// </summary>
+    public static void ForceSatisfyAllDeficits(ShiftSolution solution, ShiftConstraints constraints)
+    {
+        var nightShift = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftLabel == ShiftLabel.Night);
+        if (nightShift == null)
+        {
+            return;
+        }
+
+        var stalePasses = 0;
+        for (var pass = 0; pass < 32 && stalePasses < 4; pass++)
+        {
+            var deficits = OrderUsersByDeficit(solution, constraints).ToList();
+            if (deficits.Count == 0)
+            {
+                return;
+            }
+
+            var allowCriticalDonor = pass % 2 == 1;
+            var progress = false;
+            foreach (var user in deficits)
+            {
+                var needed = user.ExactNightShiftCount!.Value - CountNights(solution, user.UserId);
+                for (var i = 0; i < needed; i++)
+                {
+                    if (TryMandatoryAddOneNight(solution, constraints, user, nightShift, allowCriticalDonor))
+                    {
+                        progress = true;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+            }
+
+            if (!progress)
+            {
+                stalePasses++;
+            }
+            else
+            {
+                stalePasses = 0;
+            }
+        }
+    }
+
+    /// <summary>
+    /// جابجایی سراسری بین کسری/مازاد وقتی ظرفیت ماه پر است — شامل اهداکنندهٔ مسئول بحرانی.
+    /// </summary>
+    public static void GlobalRebalanceNightQuotas(ShiftSolution solution, ShiftConstraints constraints)
+    {
+        var nightShift = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftLabel == ShiftLabel.Night);
+        if (nightShift == null)
+        {
+            return;
+        }
+
+        for (var pass = 0; pass < 20; pass++)
+        {
+            var deficits = OrderUsersByDeficit(solution, constraints).ToList();
+            if (deficits.Count == 0)
+            {
+                return;
+            }
+
+            var progress = false;
+            foreach (var receiver in deficits)
+            {
+                if (TryMandatoryAddOneNight(solution, constraints, receiver, nightShift, allowCriticalDonor: true))
+                {
+                    progress = true;
+                    continue;
+                }
+
+                if (TryClaimViaSurplusRotation(solution, constraints, receiver, nightShift))
+                {
+                    progress = true;
+                }
+            }
+
+            if (!progress)
+            {
+                return;
+            }
+        }
+    }
+
+    private static bool TryMandatoryAddOneNight(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user,
+        ShiftRequirement nightShift,
+        bool allowCriticalDonor = false)
+    {
+        var existingDates = GetNights(solution, user.UserId).Select(a => a.Date.Date).ToList();
+        var minGap = ResolveNightSpacingGap(constraints, user);
+        var candidates = PickSpreadDates(
+                AllCandidateDates(constraints, holidayOnly: false).ToList(),
+                existingDates,
+                needed: Math.Max(8, (user.ExactNightShiftCount ?? 8) * 2),
+                minGap)
+            .Concat(AllCandidateDates(constraints, holidayOnly: false))
+            .Distinct()
+            .ToList();
+
+        foreach (var date in candidates)
+        {
+            if (TryClaimNightForDeficitUser(
+                    solution, constraints, user, nightShift, date, depth: 0, allowCriticalDonor))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// شب مازاد یک کاربر دیگر را — با جابجایی زنجیره‌ای در صورت نیاز — به گیرنده منتقل می‌کند.
+    /// </summary>
+    private static bool TryClaimViaSurplusRotation(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint receiver,
+        ShiftRequirement nightShift)
+    {
+        var receiverBefore = CountNights(solution, receiver.UserId);
+
+        foreach (var (donor, night) in EnumerateSurplusNights(solution, constraints, excludeUserId: receiver.UserId))
+        {
+            var date = night.Date.Date;
+            if (!IsPersonallyFeasibleNightDate(solution, constraints, receiver, nightShift, date, holidayOnly: false)
+                || !CanAcceptNightAfterClearing(solution, constraints, receiver, nightShift, date))
+            {
+                continue;
+            }
+
+            var backup = solution.Clone();
+            solution.RemoveAssignment(donor.UserId, night.ShiftId, night.Date);
+            ClearConflictingForNight(solution, constraints, receiver, date);
+            solution.AddAssignment(receiver.UserId, nightShift.ShiftId, date, ShiftLabel.Night, isOnCall: false);
+
+            if (CountNights(solution, receiver.UserId) <= receiverBefore)
+            {
+                RestoreSolutionFrom(solution, backup);
+                continue;
+            }
+
+            var donorMin = donor.ExactNightShiftCount;
+            var donorOk = !donorMin.HasValue || CountNights(solution, donor.UserId) >= donorMin.Value;
+            if (!donorOk)
+            {
+                donorOk = TryRestoreDonorMinimum(
+                    solution, constraints, donor, nightShift, depth: 0, allowCriticalDonor: true);
+            }
+
+            if (donorOk)
+            {
+                return true;
+            }
+
+            RestoreSolutionFrom(solution, backup);
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<(UserConstraint Donor, SaShiftAssignment Night)> EnumerateSurplusNights(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        int excludeUserId)
+    {
+        foreach (var donor in constraints.UserConstraints.Where(u => u.UserId != excludeUserId))
+        {
+            var nights = GetNights(solution, donor.UserId);
+            var min = donor.ExactNightShiftCount ?? 0;
+            var surplus = donor.HasExactNightQuota ? nights.Count - min : nights.Count;
+            if (surplus <= 0)
+            {
+                continue;
+            }
+
+            foreach (var night in nights
+                         .Where(a => !IsProtected(constraints, donor.UserId, a))
+                         .OrderByDescending(a => constraints.IsHolidayWeekendNight(a.Date) ? 0 : 1)
+                         .ThenByDescending(a => a.Date))
+            {
+                if (!CanDonateNight(solution, constraints, donor, night, forHolidayClaim: false))
+                {
+                    continue;
+                }
+
+                yield return (donor, night);
+            }
+        }
+    }
+
+    private static bool TryClaimNightForDeficitUser(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user,
+        ShiftRequirement nightShift,
+        DateTime date,
+        int depth,
+        bool allowCriticalDonor = false)
+    {
+        if (depth > 6 || !HasNightQuotaDeficit(solution, user))
+        {
+            return false;
+        }
+
+        if (!IsPersonallyFeasibleNightDate(solution, constraints, user, nightShift, date, holidayOnly: false))
+        {
+            return false;
+        }
+
+        ClearConflictingForNight(solution, constraints, user, date);
+
+        if (!CanAcceptNightAfterClearing(solution, constraints, user, nightShift, date))
+        {
+            return false;
+        }
+
+        var minGap = ResolveNightSpacingGap(constraints, user);
+        if (ViolatesNightSpacing(solution, constraints, user, date, minGap))
+        {
+            var blocking = GetNights(solution, user.UserId)
+                .Where(a => Math.Abs((a.Date.Date - date.Date).Days) <= minGap)
+                .OrderBy(a => Math.Abs((a.Date.Date - date.Date).Days))
+                .FirstOrDefault();
+            if (blocking == null)
+            {
+                return false;
+            }
+
+            var moved = TryMoveNightToAnyFeasibleDate(
+                solution, constraints, user, nightShift, blocking.Date.Date, excludeDate: date, minGap);
+            if (!moved || ViolatesNightSpacing(solution, constraints, user, date, minGap))
+            {
+                return false;
+            }
+        }
+
+        if (HasSpecialtyCapacity(solution, constraints, nightShift, date, user.SpecialtyId))
+        {
+            solution.AddAssignment(user.UserId, nightShift.ShiftId, date, ShiftLabel.Night, isOnCall: false);
+            return true;
+        }
+
+        var donorAssignment = FindMandatoryDonor(
+            solution, constraints, nightShift, date, user.UserId, allowCriticalDonor);
+        if (donorAssignment == null)
+        {
+            return false;
+        }
+
+        var donor = constraints.UserConstraints.FirstOrDefault(u => u.UserId == donorAssignment.UserId);
+        if (donor == null)
+        {
+            return false;
+        }
+
+        var receiverBefore = CountNights(solution, user.UserId);
+        var backup = solution.Clone();
+        var donorMin = donor.ExactNightShiftCount;
+
+        solution.RemoveAssignment(donorAssignment.UserId, donorAssignment.ShiftId, donorAssignment.Date);
+        solution.AddAssignment(user.UserId, nightShift.ShiftId, date, ShiftLabel.Night, isOnCall: false);
+
+        var donorOk = !donorMin.HasValue || CountNights(solution, donor.UserId) >= donorMin.Value;
+        if (!donorOk)
+        {
+            donorOk = TryRestoreDonorMinimum(
+                solution, constraints, donor, nightShift, depth, allowCriticalDonor);
+        }
+
+        if (donorOk && CountNights(solution, user.UserId) > receiverBefore)
+        {
+            return true;
+        }
+
+        RestoreSolutionFrom(solution, backup);
+        return false;
+    }
+
+    private static bool TryRestoreDonorMinimum(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint donor,
+        ShiftRequirement nightShift,
+        int depth,
+        bool allowCriticalDonor)
+    {
+        if (!donor.ExactNightShiftCount.HasValue)
+        {
+            return true;
+        }
+
+        if (CountNights(solution, donor.UserId) >= donor.ExactNightShiftCount.Value)
+        {
+            return true;
+        }
+
+        if (depth > 5)
+        {
+            return false;
+        }
+
+        foreach (var donorDate in AllCandidateDates(constraints, holidayOnly: false))
+        {
+            if (TryClaimNightForDeficitUser(
+                    solution, constraints, donor, nightShift, donorDate, depth + 1, allowCriticalDonor)
+                && CountNights(solution, donor.UserId) >= donor.ExactNightShiftCount.Value)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static SaShiftAssignment? FindMandatoryDonor(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        ShiftRequirement nightShift,
+        DateTime date,
+        int receiverUserId,
+        bool allowCriticalDonor = false)
+    {
+        return solution.GetShiftAssignments(nightShift.ShiftId, date)
+            .Where(a => !a.IsOnCall && a.UserId != receiverUserId)
+            .Select(a =>
+            {
+                var donor = constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId);
+                return (Assignment: a, Donor: donor);
+            })
+            .Where(x => x.Donor != null)
+            .Where(x => !IsProtected(constraints, x.Donor!.UserId, x.Assignment))
+            .Where(x => allowCriticalDonor
+                        || !ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, x.Assignment))
+            .OrderBy(x => x.Donor!.HasExactNightQuota ? 1 : 0)
+            .ThenBy(x => CanDonateNight(solution, constraints, x.Donor!, x.Assignment) ? 0 : 1)
+            .ThenBy(x => DonorPriority(solution, constraints, x.Donor!, x.Assignment, holidayClaim: false))
+            .Select(x => x.Assignment)
+            .FirstOrDefault();
+    }
+
+    private static void RestoreSolutionFrom(ShiftSolution target, ShiftSolution backup)
+    {
+        target.Assignments.Clear();
+        foreach (var assignment in backup.Assignments.Values)
+        {
+            target.AddAssignment(
+                assignment.UserId,
+                assignment.ShiftId,
+                assignment.Date,
+                assignment.ShiftLabel,
+                assignment.IsOnCall);
+        }
+
+        target.Score = backup.Score;
+    }
+
     /// <summary>جبران فوری سهمیه شب یک کاربر پس از جابجایی برای مسئول شیفت.</summary>
     public static void EnforceExactNightQuotaForUser(
         ShiftSolution solution,
@@ -1656,7 +2022,13 @@ public static class ExactNightQuotaGuard
 
         var forAdjacency = AssignmentsIgnoringClearableForNight(solution, constraints, user, date)
             .Where(a => !(ignoreUserNightOnDate && a.ShiftLabel == ShiftLabel.Night && a.Date.Date == date.Date));
-        if (AdjacentShiftRestRules.WouldConflict(forAdjacency, date, ShiftLabel.Night, constraints))
+        if (AdjacentShiftRestRules.WouldConflict(
+                forAdjacency,
+                date,
+                ShiftLabel.Night,
+                constraints,
+                ignoreShiftId: null,
+                ignoreSettingsControlledAfterNight: HasNightQuotaDeficit(solution, user)))
         {
             return false;
         }
