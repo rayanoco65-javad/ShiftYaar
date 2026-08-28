@@ -1509,7 +1509,6 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// </summary>
         public void ApplyMandatoryConstraints(ShiftSolution solution)
         {
-            var managerWarnings = EnsureShiftManagers(solution);
             ApprovedRequestGuard.ForceApply(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             ShiftEligibilityGuard.StripIneligibleAssignments(solution, _constraints);
@@ -1572,6 +1571,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             // آخرین حرف: ON تأییدشده بعد از همه گاردها دوباره اعمال شود
             ApprovedRequestGuard.ForceApply(solution, _constraints);
+
+            // مسئول شیفت بعد از همه گاردها — وگرنه Coverage/موظفی/سابقه ترکیب را می‌شکنند
+            var managerWarnings = EnsureShiftManagers(solution);
 
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
@@ -1856,7 +1858,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                                 .Where(u => u.SpecialtyId == occupantSpecialty)
                                 .Where(u => !genderLocked || u.Gender == occupantGender)
                                 .Where(u => IsUserAvailableForShift(u, date, shiftReq.ShiftLabel, solution))
-                                .Where(u => !solution.GetUserAssignments(u.UserId, date).Any())
+                                .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
                                 .OrderByDescending(u => ShiftManagerRules.IsLevel1(u))
                                 .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
                                 .FirstOrDefault();
@@ -1870,6 +1872,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                                 occupant.Assignment.UserId,
                                 occupant.Assignment.ShiftId,
                                 occupant.Assignment.Date);
+                            RemoveConflictingDailyAssignments(
+                                solution,
+                                candidate.UserId,
+                                date,
+                                shiftReq.ShiftId,
+                                shiftReq.ShiftLabel);
                             solution.AddAssignment(
                                 candidate.UserId,
                                 shiftReq.ShiftId,
