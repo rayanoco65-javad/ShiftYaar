@@ -621,6 +621,132 @@ public class ShiftManagerRulesTests
     }
 
     [Fact]
+    public void ApplyMandatoryConstraints_FixesAllReportedNightManagerMixDates_InFullMonth()
+    {
+        var start = new DateTime(2026, 8, 23);
+        var end = new DateTime(2026, 9, 22);
+        var failingDates = new[]
+        {
+            new DateTime(2026, 8, 23),
+            new DateTime(2026, 8, 28),
+            new DateTime(2026, 9, 1),
+            new DateTime(2026, 9, 7),
+            new DateTime(2026, 9, 11),
+            new DateTime(2026, 9, 13)
+        };
+
+        var l1Ids = new[] { 12, 14, 15, 17, 18, 19, 20, 21 };
+        var l2Ids = new[] { 22, 23, 24, 25, 26 };
+        var fillerIds = new[] { 27, 28, 29, 30, 31 };
+
+        var users = new List<UserConstraint>();
+        foreach (var id in l1Ids)
+        {
+            users.Add(id is 12 or 15 ? MakeFixedMorning(id, 1) : Make(id, 1));
+        }
+
+        foreach (var id in l2Ids)
+        {
+            var u = Make(id, 2);
+            if (id is 22 or 23)
+            {
+                u.ExactNightShiftCount = 8;
+            }
+
+            users.Add(u);
+        }
+
+        foreach (var id in fillerIds)
+        {
+            var u = Make(id, null);
+            u.ExactNightShiftCount = id == 31 ? 9 : 8;
+            users.Add(u);
+        }
+
+        var constraints = BuildPediatricsConstraints(start);
+        constraints.EndDate = end;
+        constraints.UserConstraints = users;
+
+        var solution = new ShiftSolution();
+        foreach (var date in failingDates)
+        {
+            solution.AddAssignment(22, 6, date, ShiftLabel.Night, false);
+            solution.AddAssignment(23, 6, date, ShiftLabel.Night, false);
+            solution.AddAssignment(27, 6, date, ShiftLabel.Night, false);
+            solution.AddAssignment(30, 6, date, ShiftLabel.Night, false);
+        }
+
+        // پر کردن سهمیه شب تا Enforce نتواند با جابجایی، L1 را از شب بردارد
+        for (var d = start; d <= end; d = d.AddDays(1))
+        {
+            if (failingDates.Contains(d))
+            {
+                continue;
+            }
+
+            var dayIndex = (d - start).Days;
+            if (dayIndex % 4 == 0)
+            {
+                solution.AddAssignment(22, 6, d, ShiftLabel.Night, false);
+            }
+
+            if (dayIndex % 4 == 1)
+            {
+                solution.AddAssignment(23, 6, d, ShiftLabel.Night, false);
+            }
+
+            if (dayIndex % 4 == 2)
+            {
+                solution.AddAssignment(27, 6, d, ShiftLabel.Night, false);
+            }
+
+            if (dayIndex % 4 == 3)
+            {
+                solution.AddAssignment(31, 6, d, ShiftLabel.Night, false);
+            }
+        }
+
+        ApplyManagers(constraints, solution);
+
+        foreach (var date in failingDates)
+        {
+            var nightUsers = GetAssignees(constraints, solution, 6, date);
+            Assert.True(
+                ShiftManagerRules.IsSatisfied(nightUsers, 2, 1),
+                $"Night manager mix still broken on {date:yyyy-MM-dd}");
+        }
+
+        Assert.DoesNotContain(
+            solution.Violations,
+            v => v.Contains("Shift manager mix unmet", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ExactNightQuotaGuard_DoesNotRemoveCriticalManagerFromNight()
+    {
+        var start = new DateTime(2026, 8, 23);
+        var l1 = Make(19, 1);
+        var l2a = Make(22, 2);
+        l2a.ExactNightShiftCount = 8;
+        var l2b = Make(23, 2);
+        l2b.ExactNightShiftCount = 8;
+        var filler = Make(27, null);
+        filler.ExactNightShiftCount = 8;
+
+        var constraints = BuildPediatricsConstraints(start);
+        constraints.UserConstraints = [l1, l2a, l2b, filler];
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(19, 6, start, ShiftLabel.Night, false);
+        solution.AddAssignment(22, 6, start, ShiftLabel.Night, false);
+        solution.AddAssignment(23, 6, start, ShiftLabel.Night, false);
+        solution.AddAssignment(27, 6, start, ShiftLabel.Night, false);
+
+        Assert.True(ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, solution.GetShiftAssignments(6, start).First(a => a.UserId == 19)));
+        Assert.False(ExactNightQuotaGuard.CanDonateNight(solution, constraints, l1, solution.GetShiftAssignments(6, start).First(a => a.UserId == 19)));
+    }
+
+    [Fact]
     public void ValidateShiftManagerCounts_RejectsMinLevel1AboveRequired()
     {
         var error = ShiftManagerRules.ValidateShiftManagerCounts(1, 2);

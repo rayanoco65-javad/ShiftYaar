@@ -1574,13 +1574,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             // مسئول شیفت + سهمیه شب: چند پاس تا هر دو با هم پایدار شوند
             ReconcileShiftManagersAndNightQuotas(solution);
-
-            ExactNightQuotaGuard.Enforce(solution, _constraints);
-            ApprovedRequestGuard.ForceApply(solution, _constraints);
+            StabilizeManagerMixAndNightQuotas(solution);
 
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
-            solution.Violations.AddRange(CollectManagerMixWarnings(solution));
+            solution.Violations.AddRange(ShiftManagerMixGuard.GetViolations(solution, _constraints));
             solution.Violations.AddRange(ApprovedRequestGuard.GetUnmetViolations(solution, _constraints));
             solution.Violations.AddRange(ShiftEligibilityGuard.GetViolations(solution, _constraints));
             solution.Violations.AddRange(AdjacentShiftRestGuard.GetViolations(solution, _constraints));
@@ -1772,6 +1770,53 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         }
 
         /// <summary>
+        /// ترمیم قطعی ترکیب مسئول — قابل فراخوانی از ShiftManagerMixGuard.
+        /// </summary>
+        public void EnforceShiftManagerMix(ShiftSolution solution)
+        {
+            RunShiftManagerRepairPasses(solution);
+        }
+
+        /// <summary>
+        /// حلقه نهایی: سهمیه شب نباید ترکیب مسئول را بشکند؛ پس از هر Enforce دوباره ترمیم می‌شود.
+        /// </summary>
+        public void StabilizeManagerMixAndNightQuotas(ShiftSolution solution)
+        {
+            for (var round = 0; round < 8; round++)
+            {
+                ExactNightQuotaGuard.Enforce(solution, _constraints);
+                AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+                DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
+                ApprovedRequestGuard.ForceApply(solution, _constraints);
+                RunShiftManagerRepairPasses(solution);
+                ApprovedRequestGuard.ForceApply(solution, _constraints);
+
+                if (!HasUnmetManagerMix(solution) && GetExactNightQuotaViolations(solution).Count == 0)
+                {
+                    return;
+                }
+            }
+
+            for (var pass = 0; pass < 10 && HasUnmetManagerMix(solution); pass++)
+            {
+                RunShiftManagerRepairPasses(solution);
+                ApprovedRequestGuard.ForceApply(solution, _constraints);
+            }
+
+            for (var round = 0; round < 4; round++)
+            {
+                ExactNightQuotaGuard.Enforce(solution, _constraints);
+                if (!HasUnmetManagerMix(solution))
+                {
+                    break;
+                }
+
+                RunShiftManagerRepairPasses(solution);
+                ApprovedRequestGuard.ForceApply(solution, _constraints);
+            }
+        }
+
+        /// <summary>
         /// پاس‌های متناوب: ترمیم مسئول شیفت → سهمیه شب → درخواست ON.
         /// </summary>
         private void ReconcileShiftManagersAndNightQuotas(ShiftSolution solution)
@@ -1808,39 +1853,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         }
 
         private bool HasUnmetManagerMix(ShiftSolution solution) =>
-            CollectManagerMixWarnings(solution).Count > 0;
+            ShiftManagerMixGuard.GetViolations(solution, _constraints).Count > 0;
 
-        private List<string> CollectManagerMixWarnings(ShiftSolution solution)
-        {
-            var warnings = new List<string>();
-
-            foreach (var date in GetDateRange())
-            {
-                foreach (var shiftReq in _constraints.ShiftRequirements)
-                {
-                    var (requiredTotal, minLevel1) = ShiftManagerRules.GetRequirement(shiftReq);
-                    if (requiredTotal <= 0)
-                    {
-                        continue;
-                    }
-
-                    var assignees = GetRegularAssignees(solution, shiftReq, date);
-                    if (assignees.Count == 0)
-                    {
-                        continue;
-                    }
-
-                    if (!ShiftManagerRules.IsSatisfied(assignees, requiredTotal, minLevel1))
-                    {
-                        warnings.Add(
-                            $"Shift manager mix unmet for {shiftReq.ShiftLabel} on {date:yyyy-MM-dd} " +
-                            $"(need total≥{requiredTotal}, level1≥{minLevel1}).");
-                    }
-                }
-            }
-
-            return warnings;
-        }
+        private List<string> CollectManagerMixWarnings(ShiftSolution solution) =>
+            ShiftManagerMixGuard.GetViolations(solution, _constraints);
 
         private void RunShiftManagerRepairPasses(ShiftSolution solution)
         {
@@ -2034,7 +2050,6 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     {
                         ExactNightQuotaGuard.EnforceExactNightQuotaForUser(
                             solution, _constraints, occupant.User!);
-                        ExactNightQuotaGuard.Enforce(solution, _constraints);
                     }
 
                     return true;
@@ -2179,6 +2194,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 ?? RankManagerCandidates(
                     solution, shiftReq, date, needLevel1, occupantSpecialty, occupantGender, genderLocked,
                     relaxNightSpacing: true)
+                    .FirstOrDefault()
+                ?? RankManagerCandidates(
+                    solution, shiftReq, date, needLevel1, occupantSpecialty, occupantGender, genderLocked,
+                    relaxNightSpacing: true, mandatoryInstall: true)
                     .FirstOrDefault();
 
             if (candidate == null)
@@ -2226,7 +2245,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     x.User!, date, targetShift.ShiftLabel, solution, x.Assignment.ShiftId, ignoreSameDayAssignments: true)
                     || IsUserAvailableForManagerInstall(
                         x.User!, date, targetShift.ShiftLabel, solution, x.Assignment.ShiftId,
-                        ignoreSameDayAssignments: true, relaxNightSpacing: true))
+                        ignoreSameDayAssignments: true, relaxNightSpacing: true)
+                    || IsUserAvailableForManagerInstall(
+                        x.User!, date, targetShift.ShiftLabel, solution, x.Assignment.ShiftId,
+                        ignoreSameDayAssignments: true, mandatoryInstall: true))
                 .OrderBy(x => ShiftManagerRules.GetRequirement(x.ShiftReq!).RequiredTotal)
                 .ThenBy(x => WouldDonorRemovalBreakManagerMix(solution, x.ShiftReq!, date, x.User!) ? 1 : 0)
                 .ThenByDescending(x => needLevel1 && ShiftManagerRules.IsLevel1(x.User!))
@@ -2323,7 +2345,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             UserGender occupantGender,
             bool genderLocked,
             int? ignoreShiftIdForAvailability = null,
-            bool relaxNightSpacing = false) =>
+            bool relaxNightSpacing = false,
+            bool mandatoryInstall = false) =>
             _constraints.UserConstraints
                 .Where(u => u.IsActive && ShiftManagerRules.IsManager(u))
                 .Where(u => !needLevel1 || ShiftManagerRules.IsLevel1(u))
@@ -2331,7 +2354,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => !genderLocked || u.Gender == occupantGender)
                 .Where(u => IsUserAvailableForManagerInstall(
                     u, date, shiftReq.ShiftLabel, solution, ignoreShiftIdForAvailability,
-                    ignoreSameDayAssignments: true, relaxNightSpacing: relaxNightSpacing))
+                    ignoreSameDayAssignments: true,
+                    relaxNightSpacing: relaxNightSpacing || mandatoryInstall,
+                    mandatoryInstall: mandatoryInstall))
                 .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
                 .OrderByDescending(u => ShiftManagerRules.IsLevel1(u))
                 .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
@@ -2416,7 +2441,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftSolution solution,
             int? ignoreShiftId = null,
             bool ignoreSameDayAssignments = false,
-            bool relaxNightSpacing = false)
+            bool relaxNightSpacing = false,
+            bool mandatoryInstall = false)
         {
             if (user.UnavailableDates.Any(d => d.Date == date.Date))
             {
@@ -2445,15 +2471,16 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return false;
             }
 
+            var relaxAdjacency = relaxNightSpacing || mandatoryInstall;
             if (AdjacentShiftRestRules.WouldConflict(
                     solution.GetUserAllAssignments(user.UserId),
                     date, shiftLabel, _constraints, ignoreShiftId,
-                    ignoreSettingsControlledAfterNight: relaxNightSpacing))
+                    ignoreSettingsControlledAfterNight: relaxAdjacency))
             {
                 return false;
             }
 
-            // الزام مسئول شیفت سخت‌تر از سقف روزهای کاری متوالی است
+            // الزام مسئول شیفت سخت‌تر از سقف روزهای کاری متوالی و فاصله شب است
             if (shiftLabel == ShiftLabel.Night)
             {
                 var nights = solution.GetUserAllAssignments(user.UserId)
@@ -2463,13 +2490,14 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                                 a.Date.Date != date.Date)
                     .ToList();
 
-                if (_constraints.HardRules.EnforceNightShiftMonthlyCap &&
-                    nights.Count >= user.MaxNightShiftsPerMonth)
+                if (!mandatoryInstall
+                    && _constraints.HardRules.EnforceNightShiftMonthlyCap
+                    && nights.Count >= user.MaxNightShiftsPerMonth)
                 {
                     return false;
                 }
 
-                if (!relaxNightSpacing && user.MinDaysBetweenNightShifts > 0)
+                if (!relaxAdjacency && user.MinDaysBetweenNightShifts > 0)
                 {
                     foreach (var n in nights)
                     {

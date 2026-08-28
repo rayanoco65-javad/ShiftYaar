@@ -635,7 +635,9 @@ public static class ExactNightQuotaGuard
                 }
 
                 var bridge = constraints.UserConstraints.FirstOrDefault(u => u.UserId == occupant.UserId);
-                if (bridge == null || IsProtected(constraints, bridge.UserId, occupant))
+                if (bridge == null
+                    || IsProtected(constraints, bridge.UserId, occupant)
+                    || ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, occupant))
                 {
                     continue;
                 }
@@ -966,6 +968,7 @@ public static class ExactNightQuotaGuard
                 return (Assignment: a, Donor: donor);
             })
             .Where(x => x.Donor != null && CanDonateNight(solution, constraints, x.Donor!, x.Assignment, forHolidayClaim: holidayClaim))
+            .Where(x => !ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, x.Assignment))
             .OrderBy(x => DonorPriority(solution, constraints, x.Donor!, x.Assignment, holidayClaim))
             .Select(x => x.Assignment)
             .FirstOrDefault();
@@ -1015,6 +1018,11 @@ public static class ExactNightQuotaGuard
         }
 
         if (IsProtected(constraints, user.UserId, assignment))
+        {
+            return false;
+        }
+
+        if (ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, assignment))
         {
             return false;
         }
