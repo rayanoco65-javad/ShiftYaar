@@ -1575,6 +1575,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             // مسئول شیفت + سهمیه شب: چند پاس تا هر دو با هم پایدار شوند
             ReconcileShiftManagersAndNightQuotas(solution);
 
+            ExactNightQuotaGuard.Enforce(solution, _constraints);
+            ApprovedRequestGuard.ForceApply(solution, _constraints);
+
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
             solution.Violations.AddRange(CollectManagerMixWarnings(solution));
@@ -1807,8 +1810,21 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             RunShiftManagerRepairPasses(solution);
             ApprovedRequestGuard.ForceApply(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
-            RunShiftManagerRepairPasses(solution);
-            ApprovedRequestGuard.ForceApply(solution, _constraints);
+
+            for (var finalize = 0; finalize < 8; finalize++)
+            {
+                ExactNightQuotaGuard.Enforce(solution, _constraints);
+                AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+                DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
+                ApprovedRequestGuard.ForceApply(solution, _constraints);
+                RunShiftManagerRepairPasses(solution);
+                ApprovedRequestGuard.ForceApply(solution, _constraints);
+
+                if (!HasUnmetManagerMix(solution) && GetExactNightQuotaViolations(solution).Count == 0)
+                {
+                    break;
+                }
+            }
         }
 
         private bool HasUnmetManagerMix(ShiftSolution solution) =>
@@ -2038,6 +2054,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     {
                         ExactNightQuotaGuard.EnforceExactNightQuotaForUser(
                             solution, _constraints, occupant.User!);
+                        ExactNightQuotaGuard.Enforce(solution, _constraints);
                     }
 
                     return true;

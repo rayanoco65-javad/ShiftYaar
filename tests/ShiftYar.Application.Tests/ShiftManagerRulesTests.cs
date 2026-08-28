@@ -547,6 +547,47 @@ public class ShiftManagerRulesTests
         solution.GetUserAllAssignments(userId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
 
     [Fact]
+    public void ApplyMandatoryConstraints_RestoresMissingNightQuotaAfterReconcile()
+    {
+        var start = new DateTime(2026, 8, 1);
+        var u19 = Make(19, level: 1);
+        var u22 = Make(22, level: 2);
+        u22.ExactNightShiftCount = 8;
+        var u23 = Make(23, level: 2);
+        u23.ExactNightShiftCount = 8;
+        var u27 = Make(27, level: null);
+        u27.ExactNightShiftCount = 8;
+        var u30 = Make(30, level: null);
+
+        var constraints = BuildPediatricsConstraints(start);
+        constraints.EndDate = start.AddDays(30);
+        constraints.UserConstraints = [u19, u22, u23, u27, u30];
+
+        var solution = new ShiftSolution();
+        foreach (var offset in new[] { 0, 3, 6, 9, 12, 15, 18 })
+        {
+            solution.AddAssignment(22, 6, start.AddDays(offset), ShiftLabel.Night, false);
+        }
+
+        solution.AddAssignment(23, 6, start.AddDays(1), ShiftLabel.Night, false);
+        solution.AddAssignment(23, 6, start.AddDays(4), ShiftLabel.Night, false);
+        solution.AddAssignment(27, 6, start.AddDays(2), ShiftLabel.Night, false);
+        solution.AddAssignment(30, 6, start.AddDays(5), ShiftLabel.Night, false);
+        solution.AddAssignment(22, 6, start.AddDays(22), ShiftLabel.Night, false);
+        solution.AddAssignment(23, 6, start.AddDays(23), ShiftLabel.Night, false);
+        solution.AddAssignment(27, 6, start.AddDays(24), ShiftLabel.Night, false);
+        solution.AddAssignment(30, 6, start.AddDays(25), ShiftLabel.Night, false);
+
+        ApplyManagers(constraints, solution);
+
+        Assert.True(CountNights(solution, 22) >= 8);
+        Assert.DoesNotContain(
+            solution.Violations,
+            v => v.Contains("سهمیه حداقل شیفت شب", StringComparison.OrdinalIgnoreCase)
+                 && v.Contains("شناسه 22", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void EnsureShiftManagers_SwapEveningL1ToNight_WithFreeL1BackfillEvening()
     {
         var start = new DateTime(2026, 8, 23);
