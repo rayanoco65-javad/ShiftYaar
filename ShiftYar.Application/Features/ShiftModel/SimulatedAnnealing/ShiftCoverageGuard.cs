@@ -17,9 +17,19 @@ public static class ShiftCoverageGuard
     public static void Enforce(ShiftSolution solution, ShiftConstraints constraints)
     {
         StripExcessCoverage(solution, constraints);
-        FillMissingCoverage(solution, constraints);
+        FillMissingCoverage(solution, constraints, reserveUnmetOnSlots: true);
         StripExcessCoverage(solution, constraints);
     }
+
+    /// <summary>
+    /// پر کردن جای خالی بعد از ForceApply — اسلات ON ناموفق دیگر ظرفیت را قفل نمی‌کند.
+    /// </summary>
+    public static void FillRemainingAfterForceApply(ShiftSolution solution, ShiftConstraints constraints)
+    {
+        FillMissingCoverage(solution, constraints, reserveUnmetOnSlots: false);
+    }
+
+    /// <summary>
 
     /// <summary>
     /// پس از گاردهای عدالت: حذف مازاد غیر ON، پر کردن جای خالی، سپس ForceApply به‌عنوان آخرین حرف مطلق.
@@ -30,7 +40,7 @@ public static class ShiftCoverageGuard
         for (var pass = 0; pass < 8; pass++)
         {
             StripExcessCoverage(solution, constraints);
-            FillMissingCoverage(solution, constraints);
+            FillMissingCoverage(solution, constraints, reserveUnmetOnSlots: true);
             ApprovedRequestGuard.ForceApply(solution, constraints);
 
             if (!HasAnyOverCapacity(solution, constraints))
@@ -42,7 +52,10 @@ public static class ShiftCoverageGuard
         ApprovedRequestGuard.ForceApply(solution, constraints);
     }
 
-    private static void FillMissingCoverage(ShiftSolution solution, ShiftConstraints constraints)
+    private static void FillMissingCoverage(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        bool reserveUnmetOnSlots)
     {
         var dates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
             .Select(i => constraints.StartDate.Date.AddDays(i))
@@ -56,7 +69,7 @@ public static class ShiftCoverageGuard
                 {
                     foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
                     {
-                        FillSpecialty(solution, constraints, shiftReq, date, specialtyReq);
+                        FillSpecialty(solution, constraints, shiftReq, date, specialtyReq, reserveUnmetOnSlots);
                     }
                 }
             }
@@ -264,7 +277,8 @@ public static class ShiftCoverageGuard
         ShiftConstraints constraints,
         ShiftRequirement shiftReq,
         DateTime date,
-        SpecialtyRequirement specialtyReq)
+        SpecialtyRequirement specialtyReq,
+        bool reserveUnmetOnSlots)
     {
         var day = specialtyReq.ForDay(constraints.IsHoliday(date));
         var needed = day.RequiredTotalCount;
@@ -273,7 +287,8 @@ public static class ShiftCoverageGuard
             return;
         }
 
-        if (HasUnmetRequiredSlotForShift(solution, constraints, shiftReq, date, specialtyReq))
+        if (reserveUnmetOnSlots
+            && HasUnmetRequiredSlotForShift(solution, constraints, shiftReq, date, specialtyReq))
         {
             return;
         }

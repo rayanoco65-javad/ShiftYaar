@@ -1573,7 +1573,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             // آخرین حرف: ON تأییدشده بعد از همه گاردها دوباره اعمال شود
             ApprovedRequestGuard.ForceApply(solution, _constraints);
 
-            // مسئول شیفت + سهمیه شب — یک حلقهٔ نهایی سبک (بدون تکرار ۴۰+ پاس سنگین)
+            // پوشش + مسئول شیفت + سهمیه + سقف روز متوالی — حلقهٔ نهایی محدود
             FinalizeMandatoryConstraints(solution);
 
             solution.Score = CalculateSolutionScore(solution);
@@ -1910,34 +1910,49 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         }
 
         /// <summary>
-        /// حلقهٔ نهایی: مسئول شیفت ↔ سهمیه شب ↔ قیود روزانه/مجاورت — با حداکثر ۳ دور.
+        /// حلقهٔ نهایی محدود: پوشش → مسئول → سهمیه → مجاورت → سقف روز متوالی.
+        /// پوشش و مسئول شیفت بعد از strip دوباره اعمال می‌شوند تا جای خالی و mix باقی نماند.
         /// </summary>
         private void FinalizeMandatoryConstraints(ShiftSolution solution)
         {
-            for (var round = 0; round < 3; round++)
+            for (var round = 0; round < 5; round++)
             {
+                ApprovedRequestGuard.ForceApply(solution, _constraints);
+                ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
                 RunShiftManagerRepairPasses(solution);
                 ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
                 AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
                 DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
+                MaxConsecutiveWorkdayGuard.Enforce(solution, _constraints);
                 ApprovedRequestGuard.ForceApply(solution, _constraints);
 
-                if (AreExactNightQuotasSatisfied(solution, out _)
-                    && !HasUnmetManagerMix(solution)
-                    && AdjacentShiftRestGuard.GetViolations(solution, _constraints).Count == 0
-                    && DailyDuplicateAssignmentGuard.GetViolations(solution, _constraints).Count == 0)
+                if (IsMandatoryStable(solution))
                 {
+                    ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
+                    RunShiftManagerRepairPasses(solution);
                     return;
                 }
             }
 
+            ApprovedRequestGuard.ForceApply(solution, _constraints);
+            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
+            RunShiftManagerRepairPasses(solution);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(solution, _constraints);
+            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
+            RunShiftManagerRepairPasses(solution);
             ApprovedRequestGuard.ForceApply(solution, _constraints);
-            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
         }
+
+        private bool IsMandatoryStable(ShiftSolution solution) =>
+            AreExactNightQuotasSatisfied(solution, out _)
+            && !HasUnmetManagerMix(solution)
+            && AdjacentShiftRestGuard.GetViolations(solution, _constraints).Count == 0
+            && DailyDuplicateAssignmentGuard.GetViolations(solution, _constraints).Count == 0
+            && MaxConsecutiveWorkdayRules.GetViolations(solution, _constraints).Count == 0;
 
         /// <summary>
         /// آخرین مرحله: ترمیم مسئول → تکمیل سهمیه؛ هیچ ترمیم مسئول بعد از پر شدن سهمیه اجرا نمی‌شود.

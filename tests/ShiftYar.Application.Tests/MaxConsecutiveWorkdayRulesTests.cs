@@ -149,6 +149,54 @@ public class MaxConsecutiveWorkdayRulesTests
         Assert.Equal(3, solution.GetUserAllAssignments(user.UserId).Count(a => !a.IsOnCall));
     }
 
+    [Fact]
+    public void MaxConsecutiveWorkdayGuard_BreaksElevenDayRun_IntoChunksOfThree()
+    {
+        var start = new DateTime(2026, 8, 28);
+        var user = MakeUser(13);
+        user.MaxConsecutiveShifts = 3;
+        var filler = MakeUser(99);
+        filler.MaxConsecutiveShifts = 3;
+
+        var solution = new ShiftSolution();
+        for (var i = 0; i < 11; i++)
+        {
+            solution.AddAssignment(user.UserId, 1, start.AddDays(i), ShiftLabel.Morning, false);
+        }
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(10),
+            UserConstraints = [user, filler],
+            ShiftRequirements =
+            [
+                new ShiftRequirement
+                {
+                    ShiftId = 1,
+                    ShiftLabel = ShiftLabel.Morning,
+                    SpecialtyRequirements =
+                    [
+                        new SpecialtyRequirement { SpecialtyId = 10, RequiredTotalCount = 1 }
+                    ]
+                }
+            ],
+            HardRules = new HardRuleSet
+            {
+                EnforceMaxConsecutiveShifts = true,
+                EnforceSpecialtyCapacity = true,
+                EnforceMaxShiftsPerDay = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 }
+        };
+
+        MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
+
+        Assert.True(
+            MaxConsecutiveWorkdayRules.GetMaxConsecutiveWorkRun(solution, user.UserId) <= 3,
+            $"User 13 run={MaxConsecutiveWorkdayRules.GetMaxConsecutiveWorkRun(solution, user.UserId)}");
+    }
+
     private static ShiftConstraints BuildConstraints(DateTime start, UserConstraint user, int days = 14) =>
         new()
         {

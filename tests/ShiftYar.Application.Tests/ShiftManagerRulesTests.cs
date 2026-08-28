@@ -880,6 +880,51 @@ public class ShiftManagerRulesTests
     }
 
     [Fact]
+    public void ApplyMandatoryConstraints_RefillsCoverageAndEveningManagerMix()
+    {
+        var start = new DateTime(2026, 8, 24);
+        var users = new List<UserConstraint>();
+        for (var id = 12; id <= 22; id++)
+        {
+            byte? level = id <= 16 ? (byte)1 : id <= 19 ? (byte)2 : null;
+            var u = Make(id, level);
+            u.MaxConsecutiveShifts = 3;
+            users.Add(u);
+        }
+
+        var constraints = BuildPediatricsConstraints(start);
+        constraints.EndDate = start;
+        constraints.UserConstraints = users;
+        constraints.HardRules.EnforceMaxConsecutiveShifts = true;
+
+        var solution = new ShiftSolution();
+        foreach (var id in new[] { 20, 21, 22, 12 })
+        {
+            solution.AddAssignment(id, 4, start, ShiftLabel.Morning, false);
+        }
+
+        solution.AddAssignment(13, 5, start, ShiftLabel.Evening, false);
+
+        foreach (var id in new[] { 14, 17, 18, 19 })
+        {
+            solution.AddAssignment(id, 6, start, ShiftLabel.Night, false);
+        }
+
+        ApplyManagers(constraints, solution);
+
+        var morningCount = solution.GetShiftAssignments(4, start).Count(x => !x.IsOnCall);
+        var eveningCount = solution.GetShiftAssignments(5, start).Count(x => !x.IsOnCall);
+        var nightCount = solution.GetShiftAssignments(6, start).Count(x => !x.IsOnCall);
+        Assert.Equal(4, morningCount);
+        Assert.Equal(3, eveningCount);
+        Assert.Equal(4, nightCount);
+        Assert.True(ShiftManagerRules.IsSatisfied(GetAssignees(constraints, solution, 5, start), 2, 1));
+        Assert.DoesNotContain(
+            solution.Violations,
+            v => v.Contains("Shift manager mix unmet", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void ExactNightQuotaGuard_DoesNotRemoveCriticalManagerFromNight()
     {
         var start = new DateTime(2026, 8, 23);
