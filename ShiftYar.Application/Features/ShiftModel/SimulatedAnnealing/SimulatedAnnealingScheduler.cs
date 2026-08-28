@@ -1573,11 +1573,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             // آخرین حرف: ON تأییدشده بعد از همه گاردها دوباره اعمال شود
             ApprovedRequestGuard.ForceApply(solution, _constraints);
 
-            // مسئول شیفت + سهمیه شب: چند پاس تا هر دو با هم پایدار شوند
-            ReconcileShiftManagersAndNightQuotas(solution);
-            StabilizeManagerMixAndNightQuotas(solution);
-            EnforceMandatoryNightQuotasUntilSatisfied(solution);
-            FinalizeNightQuotasAndManagerMix(solution);
+            // مسئول شیفت + سهمیه شب — یک حلقهٔ نهایی سبک (بدون تکرار ۴۰+ پاس سنگین)
+            FinalizeMandatoryConstraints(solution);
 
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
@@ -1884,7 +1881,6 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             {
                 ExactNightQuotaGuard.Enforce(solution, _constraints);
                 ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
-                ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, _constraints);
             }
         }
 
@@ -1911,6 +1907,36 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             RestoreSolutionFromQuotaBackup(solution, backup);
             return false;
+        }
+
+        /// <summary>
+        /// حلقهٔ نهایی: مسئول شیفت ↔ سهمیه شب ↔ قیود روزانه/مجاورت — با حداکثر ۳ دور.
+        /// </summary>
+        private void FinalizeMandatoryConstraints(ShiftSolution solution)
+        {
+            for (var round = 0; round < 3; round++)
+            {
+                RunShiftManagerRepairPasses(solution);
+                ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
+                AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+                DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
+                ApprovedRequestGuard.ForceApply(solution, _constraints);
+
+                if (AreExactNightQuotasSatisfied(solution, out _)
+                    && !HasUnmetManagerMix(solution)
+                    && AdjacentShiftRestGuard.GetViolations(solution, _constraints).Count == 0
+                    && DailyDuplicateAssignmentGuard.GetViolations(solution, _constraints).Count == 0)
+                {
+                    return;
+                }
+            }
+
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+            DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
+            ApprovedRequestGuard.ForceApply(solution, _constraints);
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+            DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
         }
 
         /// <summary>

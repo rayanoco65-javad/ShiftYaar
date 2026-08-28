@@ -101,7 +101,7 @@ public static class ExactNightQuotaGuard
         }
 
         var stalePasses = 0;
-        for (var pass = 0; pass < 16 && stalePasses < 3; pass++)
+        for (var pass = 0; pass < 10 && stalePasses < 2; pass++)
         {
             var deficits = OrderUsersByDeficit(solution, constraints).ToList();
             if (deficits.Count == 0)
@@ -149,7 +149,7 @@ public static class ExactNightQuotaGuard
             return;
         }
 
-        for (var pass = 0; pass < 8; pass++)
+        for (var pass = 0; pass < 4; pass++)
         {
             var deficits = OrderUsersByDeficit(solution, constraints).ToList();
             if (deficits.Count == 0)
@@ -231,8 +231,7 @@ public static class ExactNightQuotaGuard
 
             var backup = solution.Clone();
             solution.RemoveAssignment(donor.UserId, night.ShiftId, night.Date);
-            ClearConflictingForNight(solution, constraints, receiver, date);
-            solution.AddAssignment(receiver.UserId, nightShift.ShiftId, date, ShiftLabel.Night, isOnCall: false);
+            AddNightSafely(solution, constraints, receiver, nightShift, date);
 
             if (CountNights(solution, receiver.UserId) <= receiverBefore)
             {
@@ -337,7 +336,7 @@ public static class ExactNightQuotaGuard
 
         if (HasSpecialtyCapacity(solution, constraints, nightShift, date, user.SpecialtyId))
         {
-            solution.AddAssignment(user.UserId, nightShift.ShiftId, date, ShiftLabel.Night, isOnCall: false);
+            AddNightSafely(solution, constraints, user, nightShift, date);
             return true;
         }
 
@@ -359,7 +358,7 @@ public static class ExactNightQuotaGuard
         var donorMin = donor.ExactNightShiftCount;
 
         solution.RemoveAssignment(donorAssignment.UserId, donorAssignment.ShiftId, donorAssignment.Date);
-        solution.AddAssignment(user.UserId, nightShift.ShiftId, date, ShiftLabel.Night, isOnCall: false);
+        AddNightSafely(solution, constraints, user, nightShift, date);
 
         var donorOk = !donorMin.HasValue || CountNights(solution, donor.UserId) >= donorMin.Value;
         if (!donorOk)
@@ -1542,6 +1541,22 @@ public static class ExactNightQuotaGuard
                 solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
             }
         }
+    }
+
+    private static void AddNightSafely(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user,
+        ShiftRequirement nightShift,
+        DateTime date)
+    {
+        ClearConflictingForNight(solution, constraints, user, date);
+        if (solution.HasAssignment(user.UserId, nightShift.ShiftId, date))
+        {
+            return;
+        }
+
+        solution.AddAssignment(user.UserId, nightShift.ShiftId, date, ShiftLabel.Night, isOnCall: false);
     }
 
     private static void ClearConflictingForNight(
