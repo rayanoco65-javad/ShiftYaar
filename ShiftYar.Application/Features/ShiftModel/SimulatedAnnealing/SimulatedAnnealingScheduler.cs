@@ -1781,6 +1781,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 ShiftCoverageGuard.Enforce(solution, _constraints);
                 ApprovedRequestGuard.ForceApply(solution, _constraints);
                 RunShiftManagerRepairPasses(solution);
+                ApprovedRequestGuard.ForceApply(solution, _constraints);
 
                 if (!HasUnmetManagerMix(solution) && GetExactNightQuotaViolations(solution).Count == 0)
                 {
@@ -1795,6 +1796,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     ExactNightQuotaGuard.Enforce(solution, _constraints);
                     AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
                     DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
+                    ApprovedRequestGuard.ForceApply(solution, _constraints);
                     if (GetExactNightQuotaViolations(solution).Count == 0)
                     {
                         break;
@@ -1803,6 +1805,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             RunShiftManagerRepairPasses(solution);
+            ApprovedRequestGuard.ForceApply(solution, _constraints);
         }
 
         private bool HasUnmetManagerMix(ShiftSolution solution) =>

@@ -376,6 +376,22 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             DateTime date,
             ShiftLabel label)
         {
+            if (label == ShiftLabel.Morning)
+            {
+                var prev = date.Date.AddDays(-1);
+                foreach (var assignment in GetUserNightAssignments(solution, user.UserId)
+                             .Where(a => a.Date.Date == prev)
+                             .ToList())
+                {
+                    if (IsHardProtectedAssignment(user, assignment))
+                    {
+                        continue;
+                    }
+
+                    solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                }
+            }
+
             if (label == ShiftLabel.Night)
             {
                 var next = date.Date.AddDays(1);

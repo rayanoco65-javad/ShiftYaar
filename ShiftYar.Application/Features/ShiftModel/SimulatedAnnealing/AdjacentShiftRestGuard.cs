@@ -135,6 +135,20 @@ public static class AdjacentShiftRestGuard
     {
         var earlierManagerCritical = ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, earlier);
         var laterManagerCritical = ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, later);
+        var earlierOn = ApprovedRequestGuard.IsApprovedRequiredSlot(
+            user, earlier.Date, earlier.ShiftLabel, earlier.ShiftId);
+        var laterOn = ApprovedRequestGuard.IsApprovedRequiredSlot(
+            user, later.Date, later.ShiftLabel, later.ShiftId);
+
+        if (laterOn && !earlierOn)
+        {
+            return IsRequestProtected(user, earlier) ? null : earlier;
+        }
+
+        if (earlierOn && !laterOn)
+        {
+            return IsRequestProtected(user, later) ? null : later;
+        }
 
         if (earlierManagerCritical && laterManagerCritical)
         {
