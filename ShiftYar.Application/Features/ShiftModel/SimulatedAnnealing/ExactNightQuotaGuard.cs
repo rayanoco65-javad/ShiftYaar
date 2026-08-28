@@ -57,6 +57,21 @@ public static class ExactNightQuotaGuard
         ForceFillRemainingTotalIgnoringHolidayReservation(solution, constraints, nightShift);
     }
 
+    /// <summary>جبران فوری سهمیه شب یک کاربر پس از جابجایی برای مسئول شیفت.</summary>
+    public static void EnforceExactNightQuotaForUser(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint user)
+    {
+        var nightShift = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftLabel == ShiftLabel.Night);
+        if (nightShift == null)
+        {
+            return;
+        }
+
+        EnforceForUser(solution, constraints, user, nightShift);
+    }
+
     /// <summary>
     /// آخرین تلاش: اگر سهمیه کل هنوز کامل نشده، رزرو «باقی‌مانده برای تعطیل» را نادیده بگیر
     /// و از زنجیرهٔ دو مرحله‌ای برای جابه‌جایی در ماه پر استفاده کن.

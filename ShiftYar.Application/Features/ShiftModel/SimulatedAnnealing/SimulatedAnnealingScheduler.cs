@@ -1572,12 +1572,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             // آخرین حرف: ON تأییدشده بعد از همه گاردها دوباره اعمال شود
             ApprovedRequestGuard.ForceApply(solution, _constraints);
 
-            // مسئول شیفت بعد از همه گاردها — وگرنه Coverage/موظفی/سابقه ترکیب را می‌شکنند
-            var managerWarnings = RepairShiftManagers(solution);
+            // مسئول شیفت + سهمیه شب: چند پاس تا هر دو با هم پایدار شوند
+            ReconcileShiftManagersAndNightQuotas(solution);
 
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
-            solution.Violations.AddRange(managerWarnings);
+            solution.Violations.AddRange(CollectManagerMixWarnings(solution));
             solution.Violations.AddRange(ApprovedRequestGuard.GetUnmetViolations(solution, _constraints));
             solution.Violations.AddRange(ShiftEligibilityGuard.GetViolations(solution, _constraints));
             solution.Violations.AddRange(AdjacentShiftRestGuard.GetViolations(solution, _constraints));
@@ -1760,36 +1760,58 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         }
 
         /// <summary>
-        /// تأمین ترکیب مسئول شیفت: حداقل تعداد مسئول + حداقل سطح ۱ برای صبح/عصر/شب.
-        /// </summary>
-        /// <summary>
         /// تأمین ترکیب مسئول شیفت پس از همه گاردها. قابل فراخوانی مجدد از سرویس زمان‌بندی.
         /// </summary>
-        public List<string> RepairShiftManagers(ShiftSolution solution) => EnsureShiftManagers(solution);
-
-        private List<string> EnsureShiftManagers(ShiftSolution solution)
+        public List<string> RepairShiftManagers(ShiftSolution solution)
         {
-            var warnings = new List<string>();
+            RunShiftManagerRepairPasses(solution);
+            return CollectManagerMixWarnings(solution);
+        }
 
-            for (var pass = 0; pass < 8; pass++)
+        /// <summary>
+        /// پاس‌های متناوب: ترمیم مسئول شیفت → سهمیه شب → درخواست ON.
+        /// </summary>
+        private void ReconcileShiftManagersAndNightQuotas(ShiftSolution solution)
+        {
+            for (var round = 0; round < 8; round++)
             {
-                var progress = false;
-                foreach (var date in GetDateRange())
-                {
-                    foreach (var shiftReq in _constraints.ShiftRequirements)
-                    {
-                        if (EnsureShiftManagerMixForSlot(solution, shiftReq, date))
-                        {
-                            progress = true;
-                        }
-                    }
-                }
+                RunShiftManagerRepairPasses(solution);
+                ExactNightQuotaGuard.Enforce(solution, _constraints);
+                AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+                DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
+                ShiftCoverageGuard.Enforce(solution, _constraints);
+                ApprovedRequestGuard.ForceApply(solution, _constraints);
 
-                if (!progress)
+                if (!HasUnmetManagerMix(solution) && GetExactNightQuotaViolations(solution).Count == 0)
                 {
                     break;
                 }
             }
+
+            // ترکیب مسئول برقرار است — فقط سهمیه شب را بدون دست‌زدن دوباره به مسئول‌ها جبران کن
+            if (!HasUnmetManagerMix(solution))
+            {
+                for (var pass = 0; pass < 6; pass++)
+                {
+                    ExactNightQuotaGuard.Enforce(solution, _constraints);
+                    AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+                    DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
+                    if (GetExactNightQuotaViolations(solution).Count == 0)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            RunShiftManagerRepairPasses(solution);
+        }
+
+        private bool HasUnmetManagerMix(ShiftSolution solution) =>
+            CollectManagerMixWarnings(solution).Count > 0;
+
+        private List<string> CollectManagerMixWarnings(ShiftSolution solution)
+        {
+            var warnings = new List<string>();
 
             foreach (var date in GetDateRange())
             {
@@ -1817,6 +1839,35 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             return warnings;
+        }
+
+        private void RunShiftManagerRepairPasses(ShiftSolution solution)
+        {
+            for (var pass = 0; pass < 8; pass++)
+            {
+                var progress = false;
+                foreach (var date in GetDateRange())
+                {
+                    foreach (var shiftReq in _constraints.ShiftRequirements)
+                    {
+                        if (EnsureShiftManagerMixForSlot(solution, shiftReq, date))
+                        {
+                            progress = true;
+                        }
+                    }
+                }
+
+                if (!progress)
+                {
+                    break;
+                }
+            }
+        }
+
+        private List<string> EnsureShiftManagers(ShiftSolution solution)
+        {
+            RunShiftManagerRepairPasses(solution);
+            return CollectManagerMixWarnings(solution);
         }
 
         private List<UserConstraint> GetRegularAssignees(ShiftSolution solution, ShiftRequirement shiftReq, DateTime date) =>
@@ -1863,72 +1914,16 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     break;
                 }
 
-                var regulars = solution.GetShiftAssignments(shiftReq.ShiftId, date)
-                    .Where(a => !a.IsOnCall)
-                    .ToList();
+                var replaced = TryReplaceForManagerMix(
+                    solution, shiftReq, date, needLevel1, needAnyManager, onlyNeedLevel1, allowQuotaBypass: false)
+                    || TryReplaceForManagerMix(
+                        solution, shiftReq, date, needLevel1, needAnyManager, onlyNeedLevel1, allowQuotaBypass: true);
 
-                var occupants = regulars
-                    .Where(a => !IsProtectedAssignment(solution, a, forManagerInstall: true))
-                    .Select(a => new
-                    {
-                        Assignment = a,
-                        User = _constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)
-                    })
-                    .Where(x => x.User != null)
-                    .OrderBy(x =>
-                    {
-                        var level = ShiftManagerRules.EffectiveLevel(x.User!);
-                        if (onlyNeedLevel1)
-                        {
-                            if (level == ShiftManagerRules.Level2)
-                            {
-                                return 0;
-                            }
-
-                            if (level == 0)
-                            {
-                                return 1;
-                            }
-
-                            return 2;
-                        }
-
-                        if (level == 0)
-                        {
-                            return 0;
-                        }
-
-                        if (needLevel1 && level == ShiftManagerRules.Level2)
-                        {
-                            return 1;
-                        }
-
-                        return 2;
-                    })
-                    .ToList();
-
-                var replaced = false;
-                foreach (var occupant in occupants)
+                if (replaced)
                 {
-                    if (needLevel1 && ShiftManagerRules.IsLevel1(occupant.User!))
-                    {
-                        continue;
-                    }
-
-                    if (!needLevel1 && needAnyManager && ShiftManagerRules.IsManager(occupant.User!))
-                    {
-                        continue;
-                    }
-
-                    if (TryInstallShiftManager(solution, shiftReq, date, needLevel1, occupant.Assignment, occupant.User!))
-                    {
-                        replaced = true;
-                        progress = true;
-                        break;
-                    }
+                    progress = true;
                 }
-
-                if (!replaced)
+                else
                 {
                     break;
                 }
@@ -1936,6 +1931,95 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             return progress;
         }
+
+        private bool TryReplaceForManagerMix(
+            ShiftSolution solution,
+            ShiftRequirement shiftReq,
+            DateTime date,
+            bool needLevel1,
+            bool needAnyManager,
+            bool onlyNeedLevel1,
+            bool allowQuotaBypass)
+        {
+            var regulars = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                .Where(a => !a.IsOnCall)
+                .ToList();
+
+            var occupants = regulars
+                .Where(a => !IsProtectedAssignment(solution, a, forManagerInstall: allowQuotaBypass))
+                .Select(a => new
+                {
+                    Assignment = a,
+                    User = _constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)
+                })
+                .Where(x => x.User != null)
+                .OrderBy(x => CanDonateNightForManagerReplace(solution, x.User!, x.Assignment) ? 0 : 1)
+                .ThenBy(x =>
+                {
+                    var level = ShiftManagerRules.EffectiveLevel(x.User!);
+                    if (onlyNeedLevel1)
+                    {
+                        if (level == ShiftManagerRules.Level2)
+                        {
+                            return 0;
+                        }
+
+                        if (level == 0)
+                        {
+                            return 1;
+                        }
+
+                        return 2;
+                    }
+
+                    if (level == 0)
+                    {
+                        return 0;
+                    }
+
+                    if (needLevel1 && level == ShiftManagerRules.Level2)
+                    {
+                        return 1;
+                    }
+
+                    return 2;
+                })
+                .ToList();
+
+            foreach (var occupant in occupants)
+            {
+                if (needLevel1 && ShiftManagerRules.IsLevel1(occupant.User!))
+                {
+                    continue;
+                }
+
+                if (!needLevel1 && needAnyManager && ShiftManagerRules.IsManager(occupant.User!))
+                {
+                    continue;
+                }
+
+                if (TryInstallShiftManager(solution, shiftReq, date, needLevel1, occupant.Assignment, occupant.User!))
+                {
+                    if (allowQuotaBypass && occupant.User!.HasExactNightQuota)
+                    {
+                        ExactNightQuotaGuard.EnforceExactNightQuotaForUser(
+                            solution, _constraints, occupant.User!);
+                    }
+
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool CanDonateNightForManagerReplace(
+            ShiftSolution solution,
+            UserConstraint user,
+            SaShiftAssignment assignment) =>
+            assignment.ShiftLabel != ShiftLabel.Night
+            || assignment.IsOnCall
+            || ExactNightQuotaGuard.CanDonateNight(solution, _constraints, user, assignment);
 
         private bool TryInstallShiftManager(
             ShiftSolution solution,
@@ -2115,7 +2199,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => u.SpecialtyId == specialtyId)
                 .Where(u => !genderLocked || u.Gender == occupantGender)
                 .Where(u => IsUserAvailableForManagerInstall(
-                    u, date, shiftReq.ShiftLabel, solution, ignoreShiftIdForAvailability))
+                    u, date, shiftReq.ShiftLabel, solution, ignoreShiftIdForAvailability, ignoreSameDayAssignments: true))
                 .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
                 .OrderByDescending(u => ShiftManagerRules.IsLevel1(u))
                 .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
@@ -2137,7 +2221,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => u.SpecialtyId == specialtyId)
                 .Where(u => !genderLocked || u.Gender == requiredGender)
                 .Where(u => IsUserAvailableForManagerInstall(
-                    u, date, shiftReq.ShiftLabel, solution, ignoreShiftIdForAvailability))
+                    u, date, shiftReq.ShiftLabel, solution, ignoreShiftIdForAvailability, ignoreSameDayAssignments: true))
                 .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
                 .OrderBy(u => ShiftManagerRules.IsManager(u) ? 1 : 0)
                 .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
@@ -2198,7 +2282,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             DateTime date,
             ShiftLabel shiftLabel,
             ShiftSolution solution,
-            int? ignoreShiftId = null)
+            int? ignoreShiftId = null,
+            bool ignoreSameDayAssignments = false)
         {
             if (user.UnavailableDates.Any(d => d.Date == date.Date))
             {
@@ -2214,9 +2299,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var maxPerDay = _constraints.HardRules.EnforceMaxShiftsPerDay
                 ? Math.Max(1, _constraints.GlobalConstraints.MaxShiftsPerDay)
                 : 2;
-            var existingLabels = solution.GetUserAssignments(user.UserId, date)
-                .Where(a => !ignoreShiftId.HasValue || a.ShiftId != ignoreShiftId.Value)
-                .Select(a => a.ShiftLabel);
+            var sameDayAssignments = solution.GetUserAssignments(user.UserId, date);
+            var existingLabels = ignoreSameDayAssignments
+                ? Enumerable.Empty<ShiftLabel>()
+                : sameDayAssignments
+                    .Where(a => !ignoreShiftId.HasValue || a.ShiftId != ignoreShiftId.Value)
+                    .Select(a => a.ShiftLabel);
             if (!ShiftEligibilityResolver.IsAssignmentAllowed(
                     user, existingLabels, shiftLabel, maxPerDay,
                     _constraints.HardRules.ForbidDuplicateDailyAssignments))
