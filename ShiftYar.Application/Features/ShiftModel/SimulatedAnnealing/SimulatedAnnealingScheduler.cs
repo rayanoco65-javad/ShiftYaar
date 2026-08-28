@@ -1885,27 +1885,40 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         }
 
         /// <summary>
-        /// پس از جابجایی برای مسئول شیفت، فقط سهمیهٔ کاربر جابه‌جاشده را سریع بررسی می‌کند (بدون پاس سراسری سنگین).
+        /// پس از جابجایی مسئول: سهمیه شب همهٔ کاربران (از جمله مسئول تازه‌نصب‌شده) باید برقرار بماند.
         /// </summary>
-        private bool CommitManagerReplaceIfQuotasRestored(ShiftSolution solution, UserConstraint displacedUser)
+        private bool AllExactNightQuotasMet(ShiftSolution solution)
         {
-            if (displacedUser?.ExactNightShiftCount == null)
+            foreach (var user in _constraints.UserConstraints.Where(u => u.ExactNightShiftCount.HasValue))
+            {
+                var nights = solution.GetUserAllAssignments(user.UserId)
+                    .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+                if (nights < user.ExactNightShiftCount.Value)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private bool RestoreAnyDroppedNightQuotas(ShiftSolution solution)
+        {
+            foreach (var user in _constraints.UserConstraints.Where(u => u.ExactNightShiftCount.HasValue))
+            {
+                var nights = solution.GetUserAllAssignments(user.UserId)
+                    .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+                if (nights < user.ExactNightShiftCount.Value)
+                {
+                    ExactNightQuotaGuard.EnforceExactNightQuotaForUser(solution, _constraints, user);
+                }
+            }
+
+            if (AllExactNightQuotasMet(solution))
             {
                 return true;
             }
 
-            var required = displacedUser.ExactNightShiftCount.Value;
-            var backup = solution.Clone();
-            ExactNightQuotaGuard.EnforceExactNightQuotaForUser(solution, _constraints, displacedUser);
-
-            var nights = solution.GetUserAllAssignments(displacedUser.UserId)
-                .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
-            if (nights >= required)
-            {
-                return true;
-            }
-
-            RestoreSolutionFromQuotaBackup(solution, backup);
             return false;
         }
 
@@ -1930,6 +1943,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 {
                     ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
                     RunShiftManagerRepairPasses(solution);
+                    ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
+                    AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+                    DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
                     return;
                 }
             }
@@ -1937,14 +1953,17 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ApprovedRequestGuard.ForceApply(solution, _constraints);
             ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
             RunShiftManagerRepairPasses(solution);
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             MaxConsecutiveWorkdayGuard.Enforce(solution, _constraints);
             ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
             RunShiftManagerRepairPasses(solution);
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
             ApprovedRequestGuard.ForceApply(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
         }
 
         private bool IsMandatoryStable(ShiftSolution solution) =>
@@ -2224,10 +2243,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     continue;
                 }
 
+                var backup = solution.Clone();
                 if (TryInstallShiftManager(solution, shiftReq, date, needLevel1, occupant.Assignment, occupant.User!))
                 {
-                    if (!CommitManagerReplaceIfQuotasRestored(solution, occupant.User!))
+                    if (!RestoreAnyDroppedNightQuotas(solution))
                     {
+                        RestoreSolutionFromQuotaBackup(solution, backup);
                         continue;
                     }
 
