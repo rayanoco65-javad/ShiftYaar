@@ -1868,7 +1868,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     .ToList();
 
                 var occupants = regulars
-                    .Where(a => !IsProtectedAssignment(solution, a))
+                    .Where(a => !IsProtectedAssignment(solution, a, forManagerInstall: true))
                     .Select(a => new
                     {
                         Assignment = a,
@@ -2010,7 +2010,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(x => x.User != null && x.ShiftReq != null)
                 .Where(x => ShiftManagerRules.IsManager(x.User!))
                 .Where(x => !needLevel1 || ShiftManagerRules.IsLevel1(x.User!))
-                .Where(x => !IsProtectedAssignment(solution, x.Assignment))
+                .Where(x => !IsProtectedAssignment(solution, x.Assignment, forManagerInstall: true))
                 .Where(x => IsUserAvailableForManagerInstall(
                     x.User!, date, targetShift.ShiftLabel, solution, x.Assignment.ShiftId))
                 .OrderBy(x => ShiftManagerRules.GetRequirement(x.ShiftReq!).RequiredTotal)
@@ -2474,7 +2474,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             return false;
         }
 
-        private bool IsProtectedAssignment(ShiftSolution solution, SaShiftAssignment assignment)
+        private bool IsProtectedAssignment(
+            ShiftSolution solution,
+            SaShiftAssignment assignment,
+            bool forManagerInstall = false)
         {
             var user = _constraints.UserConstraints.FirstOrDefault(u => u.UserId == assignment.UserId);
             if (user == null)
@@ -2491,6 +2494,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             if (user.RequiredPresenceDates.Any(d => d.Date == assignment.Date.Date))
             {
                 return true;
+            }
+
+            // الزام ترکیب مسئول از سهمیه شب مهم‌تر است — جایگزینی برای L1 مجاز
+            if (forManagerInstall)
+            {
+                return false;
             }
 
             // شب‌هایی که حذف‌شان کاربر را زیر حداقل سهمیه می‌برد محافظت شوند
@@ -2515,7 +2524,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             if (!isOnCall && RequiresShiftManager(shiftLabel))
             {
                 return users
-                    .OrderByDescending(u => ShiftManagerRules.EffectiveLevel(u))
+                    .OrderByDescending(u => ShiftManagerRules.IsLevel1(u) ? 2 : ShiftManagerRules.IsManager(u) ? 1 : 0)
                     .ThenBy(u => CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)))
                     .ThenBy(u => CountUserNightShifts(solution, u.UserId))
                     .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)

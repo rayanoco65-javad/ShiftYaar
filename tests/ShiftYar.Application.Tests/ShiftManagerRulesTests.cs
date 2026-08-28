@@ -423,6 +423,61 @@ public class ShiftManagerRulesTests
     }
 
     [Fact]
+    public void RepairShiftManagers_ReplacesOccupantAtExactNightQuotaCap()
+    {
+        var start = new DateTime(2026, 8, 23);
+        var u19 = Make(19, level: 1);
+        u19.ExactNightShiftCount = 5;
+        var u22 = Make(22, level: 2);
+        u22.ExactNightShiftCount = 8;
+        var u23 = Make(23, level: 2);
+        u23.ExactNightShiftCount = 8;
+        var u27 = Make(27, level: null);
+        u27.ExactNightShiftCount = 8;
+        var u30 = Make(30, level: null);
+        u30.ExactNightShiftCount = 9;
+
+        var constraints = BuildPediatricsConstraints(start);
+        constraints.UserConstraints = [u19, u22, u23, u27, u30];
+
+        var solution = new ShiftSolution();
+        // همه روی سقف سهمیه شب — بدون forManagerInstall قابل جابجایی نیستند
+        for (var i = 0; i < 8; i++)
+        {
+            var d = start.AddDays(i + 1);
+            solution.AddAssignment(22, 6, d, ShiftLabel.Night, false);
+        }
+
+        for (var i = 0; i < 8; i++)
+        {
+            var d = start.AddDays(i + 2);
+            solution.AddAssignment(23, 6, d, ShiftLabel.Night, false);
+        }
+
+        for (var i = 0; i < 8; i++)
+        {
+            solution.AddAssignment(27, 6, start.AddDays(i), ShiftLabel.Night, false);
+        }
+
+        solution.AddAssignment(22, 6, start, ShiftLabel.Night, false);
+        solution.AddAssignment(23, 6, start, ShiftLabel.Night, false);
+        solution.AddAssignment(27, 6, start, ShiftLabel.Night, false);
+        solution.AddAssignment(30, 6, start, ShiftLabel.Night, false);
+
+        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            MaxIterations = 1,
+            InitialTemperature = 1,
+            FinalTemperature = 0.1
+        });
+        var warnings = scheduler.RepairShiftManagers(solution);
+
+        var nightUsers = GetAssignees(constraints, solution, 6, start);
+        Assert.True(ShiftManagerRules.IsSatisfied(nightUsers, 2, 1));
+        Assert.DoesNotContain(warnings, w => w.Contains("Shift manager mix unmet"));
+    }
+
+    [Fact]
     public void EnsureShiftManagers_SwapEveningL1ToNight_WithFreeL1BackfillEvening()
     {
         var start = new DateTime(2026, 8, 23);
