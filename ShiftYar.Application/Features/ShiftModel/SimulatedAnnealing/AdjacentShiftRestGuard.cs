@@ -152,6 +152,13 @@ public static class AdjacentShiftRestGuard
 
         if (earlierManagerCritical && laterManagerCritical)
         {
+            if (AdjacentShiftRestRules.IsSettingsControlledAfterNightPair(
+                    earlier.ShiftLabel, earlier.Date, later.ShiftLabel, later.Date))
+            {
+                // عصر/شب بعد از شب: اگر هیچ‌کدام ON نیست، شیفت بعدی حذف می‌شود (مسئول/پوشش بعداً ترمیم)
+                return IsRequestProtected(user, later) ? null : later;
+            }
+
             return null;
         }
 

@@ -1806,6 +1806,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             RunShiftManagerRepairPasses(solution);
             ApprovedRequestGuard.ForceApply(solution, _constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+            RunShiftManagerRepairPasses(solution);
+            ApprovedRequestGuard.ForceApply(solution, _constraints);
         }
 
         private bool HasUnmetManagerMix(ShiftSolution solution) =>
