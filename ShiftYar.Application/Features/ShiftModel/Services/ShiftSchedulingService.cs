@@ -2834,6 +2834,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         {
             var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters());
             scheduler.ApplyMandatoryConstraints(solution);
+            if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
+            {
+                scheduler.EnforceMandatoryNightQuotasUntilSatisfied(solution);
+            }
+
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
             EnsureExactDayShiftQuotasOrThrow(scheduler, solution);

@@ -887,6 +887,47 @@ public class ExactNightQuotaTests
         Assert.True(nights >= 7, $"Expected >= 7 nights, got {nights}");
     }
 
+    [Fact]
+    public void ExactNightQuotaGuard_FillsMinimumDespiteMaxConsecutiveWorkdayCap()
+    {
+        var start = new DateTime(2026, 8, 23);
+        var user = MakeUser(26, exactNights: 9, exactHolidayNights: null);
+        user.MaxConsecutiveShifts = 3;
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(30),
+            UserConstraints = [user],
+            ShiftRequirements = [Shift(3, ShiftLabel.Night)],
+            HardRules = new HardRuleSet
+            {
+                EnforceSpecialtyCapacity = true,
+                EnforceMaxConsecutiveShifts = true,
+                AllowEveningAfterNightShift = false,
+                AllowNightShiftAfterNightShift = false
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 }
+        };
+
+        var solution = new ShiftSolution();
+        // ۶ شب با فاصله + ۴ روز صبح متوالی تا سقف ۳ روز کار پُر شود
+        foreach (var offset in new[] { 0, 4, 8, 12, 16, 20 })
+        {
+            solution.AddAssignment(26, 3, start.AddDays(offset), ShiftLabel.Night, false);
+        }
+
+        for (var i = 0; i < 4; i++)
+        {
+            solution.AddAssignment(26, 1, start.AddDays(22 + i), ShiftLabel.Morning, false);
+        }
+
+        ExactNightQuotaGuard.EnforceMandatoryMinimums(solution, constraints);
+
+        var nights = solution.GetUserAllAssignments(26).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+        Assert.True(nights >= 9, $"Expected >= 9 nights despite consecutive cap, got {nights}");
+    }
+
     private static UserConstraint MakeUser(int id, int? exactNights, int? exactHolidayNights) => new()
     {
         UserId = id,

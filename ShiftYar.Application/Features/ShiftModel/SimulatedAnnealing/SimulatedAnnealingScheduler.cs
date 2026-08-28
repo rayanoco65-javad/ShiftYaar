@@ -1575,6 +1575,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             // مسئول شیفت + سهمیه شب: چند پاس تا هر دو با هم پایدار شوند
             ReconcileShiftManagersAndNightQuotas(solution);
             StabilizeManagerMixAndNightQuotas(solution);
+            EnforceMandatoryNightQuotasUntilSatisfied(solution);
 
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
@@ -1775,6 +1776,28 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         public void EnforceShiftManagerMix(ShiftSolution solution)
         {
             RunShiftManagerRepairPasses(solution);
+        }
+
+        /// <summary>
+        /// تکمیل اجباری سهمیه شب پس از تعادل با مسئول شیفت — تا هر دو قید برقرار شوند.
+        /// </summary>
+        public void EnforceMandatoryNightQuotasUntilSatisfied(ShiftSolution solution)
+        {
+            for (var round = 0; round < 16; round++)
+            {
+                if (GetExactNightQuotaViolations(solution).Count == 0
+                    && !HasUnmetManagerMix(solution))
+                {
+                    return;
+                }
+
+                ExactNightQuotaGuard.EnforceMandatoryMinimums(solution, _constraints);
+                RunShiftManagerRepairPasses(solution);
+                ApprovedRequestGuard.ForceApply(solution, _constraints);
+                AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+                ExactNightQuotaGuard.Enforce(solution, _constraints);
+                RestoreDeficitNightQuotas(solution);
+            }
         }
 
         /// <summary>

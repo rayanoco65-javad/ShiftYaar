@@ -57,6 +57,38 @@ public static class ExactNightQuotaGuard
         ForceFillRemainingTotalIgnoringHolidayReservation(solution, constraints, nightShift);
     }
 
+    /// <summary>
+    /// آخرین تلاش برای تکمیل حداقل سهمیه شب — با اولویت سخت بالاتر از سقف روزهای کاری متوالی.
+    /// </summary>
+    public static void EnforceMandatoryMinimums(ShiftSolution solution, ShiftConstraints constraints)
+    {
+        var nightShift = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftLabel == ShiftLabel.Night);
+        if (nightShift == null)
+        {
+            return;
+        }
+
+        for (var pass = 0; pass < 10; pass++)
+        {
+            var deficits = OrderUsersByDeficit(solution, constraints).ToList();
+            if (deficits.Count == 0)
+            {
+                break;
+            }
+
+            foreach (var user in deficits)
+            {
+                EnforceForUser(solution, constraints, user, nightShift);
+            }
+
+            ForceFillRemainingTotalIgnoringHolidayReservation(solution, constraints, nightShift);
+        }
+    }
+
+    private static bool HasNightQuotaDeficit(ShiftSolution solution, UserConstraint user) =>
+        user.ExactNightShiftCount.HasValue
+        && CountNights(solution, user.UserId) < user.ExactNightShiftCount.Value;
+
     /// <summary>جبران فوری سهمیه شب یک کاربر پس از جابجایی برای مسئول شیفت.</summary>
     public static void EnforceExactNightQuotaForUser(
         ShiftSolution solution,
@@ -1344,8 +1376,9 @@ public static class ExactNightQuotaGuard
                && !user.UnavailableDates.Any(d => d.Date == date.Date)
                && !user.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == ShiftLabel.Night)
                && !solution.HasAssignment(user.UserId, nightShift.ShiftId, date)
-               && !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
-                   solution, constraints, user, date);
+               && (HasNightQuotaDeficit(solution, user)
+                   || !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
+                       solution, constraints, user, date));
     }
 
     private static IEnumerable<DateTime> AllCandidateDates(ShiftConstraints constraints, bool holidayOnly) =>
@@ -1674,8 +1707,9 @@ public static class ExactNightQuotaGuard
         }
 
         return ShiftEligibilityResolver.MayEverTakeLabel(user, ShiftLabel.Night)
-               && !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
-                   solution, constraints, user, date);
+               && (HasNightQuotaDeficit(solution, user)
+                   || !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
+                       solution, constraints, user, date));
     }
 
     private static bool HasSpecialtyCapacity(
