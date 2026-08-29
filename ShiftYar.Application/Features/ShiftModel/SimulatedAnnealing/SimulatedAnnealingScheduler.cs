@@ -1571,6 +1571,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             // پوشش + مسئول شیفت + سهمیه + سقف روز متوالی — حلقهٔ نهایی محدود
             FinalizeMandatoryConstraints(solution);
+            // حضور اجباری تأییدشده آخرین حرف مطلق است — هیچ گاردی بعد از این حق حذف آن را ندارد
+            ApprovedRequestGuard.ForceApply(solution, _constraints);
 
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
@@ -1948,7 +1950,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         }
 
         /// <summary>
-        /// پوشش و مسئول شیفت بعد از سهمیه/strip — سقف روز متوالی اینجا دیگر ترکیب مسئول را خراب نمی‌کند.
+        /// پوشش و مسئول شیفت بعد از سهمیه/strip.
+        /// ForceApply آخرین مرحله است تا ترمیم مسئول/سهمیه حضور اجباری را نرباید.
         /// </summary>
         private void FinishWithCoverageManagersAndQuotas(ShiftSolution solution)
         {
@@ -1957,20 +1960,17 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
             RunShiftManagerRepairPasses(solution);
             ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
-            ApprovedRequestGuard.ForceApply(solution, _constraints);
-            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
-            DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
-            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
-            RunShiftManagerRepairPasses(solution);
+            if (HasUnmetManagerMix(solution))
+            {
+                RunShiftManagerRepairPasses(solution);
+            }
+
             if (!AreExactNightQuotasSatisfied(solution, out _))
             {
                 ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
             }
 
-            if (HasUnmetManagerMix(solution))
-            {
-                RunShiftManagerRepairPasses(solution);
-            }
+            ApprovedRequestGuard.ForceApply(solution, _constraints);
         }
 
         private bool IsMandatoryStable(ShiftSolution solution) =>
@@ -2558,6 +2558,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => !needLevel1 || ShiftManagerRules.IsLevel1(u))
                 .Where(u => u.SpecialtyId == specialtyId)
                 .Where(u => !genderLocked || u.Gender == occupantGender)
+                .Where(u => !HasConflictingApprovedRequiredOnDate(u, date, shiftReq.ShiftLabel))
                 .Where(u => IsUserAvailableForManagerInstall(
                     u, date, shiftReq.ShiftLabel, solution, ignoreShiftIdForAvailability,
                     ignoreSameDayAssignments: true,
@@ -2583,6 +2584,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => u.IsActive)
                 .Where(u => u.SpecialtyId == specialtyId)
                 .Where(u => !genderLocked || u.Gender == requiredGender)
+                .Where(u => !HasConflictingApprovedRequiredOnDate(u, date, shiftReq.ShiftLabel))
                 .Where(u => IsUserAvailableForManagerInstall(
                     u, date, shiftReq.ShiftLabel, solution, ignoreShiftIdForAvailability, ignoreSameDayAssignments: true))
                 .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
@@ -2606,6 +2608,26 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => u.UserId != donor.UserId)
                 .ToList();
             return !ShiftManagerRules.IsSatisfied(remaining, requiredTotal, minLevel1);
+        }
+
+        /// <summary>
+        /// کاربر با درخواست ON تأییدشدهٔ همان روز را به شیفت ناسازگار (مثلاً عصر به‌جای صبح اجباری) منتقل نکن.
+        /// </summary>
+        private bool HasConflictingApprovedRequiredOnDate(
+            UserConstraint user,
+            DateTime date,
+            ShiftLabel installLabel)
+        {
+            var maxPerDay = _constraints.HardRules.EnforceMaxShiftsPerDay
+                ? Math.Max(1, _constraints.GlobalConstraints.MaxShiftsPerDay)
+                : 2;
+            var forbidDup = _constraints.HardRules.ForbidDuplicateDailyAssignments;
+
+            return user.RequiredShiftSlots.Any(s =>
+                s.Date.Date == date.Date &&
+                s.ShiftLabel != installLabel &&
+                !DailyAssignmentRules.IsValidDaySet(
+                    new[] { s.ShiftLabel, installLabel }, maxPerDay, forbidDup));
         }
 
         private bool IsGenderLockedShift(ShiftRequirement shiftReq, DateTime date, int specialtyId)
@@ -2730,9 +2752,17 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 : 2;
             var forbidDup = _constraints.HardRules.ForbidDuplicateDailyAssignments;
 
+            var user = _constraints.UserConstraints.FirstOrDefault(u => u.UserId == userId);
             foreach (var assignment in solution.GetUserAssignments(userId, date).ToList())
             {
                 if (assignment.ShiftId == keepShiftId)
+                {
+                    continue;
+                }
+
+                if (user != null &&
+                    ApprovedRequestGuard.IsApprovedRequiredSlot(
+                        user, assignment.Date, assignment.ShiftLabel, assignment.ShiftId))
                 {
                     continue;
                 }

@@ -248,11 +248,6 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     }
                 }
 
-                if (!IsUserAvailable(user, required.Date, required.ShiftLabel, solution, constraints))
-                {
-                    continue;
-                }
-
                 RemoveOtherDailyAssignments(solution, constraints, user, required.Date, shiftReq.ShiftId);
                 MakeRoomForIncoming(solution, constraints, shiftReq, required.Date, user);
 
@@ -260,11 +255,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 ClearUnprotectedAdjacentConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
                 ClearUnprotectedSameDayConflicts(solution, constraints, user, required.Date, required.ShiftLabel);
 
-                if (!IsUserAvailable(user, required.Date, required.ShiftLabel, solution, constraints))
-                {
-                    continue;
-                }
-
+                // درخواست تأییدشده آخرین حرف است — حتی اگر توالی باقی‌مانده محافظت‌شده باشد
                 solution.AddAssignment(
                     user.UserId,
                     shiftReq.ShiftId,

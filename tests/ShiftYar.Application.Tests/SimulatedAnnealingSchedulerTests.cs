@@ -735,6 +735,83 @@ public class SimulatedAnnealingSchedulerTests
         }
 
         [Fact]
+        public void ApplyMandatoryConstraints_PreservesUser14RequiredMorning_AgainstManagerRepair()
+        {
+            var prev = new DateTime(2026, 8, 22);
+            var day = new DateTime(2026, 8, 23);
+            var specialty = new SpecialtyRequirement { SpecialtyId = 10, RequiredTotalCount = 2 };
+            var u14 = User(14, UserGender.Female, canBeShiftManager: true);
+            u14.UserName = "بهاره بهاری پور";
+            u14.ShiftManagerLevel = 1;
+            u14.MaxConsecutiveShifts = 2;
+            u14.RequiredShiftSlots.Add(new ShiftSlotConstraint
+            {
+                Date = day,
+                ShiftLabel = ShiftLabel.Morning,
+                ShiftId = 1
+            });
+
+            var others = Enumerable.Range(2, 7)
+                .Select(id =>
+                {
+                    var u = User(id, id % 2 == 0 ? UserGender.Female : UserGender.Male, canBeShiftManager: id <= 4);
+                    u.ShiftManagerLevel = id <= 4 ? 2 : null;
+                    u.MaxConsecutiveShifts = 2;
+                    return u;
+                })
+                .ToArray();
+
+            var constraints = BuildConstraints(
+                start: prev,
+                days: 2,
+                users: new[] { u14 }.Concat(others).ToArray(),
+                specialty: specialty);
+
+            constraints.ShiftRequirements[0].ManagerRequiredCount = 2;
+            constraints.ShiftRequirements[0].ManagerMinLevel1Count = 1;
+            constraints.ShiftRequirements.Add(new ShiftRequirement
+            {
+                ShiftId = 2,
+                ShiftLabel = ShiftLabel.Evening,
+                DepartmentId = 1,
+                DurationHours = 12,
+                ManagerRequiredCount = 2,
+                ManagerMinLevel1Count = 1,
+                SpecialtyRequirements = new List<SpecialtyRequirement> { CloneSpecialty(specialty) }
+            });
+            constraints.ShiftRequirements.Add(new ShiftRequirement
+            {
+                ShiftId = 3,
+                ShiftLabel = ShiftLabel.Night,
+                DepartmentId = 1,
+                DurationHours = 12,
+                ManagerRequiredCount = 2,
+                ManagerMinLevel1Count = 1,
+                SpecialtyRequirements = new List<SpecialtyRequirement> { CloneSpecialty(specialty) }
+            });
+            constraints.GlobalConstraints.MaxShiftsPerDay = 1;
+            constraints.HardRules.EnforceMaxShiftsPerDay = true;
+            constraints.HardRules.EnforceMaxConsecutiveShifts = true;
+            constraints.HardRules.AllowNightShiftAfterNightShift = false;
+
+            var solution = new ShiftSolution();
+            solution.AddAssignment(14, 3, prev, ShiftLabel.Night, false);
+            solution.AddAssignment(2, 1, day, ShiftLabel.Morning, false);
+            solution.AddAssignment(3, 2, day, ShiftLabel.Evening, false);
+            solution.AddAssignment(4, 2, day, ShiftLabel.Evening, false);
+            solution.AddAssignment(5, 3, day, ShiftLabel.Night, false);
+            solution.AddAssignment(6, 3, day, ShiftLabel.Night, false);
+
+            var scheduler = new SimulatedAnnealingScheduler(constraints, FastParameters);
+            scheduler.ApplyMandatoryConstraints(solution);
+
+            Assert.True(
+                solution.GetShiftAssignments(1, day).Any(a => a.UserId == 14 && !a.IsOnCall),
+                "حضور اجباری Morning کاربر ۱۴ در ۲۰۲۶-۰۸-۲۳ باید بعد از ترمیم مسئول/سهمیه باقی بماند");
+            Assert.Empty(ApprovedRequestGuard.GetUnmetViolations(solution, constraints));
+        }
+
+        [Fact]
         public void ApprovedRequestGuard_ForceApply_UsesShiftId_WhenFrontendSentShiftIdAsLabel()
         {
             // شبیه‌سازی باگ واقعی: فرانت Shift.Id=1/2/3 را به‌جای Label=0/1/2 می‌فرستد
