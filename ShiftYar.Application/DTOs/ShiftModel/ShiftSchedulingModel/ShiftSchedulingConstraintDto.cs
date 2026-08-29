@@ -19,7 +19,7 @@ namespace ShiftYar.Application.DTOs.ShiftModel.ShiftSchedulingModel
 
         public List<ShiftLabel> PreferredShifts { get; set; } = new List<ShiftLabel>();
         public List<ShiftLabel> UnwantedShifts { get; set; } = new List<ShiftLabel>();
-        public int MaxConsecutiveShifts { get; set; } = 3;
+        public int MaxConsecutiveShifts { get; set; } = 2;
         public int MinRestDaysBetweenShifts { get; set; } = 1;
         public int MaxShiftsPerWeek { get; set; } = 5;
         public int MaxNightShiftsPerMonth { get; set; } = 8;

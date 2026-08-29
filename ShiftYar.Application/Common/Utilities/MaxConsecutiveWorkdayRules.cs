@@ -31,6 +31,25 @@ public static class MaxConsecutiveWorkdayRules
             .Select(a => a.Date.Date)
             .ToHashSet();
 
+    /// <summary>
+    /// روزهایی که درخواست شیفت تأییدشده دارند در سقف روز متوالی شمرده نمی‌شوند.
+    /// </summary>
+    public static bool IsApprovedOnWorkDay(UserConstraint user, DateTime date) =>
+        user.RequiredShiftSlots.Any(s => s.Date.Date == date.Date)
+        || user.RequiredPresenceDates.Any(d => d.Date == date.Date);
+
+    public static HashSet<DateTime> GetCountableWorkDates(ShiftSolution solution, UserConstraint user) =>
+        GetWorkDates(solution, user.UserId)
+            .Where(d => !IsApprovedOnWorkDay(user, d))
+            .ToHashSet();
+
+    public static HashSet<DateTime> GetCountableWorkDatesFromAssignments(
+        IEnumerable<SaShiftAssignment> assignments,
+        UserConstraint user) =>
+        GetWorkDatesFromAssignments(assignments)
+            .Where(d => !IsApprovedOnWorkDay(user, d))
+            .ToHashSet();
+
     public static int CountRunEndingBefore(IReadOnlySet<DateTime> workDates, DateTime date)
     {
         var cursor = date.Date.AddDays(-1);
@@ -85,7 +104,12 @@ public static class MaxConsecutiveWorkdayRules
             return false;
         }
 
-        var workDates = GetWorkDates(solution, user.UserId);
+        if (IsApprovedOnWorkDay(user, date))
+        {
+            return false;
+        }
+
+        var workDates = GetCountableWorkDates(solution, user);
         var projected = ProjectedRunIfWorkDayAdded(workDates, date);
         return projected > user.MaxConsecutiveShifts;
     }
@@ -101,7 +125,12 @@ public static class MaxConsecutiveWorkdayRules
             return false;
         }
 
-        var workDates = GetWorkDatesFromAssignments(assignments);
+        if (IsApprovedOnWorkDay(user, candidateDate))
+        {
+            return false;
+        }
+
+        var workDates = GetCountableWorkDatesFromAssignments(assignments, user);
         var projected = ProjectedRunIfWorkDayAdded(workDates, candidateDate);
         return projected > user.MaxConsecutiveShifts;
     }
@@ -214,7 +243,7 @@ public static class MaxConsecutiveWorkdayRules
 
         foreach (var user in constraints.UserConstraints.Where(u => u.ShiftType != ShiftTypes.FixedShift))
         {
-            var workDates = GetWorkDates(solution, user.UserId).OrderBy(d => d).ToList();
+            var workDates = GetCountableWorkDates(solution, user).OrderBy(d => d).ToList();
             if (workDates.Count == 0)
             {
                 continue;
@@ -255,27 +284,8 @@ public static class MaxConsecutiveWorkdayRules
 
             var name = string.IsNullOrWhiteSpace(user.UserName) ? null : user.UserName.Trim();
             var who = name == null ? $"کاربر {user.UserId}" : $"کاربر {user.UserId} ({name})";
-            var msg =
-                $"{who}: {maxRun} روز کار متوالی از {bestStart:yyyy-MM-dd} تا {bestEnd:yyyy-MM-dd} (سقف {user.MaxConsecutiveShifts})";
-
-            var requiredDays = user.RequiredShiftSlots
-                .Select(s => s.Date.Date)
-                .Concat(user.RequiredPresenceDates.Select(d => d.Date))
-                .ToHashSet();
-            var daysInRun = Enumerable.Range(0, (bestEnd - bestStart).Days + 1)
-                .Select(i => bestStart.AddDays(i))
-                .ToList();
-            var requiredInRun = daysInRun.Count(d => requiredDays.Contains(d));
-            if (requiredInRun == daysInRun.Count)
-            {
-                msg += " — به‌خاطر درخواست‌های ON تأییدشده (اولویت مطلق؛ الگوریتم حذفشان نمی‌کند).";
-            }
-            else if (requiredInRun > 0)
-            {
-                msg += $" — {requiredInRun}/{daysInRun.Count} روز این بازه درخواست ON تأییدشده دارد.";
-            }
-
-            violations.Add(msg);
+            violations.Add(
+                $"{who}: {maxRun} روز کار متوالی از {bestStart:yyyy-MM-dd} تا {bestEnd:yyyy-MM-dd} (سقف {user.MaxConsecutiveShifts})");
         }
 
         return violations;

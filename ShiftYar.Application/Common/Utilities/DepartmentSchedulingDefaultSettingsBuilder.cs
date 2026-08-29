@@ -13,7 +13,7 @@ public static class DepartmentSchedulingDefaultSettingsBuilder
 
         var maxShiftsPerDay = ResolveMaxShiftsPerDay(profile);
         var maxShiftsPerWeek = ResolveMaxShiftsPerWeek(profile);
-        var maxConsecutiveShifts = profile.ActiveUserCount < 8 ? 2 : 3;
+        var maxConsecutiveShifts = 2;
         var nightDistributionType = ResolveNightDistributionType(profile);
 
         return new DepartmentSchedulingSettingsDtoAdd

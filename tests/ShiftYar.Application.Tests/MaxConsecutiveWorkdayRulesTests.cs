@@ -197,6 +197,64 @@ public class MaxConsecutiveWorkdayRulesTests
             $"User 13 run={MaxConsecutiveWorkdayRules.GetMaxConsecutiveWorkRun(solution, user.UserId)}");
     }
 
+    [Fact]
+    public void GetViolations_SkipsRunMadeEntirelyOfApprovedOnRequests()
+    {
+        var start = new DateTime(2026, 9, 17);
+        var user = MakeUser(14);
+        user.MaxConsecutiveShifts = 3;
+        for (var i = 0; i < 5; i++)
+        {
+            user.RequiredShiftSlots.Add(new ShiftSlotConstraint
+            {
+                Date = start.AddDays(i),
+                ShiftLabel = ShiftLabel.Evening,
+                ShiftId = 2
+            });
+        }
+
+        var solution = new ShiftSolution();
+        for (var i = 0; i < 5; i++)
+        {
+            solution.AddAssignment(user.UserId, 2, start.AddDays(i), ShiftLabel.Evening, false);
+        }
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(4),
+            UserConstraints = [user],
+            HardRules = new HardRuleSet { EnforceMaxConsecutiveShifts = true }
+        };
+
+        Assert.Empty(MaxConsecutiveWorkdayRules.GetViolations(solution, constraints));
+    }
+
+    [Fact]
+    public void WouldExceed_IgnoresApprovedOnDays_WhenCheckingNeighbors()
+    {
+        var start = new DateTime(2026, 8, 23);
+        var user = MakeUser(1);
+        user.MaxConsecutiveShifts = 2;
+        user.RequiredShiftSlots.Add(new ShiftSlotConstraint
+        {
+            Date = start.AddDays(1),
+            ShiftLabel = ShiftLabel.Evening,
+            ShiftId = 2
+        });
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(user.UserId, 1, start, ShiftLabel.Morning, false);
+        solution.AddAssignment(user.UserId, 2, start.AddDays(1), ShiftLabel.Evening, false);
+
+        var constraints = BuildConstraints(start, user);
+
+        Assert.False(MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
+            solution, constraints, user, start.AddDays(2)));
+        Assert.False(MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
+            solution, constraints, user, start.AddDays(1)));
+    }
+
     private static ShiftConstraints BuildConstraints(DateTime start, UserConstraint user, int days = 14) =>
         new()
         {

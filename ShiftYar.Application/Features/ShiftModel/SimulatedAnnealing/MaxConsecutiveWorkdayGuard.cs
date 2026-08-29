@@ -35,7 +35,7 @@ public static class MaxConsecutiveWorkdayGuard
         var max = Math.Max(1, user.MaxConsecutiveShifts);
         for (var pass = 0; pass < 16; pass++)
         {
-            var workDates = MaxConsecutiveWorkdayRules.GetWorkDates(solution, user.UserId)
+            var workDates = MaxConsecutiveWorkdayRules.GetCountableWorkDates(solution, user)
                 .OrderBy(d => d)
                 .ToList();
             if (workDates.Count == 0)
@@ -110,6 +110,11 @@ public static class MaxConsecutiveWorkdayGuard
         }
 
         if (assignments.Any(a => IsOnProtected(user, a)))
+        {
+            return false;
+        }
+
+        if (assignments.Any(a => ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, a)))
         {
             return false;
         }

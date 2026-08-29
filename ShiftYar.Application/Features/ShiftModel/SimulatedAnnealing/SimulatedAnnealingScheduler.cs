@@ -744,10 +744,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             double penalty = 0;
             foreach (var user in _constraints.UserConstraints.Where(u => u.ShiftType != ShiftTypes.FixedShift))
             {
-                var workDates = solution.GetUserAllAssignments(user.UserId)
-                    .Where(a => !a.IsOnCall)
-                    .Select(a => a.Date.Date)
-                    .Distinct()
+                var workDates = MaxConsecutiveWorkdayRules.GetCountableWorkDates(solution, user)
                     .OrderBy(d => d)
                     .ToList();
                 if (workDates.Count == 0)
@@ -1257,9 +1254,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
                 if (_constraints.HardRules.EnforceMaxConsecutiveShifts && !isDailyFixedStaff)
                 {
-                    var workDates = userAssignments
-                        .Select(a => a.Date.Date)
-                        .Distinct()
+                    var workDates = MaxConsecutiveWorkdayRules
+                        .GetCountableWorkDatesFromAssignments(userAssignments, userConstraint)
                         .OrderBy(d => d)
                         .ToList();
                     int consecutive = 1;
@@ -1941,37 +1937,47 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                 if (IsMandatoryStable(solution))
                 {
-                    ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
-                    RunShiftManagerRepairPasses(solution);
-                    ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
-                    AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
-                    DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
+                    FinishWithCoverageManagersAndQuotas(solution);
                     return;
                 }
             }
 
             ApprovedRequestGuard.ForceApply(solution, _constraints);
-            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
-            RunShiftManagerRepairPasses(solution);
-            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(solution, _constraints);
+            FinishWithCoverageManagersAndQuotas(solution);
+        }
+
+        /// <summary>
+        /// پوشش و مسئول شیفت بعد از سهمیه/strip — سقف روز متوالی اینجا دیگر ترکیب مسئول را خراب نمی‌کند.
+        /// </summary>
+        private void FinishWithCoverageManagersAndQuotas(ShiftSolution solution)
+        {
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
-            MaxConsecutiveWorkdayGuard.Enforce(solution, _constraints);
             ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
             RunShiftManagerRepairPasses(solution);
             ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
             ApprovedRequestGuard.ForceApply(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
-            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
+            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
+            RunShiftManagerRepairPasses(solution);
+            if (!AreExactNightQuotasSatisfied(solution, out _))
+            {
+                ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
+            }
+
+            if (HasUnmetManagerMix(solution))
+            {
+                RunShiftManagerRepairPasses(solution);
+            }
         }
 
         private bool IsMandatoryStable(ShiftSolution solution) =>
             AreExactNightQuotasSatisfied(solution, out _)
             && !HasUnmetManagerMix(solution)
             && AdjacentShiftRestGuard.GetViolations(solution, _constraints).Count == 0
-            && DailyDuplicateAssignmentGuard.GetViolations(solution, _constraints).Count == 0
-            && MaxConsecutiveWorkdayRules.GetViolations(solution, _constraints).Count == 0;
+            && DailyDuplicateAssignmentGuard.GetViolations(solution, _constraints).Count == 0;
 
         /// <summary>
         /// آخرین مرحله: ترمیم مسئول → تکمیل سهمیه؛ هیچ ترمیم مسئول بعد از پر شدن سهمیه اجرا نمی‌شود.

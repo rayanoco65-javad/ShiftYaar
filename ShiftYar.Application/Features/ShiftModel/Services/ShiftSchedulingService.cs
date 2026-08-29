@@ -1680,18 +1680,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                     constraints.GlobalConstraints.MaxShiftsPerDay = Math.Clamp(maxPerDay, 1, 2);
 
-                    if (constraints.HardRules.EnforceMaxConsecutiveShifts == false)
-                    {
-                        // حتی اگر سخت خاموش باشد، برای گزارش/جریمه نرم سقف معقول نگه دار
-                        constraints.HardRules.EnforceMaxConsecutiveShifts = true;
-                    }
+                    // سقف روز متوالی را سخت اجباری نکن مگر خود دپارتمان روشن کرده باشد.
+                    // برنامه دستی اطفال معمولاً ۳ تا ۶ روز کار پشت‌سرهم دارد.
                 }
                 else
                 {
                     constraints.HardRules.ForbidDuplicateDailyAssignments = true;
                     constraints.HardRules.EnforceMaxShiftsPerDay = true;
                     constraints.GlobalConstraints.MaxShiftsPerDay = 2;
-                    constraints.HardRules.EnforceMaxConsecutiveShifts = true;
+                    constraints.HardRules.EnforceMaxConsecutiveShifts = false;
                 }
 
                 // بارگذاری کاربران دپارتمان
@@ -1872,7 +1869,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         .GetStandaloneLabels(userConstraint.AllowedShiftPermissions)
                         .ToList();
 
-                    userConstraint.MaxConsecutiveShifts = 3; // پیش‌فرض
+                    userConstraint.MaxConsecutiveShifts = 2;
                     userConstraint.MinRestDaysBetweenShifts = 1; // پیش‌فرض
                     userConstraint.MaxShiftsPerWeek = 5; // پیش‌فرض
                     // با خاموش بودن شب‌متوالی: فقط شب پشت‌سرهم ممنوع است (Abs فاصله > ۱ ⇒ الگوی N / استراحت / N مجاز)
@@ -1897,7 +1894,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         }
                         if (deptSettingEarly.MaxConsecutiveShifts.HasValue && deptSettingEarly.MaxConsecutiveShifts.Value > 0)
                         {
-                            userConstraint.MaxConsecutiveShifts = Math.Max(1, deptSettingEarly.MaxConsecutiveShifts.Value);
+                            userConstraint.MaxConsecutiveShifts = deptSettingEarly.MaxConsecutiveShifts.Value;
                         }
                         if (constraints.HardRules.EnforceWeeklyMaxShifts &&
                             deptSettingEarly.MaxShiftsPerWeek.HasValue &&
@@ -2437,10 +2434,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     }
 
                     constraints.GlobalConstraints.MaxShiftsPerDay = Math.Clamp(maxPerDay, 1, 2);
-                    if (constraints.HardRules.EnforceMaxConsecutiveShifts != true)
-                    {
-                        constraints.HardRules.EnforceMaxConsecutiveShifts = true;
-                    }
+                    // EnforceMaxConsecutiveShifts همان مقدار تنظیمات دپارتمان می‌ماند (سخت اجباری نشود).
 
                     if (deptSetting.MaxConsecutiveNightShifts.HasValue)
                     {

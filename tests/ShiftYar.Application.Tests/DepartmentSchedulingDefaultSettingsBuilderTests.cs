@@ -41,6 +41,7 @@ public class DepartmentSchedulingDefaultSettingsBuilderTests
         Assert.Equal(2, dto.EveningShiftDistributionType);
         Assert.Equal(0.0, dto.ShiftManagerRequirementWeight);
         Assert.Equal(2, dto.MaxShiftsPerDay);
+        Assert.Equal(2, dto.MaxConsecutiveShifts);
         Assert.Equal(6, dto.MaxShiftsPerWeek);
         Assert.False(dto.EnforceMinimumShiftsForRotatingStaff);
         Assert.Equal(3.0, dto.FairShiftCountBalanceWeight);

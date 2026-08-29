@@ -32,7 +32,7 @@ namespace ShiftYar.Application.DTOs.ShiftModel.ShiftSchedulingModel
         public List<DateTime> UnavailableDates { get; set; } = new List<DateTime>(); // تاریخ‌های عدم حضور (میلادی)
         public List<ShiftLabel> PreferredShifts { get; set; } = new List<ShiftLabel>(); // شیفت‌های ترجیحی
         public List<ShiftLabel> UnwantedShifts { get; set; } = new List<ShiftLabel>(); // شیفت‌های ناخواسته
-        public int MaxConsecutiveShifts { get; set; } = 3; // سقف شیفت متوالی
+        public int MaxConsecutiveShifts { get; set; } = 2; // سقف شیفت متوالی
         public int MinRestDaysBetweenShifts { get; set; } = 1; // حداقل روز استراحت
         public int MaxShiftsPerWeek { get; set; } = 5; // سقف شیفت هفتگی
         public int MaxNightShiftsPerMonth { get; set; } = 8; // سقف شیفت شب ماهانه
