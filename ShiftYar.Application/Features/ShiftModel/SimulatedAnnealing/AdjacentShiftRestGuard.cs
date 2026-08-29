@@ -150,11 +150,23 @@ public static class AdjacentShiftRestGuard
             return IsRequestProtected(user, later) ? null : later;
         }
 
-        // شب→شب / شب→عصر تنظیمات دپارتمان: شیفت بعدی غیرِON همیشه حذف شود (سهمیه/مسئول اولویت ندارند)
+        // محدودیت تنظیمات: جفت را بشکن، ولی شبِ mix-critical را قربانی نکن
         if (AdjacentShiftRestRules.IsSettingsControlledAfterNightPair(
                 earlier.ShiftLabel, earlier.Date, later.ShiftLabel, later.Date)
             && !IsRequestProtected(user, later))
         {
+            if (laterManagerCritical && !IsRequestProtected(user, earlier) && !earlierManagerCritical)
+            {
+                return earlier;
+            }
+
+            if (later.ShiftLabel == ShiftLabel.Night
+                && laterManagerCritical
+                && !IsRequestProtected(user, earlier))
+            {
+                return earlier;
+            }
+
             return later;
         }
 

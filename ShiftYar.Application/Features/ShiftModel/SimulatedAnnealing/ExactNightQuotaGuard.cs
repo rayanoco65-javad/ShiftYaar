@@ -1531,7 +1531,7 @@ public static class ExactNightQuotaGuard
     {
         foreach (var assignment in solution.GetUserAssignments(user.UserId, date).ToList())
         {
-            if (IsProtected(constraints, user.UserId, assignment))
+            if (IsSticky(constraints, solution, user.UserId, assignment))
             {
                 continue;
             }
@@ -1601,7 +1601,7 @@ public static class ExactNightQuotaGuard
         var toRemove = solution.GetUserAssignments(user.UserId, date)
             .Where(a => !a.IsOnCall)
             .Where(a => a.ShiftLabel == label)
-            .Where(a => !IsProtected(constraints, user.UserId, a))
+            .Where(a => !IsSticky(constraints, solution, user.UserId, a))
             .ToList();
 
         foreach (var a in toRemove)
@@ -1618,7 +1618,7 @@ public static class ExactNightQuotaGuard
     {
         var toRemove = solution.GetUserAssignments(user.UserId, date)
             .Where(a => !a.IsOnCall)
-            .Where(a => !IsProtected(constraints, user.UserId, a))
+            .Where(a => !IsSticky(constraints, solution, user.UserId, a))
             .ToList();
 
         foreach (var a in toRemove)
@@ -1649,7 +1649,7 @@ public static class ExactNightQuotaGuard
                     return true;
                 }
 
-                if (IsProtected(constraints, user.UserId, a))
+                if (IsSticky(constraints, solution, user.UserId, a))
                 {
                     return true;
                 }
@@ -1696,7 +1696,7 @@ public static class ExactNightQuotaGuard
         var protectedEvening = solution.GetUserAssignments(user.UserId, date)
             .Where(a => !a.IsOnCall)
             .Where(a => a.ShiftLabel == ShiftLabel.Evening)
-            .Any(a => IsProtected(constraints, user.UserId, a));
+            .Any(a => IsSticky(constraints, solution, user.UserId, a));
         if (protectedEvening)
         {
             return false;
@@ -1705,7 +1705,7 @@ public static class ExactNightQuotaGuard
         var nextDay = date.Date.AddDays(1);
         var protectedBlockingNextDay = solution.GetUserAssignments(user.UserId, nextDay)
             .Where(a => !a.IsOnCall)
-            .Where(a => IsProtected(constraints, user.UserId, a))
+            .Where(a => IsSticky(constraints, solution, user.UserId, a))
             .Any(a => constraints.HardRules.IsForbiddenOnDayAfterNight(a.ShiftLabel));
         if (protectedBlockingNextDay)
         {
@@ -1716,7 +1716,7 @@ public static class ExactNightQuotaGuard
         var protectedPrevNight = solution.GetUserAssignments(user.UserId, prevDay)
             .Where(a => !a.IsOnCall)
             .Where(a => a.ShiftLabel == ShiftLabel.Night)
-            .Any(a => IsProtected(constraints, user.UserId, a));
+            .Any(a => IsSticky(constraints, solution, user.UserId, a));
         if (protectedPrevNight && !constraints.HardRules.AllowNightShiftAfterNightShift)
         {
             return false;
@@ -2211,6 +2211,14 @@ public static class ExactNightQuotaGuard
         return user.RequiredShiftSlots.Any(s =>
             s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel);
     }
+
+    private static bool IsSticky(
+        ShiftConstraints constraints,
+        ShiftSolution solution,
+        int userId,
+        SaShiftAssignment assignment) =>
+        IsProtected(constraints, userId, assignment)
+        || ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, assignment);
 
     public static double CalculateSpreadPenalty(
         IReadOnlyList<DateTime> nightDates,

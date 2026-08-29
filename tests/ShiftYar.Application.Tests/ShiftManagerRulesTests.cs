@@ -631,8 +631,8 @@ public class ShiftManagerRulesTests
             new DateTime(2026, 8, 28),
             new DateTime(2026, 9, 1),
             new DateTime(2026, 9, 7),
-            new DateTime(2026, 9, 11),
-            new DateTime(2026, 9, 13)
+            new DateTime(2026, 9, 8),
+            new DateTime(2026, 9, 22)
         };
 
         var l1Ids = new[] { 12, 14, 15, 17, 18, 19, 20, 21 };
@@ -717,6 +717,9 @@ public class ShiftManagerRulesTests
         }
 
         Assert.Empty(AdjacentShiftRestGuard.GetViolations(solution, constraints));
+        Assert.DoesNotContain(
+            solution.Violations,
+            v => v.Contains("Shift manager mix unmet", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

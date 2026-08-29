@@ -1974,11 +1974,18 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             if (HasUnmetManagerMix(solution))
             {
                 RunShiftManagerRepairPasses(solution);
+                ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
             }
 
             if (!AreExactNightQuotasSatisfied(solution, out _))
             {
                 ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
+            }
+
+            SealApprovedRequestsThenAdjacency(solution);
+            if (HasUnmetManagerMix(solution))
+            {
+                RunShiftManagerRepairPasses(solution);
             }
 
             SealApprovedRequestsThenAdjacency(solution);
@@ -2411,29 +2418,34 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var occupantGender = GetUserGender(occupantAssignment.UserId);
             var genderLocked = IsGenderLockedShift(shiftReq, date, occupantSpecialty);
 
-            var candidate = RankManagerCandidates(
-                    solution, shiftReq, date, needLevel1, occupantSpecialty, occupantGender, genderLocked)
-                .FirstOrDefault()
-                ?? RankManagerCandidates(
-                    solution, shiftReq, date, needLevel1, occupantSpecialty, occupantGender, genderLocked,
-                    relaxNightSpacing: true)
-                    .FirstOrDefault()
-                ?? RankManagerCandidates(
-                    solution, shiftReq, date, needLevel1, occupantSpecialty, occupantGender, genderLocked,
-                    relaxNightSpacing: true, mandatoryInstall: true)
-                    .FirstOrDefault();
-
-            if (candidate == null)
+            foreach (var candidate in RankManagerCandidatePool(
+                         solution, shiftReq, date, needLevel1, occupantSpecialty, occupantGender, genderLocked)
+                         .Where(u => u.UserId != occupantUser.UserId))
             {
-                return false;
+                var backup = solution.Clone();
+                if (!TryClearAdjacencyForManagerInstall(solution, candidate, date, shiftReq.ShiftLabel))
+                {
+                    RestoreSolutionFromQuotaBackup(solution, backup);
+                    continue;
+                }
+
+                if (!IsUserAvailableForManagerInstall(
+                        candidate, date, shiftReq.ShiftLabel, solution, occupantAssignment.ShiftId,
+                        ignoreSameDayAssignments: true, relaxNightSpacing: true, mandatoryInstall: true))
+                {
+                    RestoreSolutionFromQuotaBackup(solution, backup);
+                    continue;
+                }
+
+                solution.RemoveAssignment(
+                    occupantAssignment.UserId,
+                    occupantAssignment.ShiftId,
+                    occupantAssignment.Date);
+                AddShiftAssignmentForManagerInstall(solution, candidate, shiftReq, date);
+                return true;
             }
 
-            solution.RemoveAssignment(
-                occupantAssignment.UserId,
-                occupantAssignment.ShiftId,
-                occupantAssignment.Date);
-            AddShiftAssignmentForManagerInstall(solution, candidate, shiftReq, date);
-            return true;
+            return false;
         }
 
         /// <summary>
@@ -2557,6 +2569,125 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// کاندیداهای مسئول بدون چک توالی — تداخل غیرمحافظت‌شده قبل از نصب پاک می‌شود.
+        /// </summary>
+        private IEnumerable<UserConstraint> RankManagerCandidatePool(
+            ShiftSolution solution,
+            ShiftRequirement shiftReq,
+            DateTime date,
+            bool needLevel1,
+            int specialtyId,
+            UserGender occupantGender,
+            bool genderLocked) =>
+            _constraints.UserConstraints
+                .Where(u => u.IsActive && ShiftManagerRules.IsManager(u))
+                .Where(u => !needLevel1 || ShiftManagerRules.IsLevel1(u))
+                .Where(u => u.SpecialtyId == specialtyId)
+                .Where(u => !genderLocked || u.Gender == occupantGender)
+                .Where(u => !HasConflictingApprovedRequiredOnDate(u, date, shiftReq.ShiftLabel))
+                .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, shiftReq.ShiftLabel))
+                .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
+                .OrderByDescending(u => ShiftManagerRules.IsLevel1(u))
+                .ThenBy(u => AdjacentShiftRestRules.WouldConflict(
+                    solution.GetUserAllAssignments(u.UserId), date, shiftReq.ShiftLabel, _constraints)
+                    ? 1
+                    : 0)
+                .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
+                .ThenBy(u => u.UserId);
+
+        /// <summary>
+        /// تداخل غیرِON و غیرِmix-critical را برای نصب مسئول شب/عصر پاک می‌کند.
+        /// </summary>
+        private bool TryClearAdjacencyForManagerInstall(
+            ShiftSolution solution,
+            UserConstraint user,
+            DateTime date,
+            ShiftLabel label)
+        {
+            if (label == ShiftLabel.Night)
+            {
+                if (!_constraints.HardRules.AllowNightShiftAfterNightShift)
+                {
+                    if (!TryClearUserAssignmentsOnDate(solution, user, date.Date.AddDays(-1), ShiftLabel.Night))
+                    {
+                        return false;
+                    }
+                }
+
+                foreach (var assignment in solution.GetUserAssignments(user.UserId, date.Date.AddDays(1)).ToList())
+                {
+                    if (!_constraints.HardRules.IsForbiddenOnDayAfterNight(assignment.ShiftLabel))
+                    {
+                        continue;
+                    }
+
+                    if (!TryClearAssignment(solution, user, assignment))
+                    {
+                        return false;
+                    }
+                }
+
+                foreach (var assignment in solution.GetUserAssignments(user.UserId, date)
+                             .Where(a => a.ShiftLabel == ShiftLabel.Evening)
+                             .ToList())
+                {
+                    if (!TryClearAssignment(solution, user, assignment))
+                    {
+                        return false;
+                    }
+                }
+            }
+            else if (label == ShiftLabel.Evening && !_constraints.HardRules.AllowEveningAfterNightShift)
+            {
+                if (!TryClearUserAssignmentsOnDate(solution, user, date.Date.AddDays(-1), ShiftLabel.Night))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private bool TryClearUserAssignmentsOnDate(
+            ShiftSolution solution,
+            UserConstraint user,
+            DateTime date,
+            ShiftLabel label)
+        {
+            foreach (var assignment in solution.GetUserAssignments(user.UserId, date)
+                         .Where(a => a.ShiftLabel == label && !a.IsOnCall)
+                         .ToList())
+            {
+                if (!TryClearAssignment(solution, user, assignment))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private bool TryClearAssignment(
+            ShiftSolution solution,
+            UserConstraint user,
+            SaShiftAssignment assignment)
+        {
+            if (ApprovedRequestGuard.IsApprovedRequiredSlot(
+                    user, assignment.Date, assignment.ShiftLabel, assignment.ShiftId))
+            {
+                return false;
+            }
+
+            if (ShiftManagerRules.IsCriticalForManagerMix(_constraints, solution, assignment))
+            {
+                return false;
+            }
+
+            solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+            return true;
         }
 
         private IEnumerable<UserConstraint> RankManagerCandidates(
