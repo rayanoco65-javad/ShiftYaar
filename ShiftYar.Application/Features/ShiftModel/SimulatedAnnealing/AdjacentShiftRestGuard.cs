@@ -44,7 +44,7 @@ public static class AdjacentShiftRestGuard
                 var remove = ChooseRemovable(user, earlier, later, solution, constraints);
                 if (remove == null)
                 {
-                    // هر دو محافظت‌شده‌اند — بن‌بست؛ حلقه را قطع کن
+                    // هر دو ON تأییدشده‌اند — این جفت گزارش نمی‌شود؛ حلقه را قطع کن
                     break;
                 }
 
@@ -150,15 +150,16 @@ public static class AdjacentShiftRestGuard
             return IsRequestProtected(user, later) ? null : later;
         }
 
+        // شب→شب / شب→عصر تنظیمات دپارتمان: شیفت بعدی غیرِON همیشه حذف شود (سهمیه/مسئول اولویت ندارند)
+        if (AdjacentShiftRestRules.IsSettingsControlledAfterNightPair(
+                earlier.ShiftLabel, earlier.Date, later.ShiftLabel, later.Date)
+            && !IsRequestProtected(user, later))
+        {
+            return later;
+        }
+
         if (earlierManagerCritical && laterManagerCritical)
         {
-            if (AdjacentShiftRestRules.IsSettingsControlledAfterNightPair(
-                    earlier.ShiftLabel, earlier.Date, later.ShiftLabel, later.Date))
-            {
-                // عصر/شب بعد از شب: اگر هیچ‌کدام ON نیست، شیفت بعدی حذف می‌شود (مسئول/پوشش بعداً ترمیم)
-                return IsRequestProtected(user, later) ? null : later;
-            }
-
             return null;
         }
 
@@ -214,7 +215,7 @@ public static class AdjacentShiftRestGuard
             return earlier;
         }
 
-        return null;
+        return later;
     }
 
     private static bool IsRequestProtected(UserConstraint user, SaShiftAssignment assignment)

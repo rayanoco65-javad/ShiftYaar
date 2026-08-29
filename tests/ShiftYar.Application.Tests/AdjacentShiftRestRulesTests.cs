@@ -322,6 +322,75 @@ public class AdjacentShiftRestRulesTests
     }
 
     [Fact]
+    public void StripForbiddenAdjacencies_BreaksQuotaNightThenNightThenEvening_User21()
+    {
+        var n0 = new DateTime(2026, 9, 4);
+        var n1 = new DateTime(2026, 9, 5);
+        var eve = new DateTime(2026, 9, 6);
+        var u21 = new UserConstraint
+        {
+            UserId = 21,
+            UserName = "عاطفه رحیمی منفرد",
+            SpecialtyId = 2,
+            Gender = UserGender.Female,
+            ShiftManagerLevel = 1,
+            CanBeShiftManager = true,
+            IsActive = true,
+            ExactNightShiftCount = 2
+        };
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = n0,
+            EndDate = eve,
+            UserConstraints = { u21 },
+            ShiftRequirements =
+            {
+                new ShiftRequirement
+                {
+                    ShiftId = 5,
+                    ShiftLabel = ShiftLabel.Evening,
+                    DepartmentId = 2,
+                    DurationHours = 12,
+                    SpecialtyRequirements =
+                    {
+                        new SpecialtyRequirement { SpecialtyId = 2, RequiredTotalCount = 1 }
+                    }
+                },
+                new ShiftRequirement
+                {
+                    ShiftId = 6,
+                    ShiftLabel = ShiftLabel.Night,
+                    DepartmentId = 2,
+                    DurationHours = 12,
+                    SpecialtyRequirements =
+                    {
+                        new SpecialtyRequirement { SpecialtyId = 2, RequiredTotalCount = 1 }
+                    }
+                }
+            },
+            HardRules = new HardRuleSet
+            {
+                AllowEveningAfterNightShift = false,
+                AllowNightShiftAfterNightShift = false,
+                EnforceSpecialtyCapacity = true
+            }
+        };
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(21, 6, n0, ShiftLabel.Night, false);
+        solution.AddAssignment(21, 6, n1, ShiftLabel.Night, false);
+        solution.AddAssignment(21, 5, eve, ShiftLabel.Evening, false);
+
+        AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+
+        Assert.Empty(AdjacentShiftRestGuard.GetViolations(solution, constraints));
+        Assert.False(
+            AdjacentShiftRestRules.HasForbiddenAdjacentPair(
+                solution.GetUserAllAssignments(21), constraints.HardRules));
+    }
+
+    [Fact]
     public void Optimize_NeverAssignsForbiddenAdjacencies()
     {
         var start = new DateTime(2026, 8, 23);

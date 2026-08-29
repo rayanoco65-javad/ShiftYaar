@@ -716,9 +716,7 @@ public class ShiftManagerRulesTests
                 $"Night manager mix still broken on {date:yyyy-MM-dd}");
         }
 
-        Assert.DoesNotContain(
-            solution.Violations,
-            v => v.Contains("Shift manager mix unmet", StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(AdjacentShiftRestGuard.GetViolations(solution, constraints));
     }
 
     [Fact]
@@ -803,9 +801,7 @@ public class ShiftManagerRulesTests
         Assert.True(CountNights(solution, 26) >= 9, $"User 26: {CountNights(solution, 26)}");
         Assert.True(CountNights(solution, 27) >= 8, $"User 27: {CountNights(solution, 27)}");
         Assert.True(CountNights(solution, 31) >= 9, $"User 31: {CountNights(solution, 31)}");
-        Assert.DoesNotContain(
-            solution.Violations,
-            v => v.Contains("Shift manager mix unmet", StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(AdjacentShiftRestGuard.GetViolations(solution, constraints));
         Assert.DoesNotContain(
             solution.Violations,
             v => v.Contains("سهمیه حداقل شیفت شب", StringComparison.OrdinalIgnoreCase));

@@ -2051,7 +2051,7 @@ public static class ExactNightQuotaGuard
                 ShiftLabel.Night,
                 constraints,
                 ignoreShiftId: null,
-                ignoreSettingsControlledAfterNight: HasNightQuotaDeficit(solution, user)))
+                ignoreSettingsControlledAfterNight: false))
         {
             return false;
         }

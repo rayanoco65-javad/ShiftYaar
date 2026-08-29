@@ -1571,8 +1571,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             // پوشش + مسئول شیفت + سهمیه + سقف روز متوالی — حلقهٔ نهایی محدود
             FinalizeMandatoryConstraints(solution);
-            // حضور اجباری تأییدشده آخرین حرف مطلق است — هیچ گاردی بعد از این حق حذف آن را ندارد
-            ApprovedRequestGuard.ForceApply(solution, _constraints);
+            SealApprovedRequestsThenAdjacency(solution);
 
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
@@ -1951,7 +1950,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         /// <summary>
         /// پوشش و مسئول شیفت بعد از سهمیه/strip.
-        /// ForceApply آخرین مرحله است تا ترمیم مسئول/سهمیه حضور اجباری را نرباید.
+        /// ForceApply درخواست ON را برمی‌گرداند؛ سپس فقط جفت‌های غیرِON تنظیمات پاک می‌شوند
+        /// و در صورت نیاز مسئول/سهمیه دوباره با رعایت توالی ترمیم می‌شوند.
         /// </summary>
         private void FinishWithCoverageManagersAndQuotas(ShiftSolution solution)
         {
@@ -1970,7 +1970,24 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
             }
 
+            SealApprovedRequestsThenAdjacency(solution);
+            if (HasUnmetManagerMix(solution))
+            {
+                RunShiftManagerRepairPasses(solution);
+            }
+
+            if (!AreExactNightQuotasSatisfied(solution, out _))
+            {
+                ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
+            }
+
+            SealApprovedRequestsThenAdjacency(solution);
+        }
+
+        private void SealApprovedRequestsThenAdjacency(ShiftSolution solution)
+        {
             ApprovedRequestGuard.ForceApply(solution, _constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
         }
 
         private bool IsMandatoryStable(ShiftSolution solution) =>
@@ -2699,15 +2716,17 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return false;
             }
 
-            var relaxAdjacency = relaxNightSpacing || mandatoryInstall;
+            var ignoreSettingsAfterNight =
+                ApprovedRequestGuard.IsApprovedRequiredSlot(user, date, shiftLabel);
             if (AdjacentShiftRestRules.WouldConflict(
                     solution.GetUserAllAssignments(user.UserId),
                     date, shiftLabel, _constraints, ignoreShiftId,
-                    ignoreSettingsControlledAfterNight: relaxAdjacency))
+                    ignoreSettingsControlledAfterNight: ignoreSettingsAfterNight))
             {
                 return false;
             }
 
+            var relaxNightGap = relaxNightSpacing || mandatoryInstall;
             // الزام مسئول شیفت سخت‌تر از سقف روزهای کاری متوالی و فاصله شب است
             if (shiftLabel == ShiftLabel.Night)
             {
@@ -2725,7 +2744,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     return false;
                 }
 
-                if (!relaxAdjacency && user.MinDaysBetweenNightShifts > 0)
+                if (!relaxNightGap && user.MinDaysBetweenNightShifts > 0)
                 {
                     foreach (var n in nights)
                     {
