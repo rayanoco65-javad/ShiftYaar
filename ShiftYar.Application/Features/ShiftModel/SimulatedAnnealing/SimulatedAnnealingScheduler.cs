@@ -1,4 +1,4 @@
-﻿using ShiftYar.Application.Common.Utilities;
+using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
 using System;
 using System.Collections.Generic;
@@ -256,19 +256,23 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             // حرکت‌های هدفمند بیمارستانی: جابجایی و انتساب مجدد پرتکرارتر از افزودن/حذف تصادفی
             var roll = _random.NextDouble();
-            if (roll < 0.18)
+            if (roll < 0.15)
+            {
+                PerformManagerMixRepairMove(neighbor);
+            }
+            else if (roll < 0.30)
             {
                 PerformReassignMove(neighbor);
             }
-            else if (roll < 0.38)
+            else if (roll < 0.48)
             {
                 PerformHourBalanceMove(neighbor);
             }
-            else if (roll < 0.58)
+            else if (roll < 0.63)
             {
                 PerformMorningEveningBalanceMove(neighbor);
             }
-            else if (roll < 0.73)
+            else if (roll < 0.76)
             {
                 PerformSwapMove(neighbor);
             }
@@ -285,6 +289,36 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             return neighbor;
         }
 
+        private void PerformManagerMixRepairMove(ShiftSolution solution)
+        {
+            foreach (var date in GetDateRange())
+            {
+                foreach (var shiftReq in _constraints.ShiftRequirements.Where(ShiftManagerRules.RequiresAnyManager))
+                {
+                    if (!SlotHasCoverageDemand(shiftReq, date))
+                    {
+                        continue;
+                    }
+
+                    var assignees = GetRegularAssignees(solution, shiftReq, date);
+                    if (assignees.Count > 0 && !ShiftManagerRules.IsSatisfied(assignees, shiftReq))
+                    {
+                        EnsureShiftManagerMixForSlot(solution, shiftReq, date, strictPhase: false, markSkeleton: true);
+                        if (IsSlotManagerMixSatisfied(solution, shiftReq, date))
+                        {
+                            SkeletonAssignmentGuard.LockSlotManagerAssignments(solution, _constraints, shiftReq, date);
+                        }
+                    }
+                }
+            }
+        }
+
+        private double CalculateManagerMixPenalty(ShiftSolution solution)
+        {
+            var violations = ShiftManagerMixGuard.GetViolations(solution, _constraints);
+            return violations.Count * 100000.0;
+        }
+
         /// <summary>
         /// محاسبه امتیاز راه‌حل
         /// </summary>
@@ -295,6 +329,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             // امتیاز پایه
             score += CalculateBaseScore(solution);
+
+            // جریمه سنگین برای نقض ترکیب مسئول شیفت (عصر/شب)
+            score += CalculateManagerMixPenalty(solution);
 
             // جریمه برای نقض محدودیت‌ها
             score += CalculateConstraintViolations(solution, violations);
@@ -2521,8 +2558,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             var occupants = regulars
                 .Where(a => !solution.IsLockedSkeleton(a.UserId, a.ShiftId, a.Date))
-                .Where(a => !a.IsSkeleton)
-                .Where(a => !IsProtectedAssignment(solution, a, forManagerInstall: allowQuotaBypass))
+                .Where(a => !a.IsSkeleton || (needLevel1 && !_constraints.UserConstraints.Any(u => u.UserId == a.UserId && ShiftManagerRules.IsLevel1(u))))
+                .Where(a => !IsProtectedAssignment(solution, a, forManagerInstall: allowQuotaBypass) || (needLevel1 && !_constraints.UserConstraints.Any(u => u.UserId == a.UserId && ShiftManagerRules.IsLevel1(u))))
                 .Select(a => new
                 {
                     Assignment = a,
