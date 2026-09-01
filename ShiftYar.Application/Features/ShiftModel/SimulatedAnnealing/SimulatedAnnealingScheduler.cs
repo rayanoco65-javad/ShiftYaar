@@ -248,7 +248,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         }
 
         /// <summary>
-        /// تولید راه‌حل همسایه
+        /// تولید راه‌حل همسایه با فیلتر فضایی سخت‌گیرانه (Feasible Space Filtering)
         /// </summary>
         private ShiftSolution GenerateNeighbor(ShiftSolution currentSolution)
         {
@@ -256,33 +256,51 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             // حرکت‌های هدفمند بیمارستانی: جابجایی و انتساب مجدد پرتکرارتر از افزودن/حذف تصادفی
             var roll = _random.NextDouble();
-            if (roll < 0.15)
+            if (roll < 0.20)
             {
                 PerformManagerMixRepairMove(neighbor);
             }
-            else if (roll < 0.30)
+            else if (roll < 0.35)
             {
                 PerformReassignMove(neighbor);
             }
-            else if (roll < 0.48)
+            else if (roll < 0.50)
             {
                 PerformHourBalanceMove(neighbor);
             }
-            else if (roll < 0.63)
+            else if (roll < 0.65)
             {
                 PerformMorningEveningBalanceMove(neighbor);
             }
-            else if (roll < 0.76)
+            else if (roll < 0.78)
             {
                 PerformSwapMove(neighbor);
             }
-            else if (roll < 0.88)
+            else if (roll < 0.89)
             {
                 PerformAddMove(neighbor);
             }
             else
             {
                 PerformRemoveMove(neighbor);
+            }
+
+            // ارزیابی دو مرحله‌ای و فیلتر فضایی حالت موجه (Feasible Space Filtering):
+            // اگر حرکت همسایگی منجر به افزایش نقض ترکیب مسئول، توالی استراحت، یا تکرار روزانه شود، حرکت رد می‌شود
+            var currentMixViolations = ShiftManagerMixGuard.GetViolations(currentSolution, _constraints).Count;
+            var currentRestViolations = AdjacentShiftRestGuard.GetViolations(currentSolution, _constraints).Count;
+            var currentDupViolations = DailyDuplicateAssignmentGuard.GetViolations(currentSolution, _constraints).Count;
+
+            var neighborMixViolations = ShiftManagerMixGuard.GetViolations(neighbor, _constraints).Count;
+            var neighborRestViolations = AdjacentShiftRestGuard.GetViolations(neighbor, _constraints).Count;
+            var neighborDupViolations = DailyDuplicateAssignmentGuard.GetViolations(neighbor, _constraints).Count;
+
+            if (neighborMixViolations > currentMixViolations ||
+                neighborRestViolations > currentRestViolations ||
+                neighborDupViolations > currentDupViolations)
+            {
+                // حرکت غیرمجاز رد می‌شود و حالت موجه قبلی حفظ می‌گردد
+                return currentSolution;
             }
 
             neighbor.Score = CalculateSolutionScore(neighbor);
@@ -1873,16 +1891,16 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         private void PlaceManagerLayer(ShiftSolution solution, bool strictPhase, bool lockAssignments)
         {
             var dates = GetDateRange().ToList();
-            var shifts = _constraints.ShiftRequirements
+            var managerShifts = _constraints.ShiftRequirements
                 .Where(ShiftManagerRules.RequiresAnyManager)
                 .OrderBy(s => s.ShiftLabel == ShiftLabel.Night ? 0
                     : s.ShiftLabel == ShiftLabel.Evening ? 1 : 2)
                 .ThenBy(s => s.ShiftId)
                 .ToList();
 
-            foreach (var shiftReq in shifts)
+            foreach (var date in dates)
             {
-                foreach (var date in dates)
+                foreach (var shiftReq in managerShifts)
                 {
                     if (!SlotHasCoverageDemand(shiftReq, date))
                     {
