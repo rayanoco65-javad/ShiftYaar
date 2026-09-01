@@ -313,7 +313,9 @@ public static class ManagerMixFeasibilityChecker
         var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
             ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
             : 2;
-        var sameDay = solution.GetUserAssignments(user.UserId, date).Select(a => a.ShiftLabel);
+        var sameDay = solution.GetUserAssignments(user.UserId, date)
+            .Where(a => ApprovedRequestGuard.IsApprovedRequiredSlot(user, a.Date, a.ShiftLabel, a.ShiftId))
+            .Select(a => a.ShiftLabel);
         if (!ShiftEligibilityResolver.IsAssignmentAllowed(
                 user, sameDay, shiftReq.ShiftLabel, maxPerDay,
                 constraints.HardRules.ForbidDuplicateDailyAssignments))
@@ -321,8 +323,10 @@ public static class ManagerMixFeasibilityChecker
             return false;
         }
 
+        var lockedAssignments = solution.GetUserAllAssignments(user.UserId)
+            .Where(a => ApprovedRequestGuard.IsApprovedRequiredSlot(user, a.Date, a.ShiftLabel, a.ShiftId));
         if (AdjacentShiftRestRules.WouldConflict(
-                solution.GetUserAllAssignments(user.UserId), date, shiftReq.ShiftLabel, constraints))
+                lockedAssignments, date, shiftReq.ShiftLabel, constraints))
         {
             return false;
         }
@@ -335,8 +339,7 @@ public static class ManagerMixFeasibilityChecker
 
         if (shiftReq.ShiftLabel == ShiftLabel.Night && user.MinDaysBetweenNightShifts > 0)
         {
-            foreach (var n in solution.GetUserAllAssignments(user.UserId)
-                         .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall))
+            foreach (var n in lockedAssignments.Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall))
             {
                 if (Math.Abs((date.Date - n.Date.Date).Days) <= user.MinDaysBetweenNightShifts)
                 {

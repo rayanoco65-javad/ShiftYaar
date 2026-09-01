@@ -2539,7 +2539,74 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
             }
 
+            var finalAssignees = GetRegularAssignees(solution, shiftReq, date);
+            if (finalAssignees.Count > 0 && !ShiftManagerRules.IsSatisfied(finalAssignees, requiredTotal, minLevel1))
+            {
+                if (ForceInstallLevel1ManagerForSlot(solution, shiftReq, date, markSkeleton))
+                {
+                    progress = true;
+                }
+            }
+
             return progress;
+        }
+
+        private bool ForceInstallLevel1ManagerForSlot(
+            ShiftSolution solution,
+            ShiftRequirement shiftReq,
+            DateTime date,
+            bool markSkeleton = true)
+        {
+            var (requiredTotal, minLevel1) = ShiftManagerRules.GetRequirement(shiftReq);
+            var specialtyId = shiftReq.SpecialtyRequirements
+                .OrderByDescending(s => s.ForDay(_constraints.IsHoliday(date)).RequiredTotalCount)
+                .Select(s => s.SpecialtyId)
+                .FirstOrDefault();
+
+            var currentAssignees = GetRegularAssignees(solution, shiftReq, date);
+            var currentL1 = currentAssignees.Count(ShiftManagerRules.IsLevel1);
+            if (currentL1 >= Math.Min(minLevel1, requiredTotal) && currentAssignees.Count >= requiredTotal)
+            {
+                return false;
+            }
+
+            var candidates = _constraints.UserConstraints
+                .Where(u => u.IsActive && ShiftManagerRules.IsLevel1(u))
+                .Where(u => u.SpecialtyId == specialtyId)
+                .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, shiftReq.ShiftLabel))
+                .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
+                .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
+                .Where(u => !u.RequiredShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel != shiftReq.ShiftLabel))
+                .OrderBy(u => solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == shiftReq.ShiftLabel && !a.IsOnCall))
+                .ToList();
+
+            if (candidates.Count == 0)
+            {
+                var labelName = shiftReq.ShiftLabel == ShiftLabel.Night ? "شب" : shiftReq.ShiftLabel == ShiftLabel.Evening ? "عصر" : "صبح";
+                throw new InvalidOperationException(
+                    $"امکان تخصیص مسئول سطح-۱ برای شیفت {labelName} در تاریخ {date:yyyy-MM-dd} وجود ندارد. " +
+                    "تمامی مسئولان سطح-۱ در این تاریخ دارای مرخصی، شیفت اجباری دیگر، یا عدم دسترسی ساختاری هستند.");
+            }
+
+            var selected = candidates.FirstOrDefault(c => !solution.HasAssignment(c.UserId, shiftReq.ShiftId, date)) ?? candidates.First();
+
+            // پاک‌سازی تداخل شیفت همان روز اگر درخواست تأییدشده نباشد
+            RemoveConflictingDailyAssignments(solution, selected.UserId, date, shiftReq.ShiftId, shiftReq.ShiftLabel);
+
+            // پاک‌سازی تداخل مجاور غیر درخواستی
+            TryClearAdjacencyForManagerInstall(solution, selected, date, shiftReq.ShiftLabel);
+
+            // اگر شیفت پر است، یک فرد غیر مسئول سطح-۱ حذف شود تا جا باز شود
+            MakeRoomInShift(solution, shiftReq, date, selected);
+
+            // اضافه کردن مسئول سطح-۱
+            solution.AddAssignment(selected.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall: false, isSkeleton: markSkeleton);
+            if (markSkeleton)
+            {
+                SkeletonAssignmentGuard.LockSlotManagerAssignments(solution, _constraints, shiftReq, date);
+            }
+
+            return true;
         }
 
         private bool TryReplaceForManagerMix(
