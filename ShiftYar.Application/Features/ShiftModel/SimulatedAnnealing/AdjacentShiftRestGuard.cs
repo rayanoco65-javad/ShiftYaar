@@ -133,8 +133,8 @@ public static class AdjacentShiftRestGuard
         ShiftSolution solution,
         ShiftConstraints constraints)
     {
-        var earlierSkeleton = earlier.IsSkeleton;
-        var laterSkeleton = later.IsSkeleton;
+        var earlierMixSkeleton = SkeletonAssignmentGuard.IsLevel1MixSkeleton(constraints, earlier);
+        var laterMixSkeleton = SkeletonAssignmentGuard.IsLevel1MixSkeleton(constraints, later);
         var earlierManagerCritical = ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, earlier);
         var laterManagerCritical = ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, later);
         var earlierOn = ApprovedRequestGuard.IsApprovedRequiredSlot(
@@ -144,48 +144,56 @@ public static class AdjacentShiftRestGuard
 
         if (laterOn && !earlierOn)
         {
-            return IsRequestProtected(user, earlier) || earlierSkeleton ? null : earlier;
+            return IsRequestProtected(user, earlier) || earlierMixSkeleton ? null : earlier;
         }
 
         if (earlierOn && !laterOn)
         {
-            return IsRequestProtected(user, later) || laterSkeleton ? null : later;
+            return IsRequestProtected(user, later) || laterMixSkeleton ? null : later;
         }
 
-        // محدودیت تنظیمات: جفت را بشکن، ولی شبِ mix-critical/اسکلت را قربانی نکن
+        // محدودیت تنظیمات: جفت را بشکن، ولی شبِ mix-critical/L1 اسکلت را قربانی نکن
         if (AdjacentShiftRestRules.IsSettingsControlledAfterNightPair(
                 earlier.ShiftLabel, earlier.Date, later.ShiftLabel, later.Date)
             && !IsRequestProtected(user, later))
         {
-            if ((laterManagerCritical || laterSkeleton) && !IsRequestProtected(user, earlier) && !earlierManagerCritical && !earlierSkeleton)
+            if ((laterManagerCritical || laterMixSkeleton) && !IsRequestProtected(user, earlier) && !earlierManagerCritical && !earlierMixSkeleton)
             {
                 return earlier;
             }
 
             if (later.ShiftLabel == ShiftLabel.Night
-                && (laterManagerCritical || laterSkeleton)
+                && (laterManagerCritical || laterMixSkeleton)
                 && !IsRequestProtected(user, earlier)
-                && !earlierSkeleton)
+                && !earlierMixSkeleton)
             {
                 return earlier;
             }
 
-            if (laterSkeleton)
+            if (laterMixSkeleton)
             {
-                return IsRequestProtected(user, earlier) || earlierSkeleton ? null : earlier;
+                return IsRequestProtected(user, earlier) || earlierMixSkeleton ? null : earlier;
             }
 
             return later;
         }
 
-        if ((earlierManagerCritical || earlierSkeleton) && (laterManagerCritical || laterSkeleton))
+        if ((earlierManagerCritical || earlierMixSkeleton) && (laterManagerCritical || laterMixSkeleton))
         {
+            if (AdjacentShiftRestRules.IsSettingsControlledAfterNightPair(
+                    earlier.ShiftLabel, earlier.Date, later.ShiftLabel, later.Date)
+                && !IsRequestProtected(user, later)
+                && !laterMixSkeleton)
+            {
+                return later;
+            }
+
             return null;
         }
 
-        if (laterManagerCritical || laterSkeleton)
+        if (laterManagerCritical || laterMixSkeleton)
         {
-            if (IsRequestProtected(user, earlier) || earlierSkeleton)
+            if (IsRequestProtected(user, earlier) || earlierMixSkeleton)
             {
                 return null;
             }
@@ -193,9 +201,9 @@ public static class AdjacentShiftRestGuard
             return earlier;
         }
 
-        if (earlierManagerCritical || earlierSkeleton)
+        if (earlierManagerCritical || earlierMixSkeleton)
         {
-            if (IsRequestProtected(user, later) || laterSkeleton)
+            if (IsRequestProtected(user, later) || laterMixSkeleton)
             {
                 return null;
             }

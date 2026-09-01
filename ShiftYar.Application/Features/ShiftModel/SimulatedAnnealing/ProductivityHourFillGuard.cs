@@ -1328,6 +1328,7 @@ public static class ProductivityHourFillGuard
         }
 
         return user.RequiredShiftSlots.Any(s =>
-            s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel);
+            s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel)
+            || assignment.IsSkeleton;
     }
 }

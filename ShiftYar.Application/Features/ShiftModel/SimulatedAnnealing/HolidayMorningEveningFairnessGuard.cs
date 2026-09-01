@@ -106,6 +106,11 @@ public static class HolidayMorningEveningFairnessGuard
                         continue;
                     }
 
+                    if (assignment.IsSkeleton)
+                    {
+                        continue;
+                    }
+
                     solution.RemoveAssignment(donorEntry.User.UserId, assignment.ShiftId, assignment.Date);
                     solution.AddAssignment(
                         receiverEntry.User.UserId,

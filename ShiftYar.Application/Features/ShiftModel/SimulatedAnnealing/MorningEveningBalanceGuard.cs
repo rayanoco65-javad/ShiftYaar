@@ -568,7 +568,8 @@ public static class MorningEveningBalanceGuard
     }
 
     private static bool IsProtected(ShiftConstraints constraints, UserConstraint user, SaShiftAssignment assignment) =>
-        user.RequiredShiftSlots.Any(s =>
+        assignment.IsSkeleton
+        || user.RequiredShiftSlots.Any(s =>
             s.Date.Date == assignment.Date.Date &&
             s.ShiftLabel == assignment.ShiftLabel &&
             (!s.ShiftId.HasValue || s.ShiftId.Value == assignment.ShiftId));

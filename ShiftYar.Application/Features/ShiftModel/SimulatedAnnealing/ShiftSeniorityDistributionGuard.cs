@@ -648,6 +648,7 @@ public static class ShiftSeniorityDistributionGuard
         solution.GetUserAllAssignments(userId).Count(a => a.ShiftLabel == label && !a.IsOnCall);
 
     private static bool IsProtected(UserConstraint user, SaShiftAssignment assignment) =>
-        user.RequiredShiftSlots.Any(s =>
+        assignment.IsSkeleton
+        || user.RequiredShiftSlots.Any(s =>
             s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel);
 }
