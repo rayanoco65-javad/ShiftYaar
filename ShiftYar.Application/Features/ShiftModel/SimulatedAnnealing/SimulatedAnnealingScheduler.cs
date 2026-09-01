@@ -2260,9 +2260,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         }
 
         /// <summary>
-        /// چتر نجات نهایی و جاروب ترمیم پسا‌بهینه‌سازی (Post-Optimization Repair Sweep & Strict Feasibility Enforcement).
-        /// این متد قبل از تحویل برنامه نهایی، تمام شیفت‌ها را بازرسی کرده و در صورت نبود مسئول سطح-۱، به صورت تهاجمی مسئول سطح-۱ را جایگزین می‌کند.
-        /// در صورت عدم امکان فیزیکی (به دلیل استراحت اجباری)، استثنای صریح InvalidOperationException پرتاب می‌کند.
+        /// چتر نجات نهایی و جاروب ترمیم پسا‌بهینه‌سازی (Post-Optimization Repair Sweep & Smart Constraint Relaxation).
+        /// ۱. ابتدا به صورت عادی مسئول سطح-۱ را جایگزین یا اصلاح می‌کند.
+        /// ۲. در صورت بروز کمبود شدید، محدودیت‌های نرم (مانند فاصله بین شب‌ها) را فقط برای کم‌کارترین مسئول سطح-۱ تسهیل می‌کند.
+        /// ۳. در صورت عدم امکان فیزیکی مطلق (مانند مرخصی یا تداخل همزمان)، یک Audit Trail کامل با فرمت فارسی تمیز و شناسه کاربران ارائه می‌دهد.
         /// </summary>
         public void PerformFinalManagerMixRepairSweep(ShiftSolution solution)
         {
@@ -2281,29 +2282,61 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
-                    // ۱) تلاش اول: اجرای ترمیم اختصاصی برای اسلات
+                    // ۱) گام اول: تلاش استاندارد و قاطعانه برای ترمیم اسلات
                     EnsureShiftManagerMixForSlot(solution, shiftReq, date, strictPhase: false, markSkeleton: true);
 
-                    // ۲) تلاش دوم: کشیدن تهاجمی مسئول سطح-۱ با آزادسازی نیروهای غیرضروری
+                    // ۲) گام دوم: کشیدن تهاجمی مسئول سطح-۱ (بدون شکستن قوانین سخت)
                     if (!IsSlotManagerMixSatisfied(solution, shiftReq, date))
                     {
-                        TryForcePullLevel1Manager(solution, shiftReq, date);
+                        TryForcePullLevel1Manager(solution, shiftReq, date, relaxSoftRest: false);
                     }
 
-                    // ۳) در صورت عدم موفقیت قطعی، صدور استثنای عدم امکان فیزیکی تخصیص
+                    // ۳) گام سوم (تسهیل هوشمند قیود نرم): در صورت کمبود شدید منابع، تسهیل فاصله شب برای کم‌کارترین مسئول سطح-۱
                     if (!IsSlotManagerMixSatisfied(solution, shiftReq, date))
                     {
-                        var labelName = shiftReq.ShiftLabel == ShiftLabel.Night ? "شب" : shiftReq.ShiftLabel == ShiftLabel.Evening ? "عصر" : "صبح";
-                        throw new InvalidOperationException(
-                            $"Cannot generate valid schedule: Insufficient Level-1 personnel available on {date:yyyy-MM-dd} for {labelName} shift. " +
-                            $"ترکیب مسئول شیفت ({labelName}) در تاریخ {date:yyyy-MM-dd} برآورده نشد: تمامی مسئولان سطح-۱ در این تاریخ به دلیل محدودیت‌های استراحت اجباری، مرخصی یا توالی غیرمجاز ناچاراً غیرقابل استفاده هستند.");
+                        if (TryForcePullLevel1Manager(solution, shiftReq, date, relaxSoftRest: true))
+                        {
+                            var labelText = shiftReq.ShiftLabel == ShiftLabel.Night ? "شب" : "عصر";
+                            solution.Violations.Add(
+                                $"[تسهیل اضطراری قیود] به دلیل کمبود مسئول در تاریخ {date:yyyy/MM/dd} برای شیفت {labelText}، قانون فاصله شب برای کم‌کارترین مسئول سطح-۱ به صورت اضطراری تعدیل گردید.");
+                        }
+                    }
+
+                    // ۴) گام چهارم (عدم امکان فیزیکی مطلق): در صورت عدم تخصیص، تولید Audit Trail ساختاریافته و پرتاب استثنای تمیز
+                    if (!IsSlotManagerMixSatisfied(solution, shiftReq, date))
+                    {
+                        var auditTrail = BuildLevel1ConflictAuditTrail(solution, shiftReq, date);
+                        var formattedMessage = BuildCleanExceptionMessage(date, shiftReq.ShiftLabel, auditTrail);
+                        throw new InvalidOperationException(formattedMessage);
                     }
                 }
             }
         }
 
-        private bool TryForcePullLevel1Manager(ShiftSolution solution, ShiftRequirement shiftReq, DateTime date)
+        private bool TryForcePullLevel1Manager(ShiftSolution solution, ShiftRequirement shiftReq, DateTime date, bool relaxSoftRest)
         {
+            var (reqTotal, reqL1) = ShiftManagerRules.GetRequirement(shiftReq);
+            var currentAssignees = GetRegularAssignees(solution, shiftReq, date);
+            var currentL1Count = currentAssignees.Count(ShiftManagerRules.IsLevel1);
+
+            if (currentL1Count >= reqL1 && currentAssignees.Count < reqTotal)
+            {
+                var helper = _constraints.UserConstraints
+                    .Where(u => u.IsActive && !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
+                    .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
+                    .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
+                    .FirstOrDefault(u => !HasDailyConflict(solution, u.UserId, date, shiftReq.ShiftLabel));
+
+                if (helper != null)
+                {
+                    solution.AddAssignment(helper.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall: false);
+                    if (IsSlotManagerMixSatisfied(solution, shiftReq, date))
+                    {
+                        return true;
+                    }
+                }
+            }
+
             var specialtyId = shiftReq.SpecialtyRequirements
                 .OrderByDescending(s => s.ForDay(_constraints.IsHoliday(date)).RequiredTotalCount)
                 .Select(s => s.SpecialtyId)
@@ -2311,12 +2344,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             var eligibleL1Candidates = _constraints.UserConstraints
                 .Where(u => u.IsActive && ShiftManagerRules.IsLevel1(u))
-                .Where(u => u.SpecialtyId == specialtyId)
+                .Where(u => specialtyId == 0 || u.SpecialtyId == specialtyId)
                 .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, shiftReq.ShiftLabel))
                 .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
                 .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
                 .Where(u => !u.RequiredShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel != shiftReq.ShiftLabel))
                 .OrderBy(u => solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == shiftReq.ShiftLabel && !a.IsOnCall))
+                .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count(a => !a.IsOnCall))
                 .ToList();
 
             foreach (var candidate in eligibleL1Candidates)
@@ -2336,12 +2370,21 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     continue;
                 }
 
-                if (HasDailyConflict(solution, candidate.UserId, date, shiftReq.ShiftLabel) ||
-                    AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(candidate.UserId), date, shiftReq.ShiftLabel, _constraints) ||
-                    MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(solution, _constraints, candidate, date))
+                // در حالت relaxSoftRest، تداخل‌های مجاور فاصله شب/استراحت نرم نادیده گرفته می‌شوند بشرطی که تداخل همزمان روزانه نباشد
+                if (HasDailyConflict(solution, candidate.UserId, date, shiftReq.ShiftLabel))
                 {
                     RestoreSolutionFromQuotaBackup(solution, backup);
                     continue;
+                }
+
+                if (!relaxSoftRest)
+                {
+                    if (AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(candidate.UserId), date, shiftReq.ShiftLabel, _constraints) ||
+                        MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(solution, _constraints, candidate, date))
+                    {
+                        RestoreSolutionFromQuotaBackup(solution, backup);
+                        continue;
+                    }
                 }
 
                 MakeRoomInShift(solution, shiftReq, date, candidate);
@@ -2358,6 +2401,101 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             return false;
+        }
+
+        private List<string> BuildLevel1ConflictAuditTrail(ShiftSolution solution, ShiftRequirement shiftReq, DateTime date)
+        {
+            var auditList = new List<string>();
+            var specialtyId = shiftReq.SpecialtyRequirements
+                .OrderByDescending(s => s.ForDay(_constraints.IsHoliday(date)).RequiredTotalCount)
+                .Select(s => s.SpecialtyId)
+                .FirstOrDefault();
+
+            var level1Users = _constraints.UserConstraints
+                .Where(u => ShiftManagerRules.IsLevel1(u) && (specialtyId == 0 || u.SpecialtyId == specialtyId))
+                .ToList();
+
+            foreach (var user in level1Users)
+            {
+                var reasons = new List<string>();
+                if (!user.IsActive)
+                {
+                    reasons.Add("کاربر غیرفعال است");
+                }
+
+                if (user.UnavailableDates.Any(d => d.Date == date.Date))
+                {
+                    reasons.Add("مرخصی روزانه ثبت‌شده/تأییدشده");
+                }
+
+                if (user.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
+                {
+                    reasons.Add($"عدم امکان حضور در شیفت {GetShiftLabelPersianName(shiftReq.ShiftLabel)}");
+                }
+
+                if (user.RequiredShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel != shiftReq.ShiftLabel))
+                {
+                    reasons.Add("شیفت اجباری همزمان در شیفت دیگر");
+                }
+
+                if (HasDailyConflict(solution, user.UserId, date, shiftReq.ShiftLabel))
+                {
+                    reasons.Add("دارای انتساب همزمان در شیفت دیگر همین روز (محدودیت کار مداوم ۲۴ ساعته)");
+                }
+
+                if (AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(user.UserId), date, shiftReq.ShiftLabel, _constraints))
+                {
+                    reasons.Add("شیفت شب روز قبل یا شیفت عصر بلافاصله (قانون استراحت اجباری)");
+                }
+
+                if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(solution, _constraints, user, date))
+                {
+                    reasons.Add("تکمیل سقف روزهای کاری متوالی مجاز");
+                }
+
+                if (reasons.Count == 0)
+                {
+                    reasons.Add("محدودیت ظرفیت یا سهمیه شیفت");
+                }
+
+                var userDisplayName = !string.IsNullOrWhiteSpace(user.UserName) ? user.UserName : $"کاربر {user.UserId}";
+                auditList.Add($"• {userDisplayName} (شناسه {user.UserId}): {string.Join(" | ", reasons)}");
+            }
+
+            return auditList;
+        }
+
+        private static string GetShiftLabelPersianName(ShiftLabel label) => label switch
+        {
+            ShiftLabel.Night => "شب",
+            ShiftLabel.Evening => "عصر",
+            ShiftLabel.Morning => "صبح",
+            _ => label.ToString()
+        };
+
+        private static string BuildCleanExceptionMessage(DateTime date, ShiftLabel label, List<string> auditTrail)
+        {
+            var labelPersian = GetShiftLabelPersianName(label);
+            var formattedDate = date.ToString("yyyy/MM/dd");
+            var sb = new System.Text.StringBuilder();
+
+            sb.AppendLine("════════════════════════════════════════════════════════════");
+            sb.AppendLine("خطای عدم امکان فیزیکی شیفت‌بندی (Insufficient Level-1 Personnel)");
+            sb.AppendLine("════════════════════════════════════════════════════════════");
+            sb.AppendLine($"ترکیب مسئول شیفت {labelPersian} در تاریخ {formattedDate} برآورده نشد.");
+            sb.AppendLine("علت: هیچ مسئول سطح-۱ واجد شرایطی حتی با اعطای مرخصی نرم در این تاریخ در دسترس نیست.");
+            sb.AppendLine();
+            sb.AppendLine("گزارش ممیزی وضعیت مسئولان سطح-۱ در این تاریخ (Audit Trail):");
+            foreach (var item in auditTrail)
+            {
+                sb.AppendLine(item);
+            }
+            sb.AppendLine("════════════════════════════════════════════════════════════");
+            sb.AppendLine("راهکار پیشنهاد شده برای مدیر سیستم:");
+            sb.AppendLine("۱. بررسی و ویرایش مرخصی‌های ثبت‌شده مسئولان سطح-۱ در تاریخ فوق.");
+            sb.AppendLine("۲. تعریف یا ارتقای سطح مسئولیت (Level-1) برای حداقل یک پرسنل دیگر در این بخش.");
+
+            return sb.ToString();
         }
 
         private void RefreshManagerSkeletonFlags(ShiftSolution solution) =>
