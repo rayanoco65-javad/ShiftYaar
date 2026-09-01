@@ -2555,7 +2555,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftSolution solution,
             ShiftRequirement shiftReq,
             DateTime date,
-            bool markSkeleton = true)
+            bool markSkeleton = true,
+            bool throwIfFailed = false)
         {
             var (requiredTotal, minLevel1) = ShiftManagerRules.GetRequirement(shiftReq);
             var specialtyId = shiftReq.SpecialtyRequirements
@@ -2580,33 +2581,56 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .OrderBy(u => solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == shiftReq.ShiftLabel && !a.IsOnCall))
                 .ToList();
 
-            if (candidates.Count == 0)
+            foreach (var candidate in candidates)
+            {
+                if (solution.HasAssignment(candidate.UserId, shiftReq.ShiftId, date))
+                {
+                    continue;
+                }
+
+                var backup = solution.Clone();
+
+                // ۱) پاک‌سازی تداخل شیفت همان روز اگر درخواست تأییدشده نباشد
+                RemoveConflictingDailyAssignments(solution, candidate.UserId, date, shiftReq.ShiftId, shiftReq.ShiftLabel);
+
+                // ۲) پاک‌سازی تداخل مجاور غیر درخواستی
+                if (!TryClearAdjacencyForManagerInstall(solution, candidate, date, shiftReq.ShiftLabel))
+                {
+                    RestoreSolutionFromQuotaBackup(solution, backup);
+                    continue;
+                }
+
+                // ۳) بررسی اعتبارسنجی تداخل‌های روزانه و توالی بعد از پاک‌سازی
+                if (HasDailyConflict(solution, candidate.UserId, date, shiftReq.ShiftLabel) ||
+                    AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(candidate.UserId), date, shiftReq.ShiftLabel, _constraints) ||
+                    MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(solution, _constraints, candidate, date))
+                {
+                    RestoreSolutionFromQuotaBackup(solution, backup);
+                    continue;
+                }
+
+                // ۴) آزادسازی جا در شیفت شب در صورت پر بودن ظرفیت
+                MakeRoomInShift(solution, shiftReq, date, candidate);
+
+                // ۵) اضافه کردن مسئول سطح-۱ و قفل کردن
+                solution.AddAssignment(candidate.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall: false, isSkeleton: markSkeleton);
+                if (markSkeleton)
+                {
+                    SkeletonAssignmentGuard.LockSlotManagerAssignments(solution, _constraints, shiftReq, date);
+                }
+
+                return true;
+            }
+
+            if (throwIfFailed)
             {
                 var labelName = shiftReq.ShiftLabel == ShiftLabel.Night ? "شب" : shiftReq.ShiftLabel == ShiftLabel.Evening ? "عصر" : "صبح";
                 throw new InvalidOperationException(
-                    $"امکان تخصیص مسئول سطح-۱ برای شیفت {labelName} در تاریخ {date:yyyy-MM-dd} وجود ندارد. " +
-                    "تمامی مسئولان سطح-۱ در این تاریخ دارای مرخصی، شیفت اجباری دیگر، یا عدم دسترسی ساختاری هستند.");
+                    $"امکان تخصیص مسئول سطح-۱ برای شیفت {labelName} در تاریخ {date:yyyy-MM-dd} بدون نقض قوانین توالی و استراحت وجود ندارد. " +
+                    "تمامی مسئولان سطح-۱ در این تاریخ دارای مرخصی، شیفت اجباری دیگر، یا محدودیت توالی شب متوالی/عصر بعد از شب هستند.");
             }
 
-            var selected = candidates.FirstOrDefault(c => !solution.HasAssignment(c.UserId, shiftReq.ShiftId, date)) ?? candidates.First();
-
-            // پاک‌سازی تداخل شیفت همان روز اگر درخواست تأییدشده نباشد
-            RemoveConflictingDailyAssignments(solution, selected.UserId, date, shiftReq.ShiftId, shiftReq.ShiftLabel);
-
-            // پاک‌سازی تداخل مجاور غیر درخواستی
-            TryClearAdjacencyForManagerInstall(solution, selected, date, shiftReq.ShiftLabel);
-
-            // اگر شیفت پر است، یک فرد غیر مسئول سطح-۱ حذف شود تا جا باز شود
-            MakeRoomInShift(solution, shiftReq, date, selected);
-
-            // اضافه کردن مسئول سطح-۱
-            solution.AddAssignment(selected.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall: false, isSkeleton: markSkeleton);
-            if (markSkeleton)
-            {
-                SkeletonAssignmentGuard.LockSlotManagerAssignments(solution, _constraints, shiftReq, date);
-            }
-
-            return true;
+            return false;
         }
 
         private bool TryReplaceForManagerMix(
