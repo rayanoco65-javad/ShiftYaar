@@ -56,6 +56,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             // تضمین نهایی: درخواست‌های تأییدشده آخرین حرف را می‌زنند
             ApplyMandatoryConstraints(bestSolution);
+            PerformFinalManagerMixRepairSweep(bestSolution);
+            ShiftManagerMixGuard.EnsureOrThrow(bestSolution, _constraints);
 
             stopwatch.Stop();
             _statistics.ExecutionTime = stopwatch.Elapsed;
@@ -80,6 +82,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             RunAnnealingLoop(ref currentSolution, ref bestSolution);
 
             ApplyMandatoryConstraints(bestSolution);
+            PerformFinalManagerMixRepairSweep(bestSolution);
+            ShiftManagerMixGuard.EnsureOrThrow(bestSolution, _constraints);
 
             stopwatch.Stop();
             _statistics.ExecutionTime = stopwatch.Elapsed;
@@ -1665,9 +1669,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
             }
 
+            PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
+            MaxConsecutiveWorkdayGuard.Enforce(solution, _constraints, RepairManagerMix);
             solution.Score = CalculateSolutionScore(solution);
-            PerformFinalManagerMixRepairSweep(solution);
-            ShiftManagerMixGuard.EnsureOrThrow(solution, _constraints);
+            solution.Violations.AddRange(ShiftManagerMixGuard.GetViolations(solution, _constraints));
             solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
             solution.Violations.AddRange(ApprovedRequestGuard.GetUnmetViolations(solution, _constraints));
             solution.Violations.AddRange(ShiftEligibilityGuard.GetViolations(solution, _constraints));
@@ -2265,49 +2270,61 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// ۲. در صورت بروز کمبود شدید، محدودیت‌های نرم (مانند فاصله بین شب‌ها) را فقط برای کم‌کارترین مسئول سطح-۱ تسهیل می‌کند.
         /// ۳. در صورت عدم امکان فیزیکی مطلق (مانند مرخصی یا تداخل همزمان)، یک Audit Trail کامل با فرمت فارسی تمیز و شناسه کاربران ارائه می‌دهد.
         /// </summary>
-        public void PerformFinalManagerMixRepairSweep(ShiftSolution solution)
+        public void PerformFinalManagerMixRepairSweep(ShiftSolution solution, bool throwIfUnsatisfied = true)
         {
             var dateRange = GetDateRange();
-            foreach (var date in dateRange)
+            for (var pass = 0; pass < 2; pass++)
             {
-                foreach (var shiftReq in _constraints.ShiftRequirements.Where(ShiftManagerRules.RequiresAnyManager))
+                foreach (var date in dateRange)
                 {
-                    if (!SlotHasCoverageDemand(shiftReq, date))
+                    foreach (var shiftReq in _constraints.ShiftRequirements.Where(ShiftManagerRules.RequiresAnyManager))
                     {
-                        continue;
-                    }
-
-                    if (IsSlotManagerMixSatisfied(solution, shiftReq, date))
-                    {
-                        continue;
-                    }
-
-                    // ۱) گام اول: تلاش استاندارد و قاطعانه برای ترمیم اسلات
-                    EnsureShiftManagerMixForSlot(solution, shiftReq, date, strictPhase: false, markSkeleton: true);
-
-                    // ۲) گام دوم: کشیدن تهاجمی مسئول سطح-۱ (بدون شکستن قوانین سخت)
-                    if (!IsSlotManagerMixSatisfied(solution, shiftReq, date))
-                    {
-                        TryForcePullLevel1Manager(solution, shiftReq, date, relaxSoftRest: false);
-                    }
-
-                    // ۳) گام سوم (تسهیل هوشمند قیود نرم): در صورت کمبود شدید منابع، تسهیل فاصله شب برای کم‌کارترین مسئول سطح-۱
-                    if (!IsSlotManagerMixSatisfied(solution, shiftReq, date))
-                    {
-                        if (TryForcePullLevel1Manager(solution, shiftReq, date, relaxSoftRest: true))
+                        if (!SlotHasCoverageDemand(shiftReq, date))
                         {
-                            var labelText = shiftReq.ShiftLabel == ShiftLabel.Night ? "شب" : "عصر";
-                            solution.Violations.Add(
-                                $"[تسهیل اضطراری قیود] به دلیل کمبود مسئول در تاریخ {date:yyyy/MM/dd} برای شیفت {labelText}، قانون فاصله شب برای کم‌کارترین مسئول سطح-۱ به صورت اضطراری تعدیل گردید.");
+                            continue;
+                        }
+
+                        if (IsSlotManagerMixSatisfied(solution, shiftReq, date))
+                        {
+                            continue;
+                        }
+
+                        // ۱) گام اول: تلاش استاندارد و قاطعانه برای ترمیم اسلات
+                        EnsureShiftManagerMixForSlot(solution, shiftReq, date, strictPhase: false, markSkeleton: true);
+
+                        // ۲) گام دوم: کشیدن تهاجمی مسئول سطح-۱ (بدون شکستن قوانین سخت)
+                        if (!IsSlotManagerMixSatisfied(solution, shiftReq, date))
+                        {
+                            TryForcePullLevel1Manager(solution, shiftReq, date, relaxSoftRest: false);
+                        }
+
+                        // ۳) گام سوم (تسهیل هوشمند قیود نرم): در صورت کمبود شدید منابع، تسهیل فاصله شب برای کم‌کارترین مسئول سطح-۱
+                        if (!IsSlotManagerMixSatisfied(solution, shiftReq, date))
+                        {
+                            if (TryForcePullLevel1Manager(solution, shiftReq, date, relaxSoftRest: true))
+                            {
+                                var labelText = shiftReq.ShiftLabel == ShiftLabel.Night ? "شب" : "عصر";
+                                solution.Violations.Add(
+                                    $"[تسهیل اضطراری قیود] به دلیل کمبود مسئول در تاریخ {date:yyyy/MM/dd} برای شیفت {labelText}، قانون فاصله شب برای کم‌کارترین مسئول سطح-۱ به صورت اضطراری تعدیل گردید.");
+                            }
                         }
                     }
+                }
+            }
 
-                    // ۴) گام چهارم (عدم امکان فیزیکی مطلق): در صورت عدم تخصیص، تولید Audit Trail ساختاریافته و پرتاب استثنای تمیز
-                    if (!IsSlotManagerMixSatisfied(solution, shiftReq, date))
+            // ۴) گام چهارم (عدم امکان فیزیکی مطلق): در صورت عدم تخصیص، تولید Audit Trail ساختاریافته و پرتاب استثنای تمیز
+            if (throwIfUnsatisfied)
+            {
+                foreach (var date in dateRange)
+                {
+                    foreach (var shiftReq in _constraints.ShiftRequirements.Where(ShiftManagerRules.RequiresAnyManager))
                     {
-                        var auditTrail = BuildLevel1ConflictAuditTrail(solution, shiftReq, date);
-                        var formattedMessage = BuildCleanExceptionMessage(date, shiftReq.ShiftLabel, auditTrail);
-                        throw new InvalidOperationException(formattedMessage);
+                        if (SlotHasCoverageDemand(shiftReq, date) && !IsSlotManagerMixSatisfied(solution, shiftReq, date))
+                        {
+                            var auditTrail = BuildLevel1ConflictAuditTrail(solution, shiftReq, date);
+                            var formattedMessage = BuildCleanExceptionMessage(date, shiftReq.ShiftLabel, auditTrail);
+                            throw new InvalidOperationException(formattedMessage);
+                        }
                     }
                 }
             }
@@ -2349,6 +2366,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
                 .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
                 .Where(u => !u.RequiredShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel != shiftReq.ShiftLabel))
+                .Where(u => !solution.GetUserAssignments(u.UserId, date.Date).Any(a => a.IsSkeleton || solution.IsLockedSkeleton(u.UserId, a.ShiftId, date.Date)))
                 .OrderBy(u => solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == shiftReq.ShiftLabel && !a.IsOnCall))
                 .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count(a => !a.IsOnCall))
                 .ToList();
@@ -2364,7 +2382,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                 RemoveConflictingDailyAssignments(solution, candidate.UserId, date, shiftReq.ShiftId, shiftReq.ShiftLabel);
 
-                if (!TryClearAdjacencyForManagerInstall(solution, candidate, date, shiftReq.ShiftLabel))
+                if (!TryClearAdjacencyForManagerInstall(solution, candidate, date, shiftReq.ShiftLabel, relaxSoftRest))
                 {
                     RestoreSolutionFromQuotaBackup(solution, backup);
                     continue;
@@ -2805,11 +2823,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             var candidates = _constraints.UserConstraints
                 .Where(u => u.IsActive && ShiftManagerRules.IsLevel1(u))
-                .Where(u => u.SpecialtyId == specialtyId)
+                .Where(u => specialtyId == 0 || u.SpecialtyId == specialtyId)
                 .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, shiftReq.ShiftLabel))
                 .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
                 .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
                 .Where(u => !u.RequiredShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel != shiftReq.ShiftLabel))
+                .Where(u => !solution.GetUserAssignments(u.UserId, date.Date).Any(a => a.IsSkeleton || solution.IsLockedSkeleton(u.UserId, a.ShiftId, date.Date)))
                 .OrderBy(u => solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == shiftReq.ShiftLabel && !a.IsOnCall))
                 .ToList();
 
@@ -2825,16 +2844,16 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 // ۱) پاک‌سازی تداخل شیفت همان روز اگر درخواست تأییدشده نباشد
                 RemoveConflictingDailyAssignments(solution, candidate.UserId, date, shiftReq.ShiftId, shiftReq.ShiftLabel);
 
-                // ۲) پاک‌سازی تداخل مجاور غیر درخواستی
-                if (!TryClearAdjacencyForManagerInstall(solution, candidate, date, shiftReq.ShiftLabel))
+                // ۲) پاک‌سازی تداخل مجاور غیر درخواستی (با پشتیبانی از تعدیل اضطراری)
+                if (!TryClearAdjacencyForManagerInstall(solution, candidate, date, shiftReq.ShiftLabel) &&
+                    !TryClearAdjacencyForManagerInstall(solution, candidate, date, shiftReq.ShiftLabel, relaxSoftRest: true))
                 {
                     RestoreSolutionFromQuotaBackup(solution, backup);
                     continue;
                 }
 
-                // ۳) بررسی اعتبارسنجی تداخل‌های روزانه و توالی بعد از پاک‌سازی
+                // ۳) بررسی اعتبارسنجی تداخل‌های روزانه همزمان و روزهای متوالی
                 if (HasDailyConflict(solution, candidate.UserId, date, shiftReq.ShiftLabel) ||
-                    AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(candidate.UserId), date, shiftReq.ShiftLabel, _constraints) ||
                     MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(solution, _constraints, candidate, date))
                 {
                     RestoreSolutionFromQuotaBackup(solution, backup);
@@ -3300,11 +3319,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftSolution solution,
             UserConstraint user,
             DateTime date,
-            ShiftLabel label)
+            ShiftLabel label,
+            bool relaxSoftRest = false)
         {
             if (label == ShiftLabel.Night)
             {
-                if (!_constraints.HardRules.AllowNightShiftAfterNightShift)
+                if (!_constraints.HardRules.AllowNightShiftAfterNightShift && !relaxSoftRest)
                 {
                     if (!TryClearUserAssignmentsOnDate(solution, user, date.Date.AddDays(-1), ShiftLabel.Night))
                     {
@@ -3319,7 +3339,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
-                    if (!TryClearAssignment(solution, user, assignment))
+                    if (!TryClearAssignment(solution, user, assignment) && !relaxSoftRest)
                     {
                         return false;
                     }
@@ -3329,13 +3349,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                              .Where(a => a.ShiftLabel == ShiftLabel.Evening)
                              .ToList())
                 {
-                    if (!TryClearAssignment(solution, user, assignment))
+                    if (!TryClearAssignment(solution, user, assignment) && !relaxSoftRest)
                     {
                         return false;
                     }
                 }
             }
-            else if (label == ShiftLabel.Evening && !_constraints.HardRules.AllowEveningAfterNightShift)
+            else if (label == ShiftLabel.Evening && !_constraints.HardRules.AllowEveningAfterNightShift && !relaxSoftRest)
             {
                 if (!TryClearUserAssignmentsOnDate(solution, user, date.Date.AddDays(-1), ShiftLabel.Night))
                 {
@@ -3383,7 +3403,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 if (shiftReq != null)
                 {
                     var otherL1 = _constraints.UserConstraints
-                        .Where(u => u.UserId != user.UserId && ShiftManagerRules.IsLevel1(u) && u.SpecialtyId == user.SpecialtyId && u.IsActive)
+                        .Where(u => u.UserId != user.UserId && ShiftManagerRules.IsLevel1(u) && (user.SpecialtyId == 0 || u.SpecialtyId == 0 || u.SpecialtyId == user.SpecialtyId) && u.IsActive)
                         .FirstOrDefault(u => IsUserAvailableForManagerInstall(u, assignment.Date, assignment.ShiftLabel, solution, assignment.ShiftId, ignoreSameDayAssignments: false, relaxNightSpacing: true));
                     if (otherL1 != null)
                     {
@@ -3418,15 +3438,16 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             _constraints.UserConstraints
                 .Where(u => u.IsActive && ShiftManagerRules.IsManager(u))
                 .Where(u => !needLevel1 || ShiftManagerRules.IsLevel1(u))
-                .Where(u => u.SpecialtyId == specialtyId)
+                .Where(u => specialtyId == 0 || u.SpecialtyId == specialtyId)
                 .Where(u => !genderLocked || u.Gender == occupantGender)
                 .Where(u => !HasConflictingApprovedRequiredOnDate(u, date, shiftReq.ShiftLabel))
                 .Where(u => IsUserAvailableForManagerInstall(
                     u, date, shiftReq.ShiftLabel, solution, ignoreShiftIdForAvailability,
-                    ignoreSameDayAssignments: true,
+                    ignoreSameDayAssignments: false,
                     relaxNightSpacing: relaxNightSpacing || mandatoryInstall,
                     mandatoryInstall: mandatoryInstall))
                 .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
+                .Where(u => !solution.GetUserAssignments(u.UserId, date.Date).Any(a => a.IsSkeleton || solution.IsLockedSkeleton(u.UserId, a.ShiftId, date.Date)))
                 .OrderByDescending(u => ShiftManagerRules.IsLevel1(u))
                 .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
                 .ThenBy(u => u.UserId);
@@ -3444,7 +3465,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             int? ignoreShiftIdForAvailability = null) =>
             _constraints.UserConstraints
                 .Where(u => u.IsActive)
-                .Where(u => u.SpecialtyId == specialtyId)
+                .Where(u => specialtyId == 0 || u.SpecialtyId == specialtyId)
                 .Where(u => !genderLocked || u.Gender == requiredGender)
                 .Where(u => !HasConflictingApprovedRequiredOnDate(u, date, shiftReq.ShiftLabel))
                 .Where(u => IsUserAvailableForManagerInstall(

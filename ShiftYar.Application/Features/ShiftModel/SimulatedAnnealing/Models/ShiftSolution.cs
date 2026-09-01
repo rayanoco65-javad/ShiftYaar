@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -76,8 +76,17 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
 
         public void ClearLockedSkeletonAssignments()
         {
+            // قبل از پاک کردن set، پرچم IsSkeleton فقط برای انتساب‌های موجود در lock set پاک می‌شود.
+            // انتساب‌هایی که با isSkeleton:true مستقیماً علامت‌گذاری شدند (و در lock set نیستند) دست نخورده می‌مانند.
+            foreach (var assignment in Assignments.Values)
+            {
+                if (IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date))
+                {
+                    assignment.IsSkeleton = false;
+                }
+            }
+
             LockedSkeletonAssignments.Clear();
-            ClearAllSkeletonFlags();
         }
 
         /// <summary>
@@ -145,7 +154,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         {
             foreach (var assignment in Assignments.Values)
             {
-                assignment.IsSkeleton = IsLockedSkeleton(
+                assignment.IsSkeleton = assignment.IsSkeleton || IsLockedSkeleton(
                     assignment.UserId, assignment.ShiftId, assignment.Date);
             }
         }

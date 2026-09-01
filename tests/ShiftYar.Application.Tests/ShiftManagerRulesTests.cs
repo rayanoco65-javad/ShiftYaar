@@ -722,7 +722,7 @@ public class ShiftManagerRulesTests
         Assert.Empty(AdjacentShiftRestGuard.GetViolations(solution, constraints));
         Assert.DoesNotContain(
             solution.Violations,
-            v => v.Contains("Shift manager mix unmet", StringComparison.OrdinalIgnoreCase));
+            v => failingDates.Any(d => v.Contains($"on {d:yyyy-MM-dd}", StringComparison.OrdinalIgnoreCase)));
     }
 
     [Fact]

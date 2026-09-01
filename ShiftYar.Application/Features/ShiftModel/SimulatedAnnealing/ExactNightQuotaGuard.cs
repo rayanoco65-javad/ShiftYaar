@@ -456,7 +456,8 @@ public static class ExactNightQuotaGuard
                 assignment.ShiftId,
                 assignment.Date,
                 assignment.ShiftLabel,
-                assignment.IsOnCall);
+                assignment.IsOnCall,
+                isSkeleton: assignment.IsSkeleton);
         }
 
         target.Score = backup.Score;
@@ -645,7 +646,9 @@ public static class ExactNightQuotaGuard
             var holidayCount = nights.Count(a => constraints.IsHolidayWeekendNight(a.Date));
 
             var removable = nights
-                .Where(a => !IsProtected(constraints, user.UserId, a))
+                .Where(a => !IsProtected(constraints, user.UserId, a)
+                            && !solution.IsLockedSkeleton(user.UserId, a.ShiftId, a.Date)
+                            && !a.IsSkeleton)
                 .Select(a =>
                 {
                     var isHol = constraints.IsHolidayWeekendNight(a.Date);
@@ -1166,7 +1169,7 @@ public static class ExactNightQuotaGuard
             // یکی از شب‌های نزدیک را جابه‌جا کن تا فاصله باز شود
             var blocking = GetNights(solution, user.UserId)
                 .Where(a => Math.Abs((a.Date.Date - date).Days) <= minGap)
-                .Where(a => !IsProtected(constraints, user.UserId, a))
+                .Where(a => !IsSticky(constraints, solution, user.UserId, a))
                 .OrderBy(a => Math.Abs((a.Date.Date - date).Days))
                 .FirstOrDefault();
             if (blocking == null)
@@ -1236,6 +1239,13 @@ public static class ExactNightQuotaGuard
         DateTime excludeDate,
         int minGap)
     {
+        // اگر شب مبدأ اسکلت/sticky است نباید جابجا شود
+        if (solution.TryGetAssignment(user.UserId, nightShift.ShiftId, fromDate, out var fromAssign)
+            && IsSticky(constraints, solution, user.UserId, fromAssign))
+        {
+            return false;
+        }
+
         var candidates = AllCandidateDates(constraints, holidayOnly: false)
             .Where(d => d != fromDate && d != excludeDate)
             .Where(d => !GetNights(solution, user.UserId).Any(n => n.Date.Date == d))
@@ -1271,9 +1281,10 @@ public static class ExactNightQuotaGuard
 
             if (HasSpecialtyCapacity(solution, constraints, nightShift, target, user.SpecialtyId))
             {
+                var wasSkeleton = solution.TryGetAssignment(user.UserId, nightShift.ShiftId, fromDate, out var fromAss) && fromAss.IsSkeleton;
                 ClearConflictingForNight(solution, constraints, user, target);
                 solution.RemoveAssignment(user.UserId, nightShift.ShiftId, fromDate);
-                solution.AddAssignment(user.UserId, nightShift.ShiftId, target, ShiftLabel.Night, false);
+                solution.AddAssignment(user.UserId, nightShift.ShiftId, target, ShiftLabel.Night, false, isSkeleton: wasSkeleton);
                 return true;
             }
 
@@ -1283,10 +1294,11 @@ public static class ExactNightQuotaGuard
                 continue;
             }
 
+            var wasSkel = solution.TryGetAssignment(user.UserId, nightShift.ShiftId, fromDate, out var fAss) && fAss.IsSkeleton;
             ClearConflictingForNight(solution, constraints, user, target);
             solution.RemoveAssignment(user.UserId, nightShift.ShiftId, fromDate);
             solution.RemoveAssignment(donorAssignment.UserId, donorAssignment.ShiftId, donorAssignment.Date);
-            solution.AddAssignment(user.UserId, nightShift.ShiftId, target, ShiftLabel.Night, false);
+            solution.AddAssignment(user.UserId, nightShift.ShiftId, target, ShiftLabel.Night, false, isSkeleton: wasSkel);
             return true;
         }
 
@@ -1449,7 +1461,8 @@ public static class ExactNightQuotaGuard
             : holidayNights;
 
         var remainingTotal = nights.Count - 1;
-        if (user.ExactNightShiftCount.HasValue && remainingTotal < user.ExactNightShiftCount.Value)
+        var minRequired = user.ExactNightShiftCount ?? (user.MinimumShiftsRequired.TryGetValue(ShiftLabel.Night, out var minN) ? minN : (int?)null);
+        if (minRequired.HasValue && remainingTotal < minRequired.Value)
         {
             // مازاد شب تعطیل را برای رفع کسری تعطیل دیگران قفل نکن
             if (!(forHolidayClaim && isHolidayNight && holidaySurplus > 0))
@@ -1797,7 +1810,7 @@ public static class ExactNightQuotaGuard
         for (var iter = 0; iter < 24; iter++)
         {
             var nights = GetNights(solution, user.UserId)
-                .Where(a => !IsProtected(constraints, user.UserId, a))
+                .Where(a => !IsSticky(constraints, solution, user.UserId, a))
                 .ToList();
             if (nights.Count < 2)
             {
@@ -1897,15 +1910,18 @@ public static class ExactNightQuotaGuard
 
             if (swapUserId.HasValue)
             {
+                var userWasSkeleton = solution.TryGetAssignment(user.UserId, nightShift.ShiftId, fromDate, out var userFromAss) && userFromAss.IsSkeleton;
+                var swapWasSkeleton = solution.TryGetAssignment(swapUserId.Value, nightShift.ShiftId, toDate, out var swapToAss) && swapToAss.IsSkeleton;
                 solution.RemoveAssignment(user.UserId, nightShift.ShiftId, fromDate);
                 solution.RemoveAssignment(swapUserId.Value, nightShift.ShiftId, toDate);
-                solution.AddAssignment(user.UserId, nightShift.ShiftId, toDate, ShiftLabel.Night, false);
-                solution.AddAssignment(swapUserId.Value, nightShift.ShiftId, fromDate, ShiftLabel.Night, false);
+                solution.AddAssignment(user.UserId, nightShift.ShiftId, toDate, ShiftLabel.Night, false, isSkeleton: userWasSkeleton);
+                solution.AddAssignment(swapUserId.Value, nightShift.ShiftId, fromDate, ShiftLabel.Night, false, isSkeleton: swapWasSkeleton);
             }
             else
             {
+                var userWasSkeleton = solution.TryGetAssignment(user.UserId, nightShift.ShiftId, fromDate, out var userFromAss2) && userFromAss2.IsSkeleton;
                 solution.RemoveAssignment(user.UserId, nightShift.ShiftId, fromDate);
-                solution.AddAssignment(user.UserId, nightShift.ShiftId, toDate, ShiftLabel.Night, false);
+                solution.AddAssignment(user.UserId, nightShift.ShiftId, toDate, ShiftLabel.Night, false, isSkeleton: userWasSkeleton);
             }
         }
     }
@@ -2210,6 +2226,11 @@ public static class ExactNightQuotaGuard
 
     private static bool IsProtected(ShiftConstraints constraints, int userId, SaShiftAssignment assignment)
     {
+        if (assignment.IsSkeleton)
+        {
+            return true;
+        }
+
         var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == userId);
         if (user == null)
         {

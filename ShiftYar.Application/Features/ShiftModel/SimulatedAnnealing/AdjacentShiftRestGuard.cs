@@ -135,8 +135,8 @@ public static class AdjacentShiftRestGuard
         ShiftSolution solution,
         ShiftConstraints constraints)
     {
-        var earlierMixSkeleton = SkeletonAssignmentGuard.IsLocked(solution, earlier);
-        var laterMixSkeleton = SkeletonAssignmentGuard.IsLocked(solution, later);
+        var earlierMixSkeleton = SkeletonAssignmentGuard.IsLocked(solution, earlier) || earlier.IsSkeleton;
+        var laterMixSkeleton = SkeletonAssignmentGuard.IsLocked(solution, later) || later.IsSkeleton;
         var earlierManagerCritical = ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, earlier);
         var laterManagerCritical = ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, later);
         var earlierOn = ApprovedRequestGuard.IsApprovedRequiredSlot(

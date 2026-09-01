@@ -397,14 +397,9 @@ public static class ProductivityHourFillGuard
                             assignment.Date,
                             assignment.ShiftLabel,
                             assignment.IsOnCall);
+                        changed = true;
+                        break;
                     }
-                    else
-                    {
-                        solution.RemoveAssignment(user.UserId, assignment.ShiftId, assignment.Date);
-                    }
-
-                    changed = true;
-                    break;
                 }
             }
 
