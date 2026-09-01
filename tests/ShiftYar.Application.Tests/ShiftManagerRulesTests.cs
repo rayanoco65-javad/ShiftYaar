@@ -1023,6 +1023,96 @@ public class ShiftManagerRulesTests
         Assert.NotNull(error);
     }
 
+    [Fact]
+    public void ApplyMandatoryConstraints_PlacesNightL1_WhenSlotHasOnlyJuniors()
+    {
+        var start = new DateTime(2026, 8, 23);
+        var l1 = Make(17, 1);
+        var l1b = Make(19, 1);
+        var l2a = Make(22, 2);
+        var l2b = Make(23, 2);
+        var junior = Make(27, null);
+        var extra = Make(30, null);
+
+        var constraints = BuildPediatricsConstraints(start);
+        constraints.UserConstraints = [l1, l1b, l2a, l2b, junior, extra];
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(22, 6, start, ShiftLabel.Night, false);
+        solution.AddAssignment(23, 6, start, ShiftLabel.Night, false);
+        solution.AddAssignment(27, 6, start, ShiftLabel.Night, false);
+        solution.AddAssignment(30, 6, start, ShiftLabel.Night, false);
+
+        ApplyManagers(constraints, solution);
+
+        var nightUsers = GetAssignees(constraints, solution, 6, start);
+        Assert.True(ShiftManagerRules.IsSatisfied(nightUsers, 2, 1));
+        Assert.DoesNotContain(
+            solution.Violations,
+            v => v.Contains("Shift manager mix unmet", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ApplyMandatoryConstraints_BreaksFiveConsecutiveDays_ForLevel1User18()
+    {
+        var start = new DateTime(2026, 8, 30);
+        var u18 = Make(18, 1);
+        u18.UserName = "خدیجه متقی";
+        u18.MaxConsecutiveShifts = 4;
+        var u17 = Make(17, 1);
+        var u19 = Make(19, 1);
+        var u22 = Make(22, 2);
+        var u23 = Make(23, 2);
+        var u27 = Make(27, null);
+        var u30 = Make(30, null);
+
+        var constraints = BuildPediatricsConstraints(start);
+        constraints.EndDate = start.AddDays(4);
+        constraints.UserConstraints = [u18, u17, u19, u22, u23, u27, u30];
+        constraints.HardRules.EnforceMaxConsecutiveShifts = true;
+
+        var solution = new ShiftSolution();
+        for (var d = start; d <= constraints.EndDate; d = d.AddDays(1))
+        {
+            solution.AddAssignment(18, 4, d, ShiftLabel.Morning, false);
+            solution.AddAssignment(22, 6, d, ShiftLabel.Night, false);
+            solution.AddAssignment(23, 6, d, ShiftLabel.Night, false);
+            solution.AddAssignment(27, 6, d, ShiftLabel.Night, false);
+            solution.AddAssignment(30, 6, d, ShiftLabel.Night, false);
+        }
+
+        ApplyManagers(constraints, solution);
+
+        var workDates = solution.GetUserAllAssignments(18)
+            .Where(a => !a.IsOnCall)
+            .Select(a => a.Date.Date)
+            .Distinct()
+            .OrderBy(d => d)
+            .ToList();
+        var maxRun = 0;
+        var run = 0;
+        DateTime? prev = null;
+        foreach (var d in workDates)
+        {
+            if (prev != null && (d - prev.Value).Days == 1)
+            {
+                run++;
+            }
+            else
+            {
+                run = 1;
+            }
+
+            maxRun = Math.Max(maxRun, run);
+            prev = d;
+        }
+
+        Assert.True(maxRun <= 4, $"User 18 consecutive run={maxRun}, dates={string.Join(",", workDates)}");
+        Assert.DoesNotContain(
+            MaxConsecutiveWorkdayRules.GetViolations(solution, constraints),
+            v => v.Contains("کاربر ۱۸", StringComparison.Ordinal) || v.Contains("User 18"));
+    }
+
     private static void ApplyManagers(ShiftConstraints constraints, ShiftSolution solution)
     {
         var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters

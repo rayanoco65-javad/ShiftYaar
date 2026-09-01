@@ -114,11 +114,6 @@ public static class MaxConsecutiveWorkdayGuard
             return false;
         }
 
-        if (assignments.Any(a => ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, a)))
-        {
-            return false;
-        }
-
         var nights = assignments.Count(a => a.ShiftLabel == ShiftLabel.Night);
         if (nights > 0 && user.ExactNightShiftCount.HasValue)
         {

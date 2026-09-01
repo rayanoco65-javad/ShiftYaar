@@ -190,6 +190,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ExactDayShiftQuotaGuard.EnforceAll(solution, _constraints);
             ExactComboShiftQuotaGuard.Enforce(solution, _constraints);
 
+            // فاز ۱ (اسکلت مسئول): قبل از پر کردن ظرفیت با نیروی عادی، L1/مسئول روی Evening/Night قفل شود
+            PlaceManagerSkeleton(solution);
+
             // تولید انتساب‌های تصادفی اولیه
             var availableUsers = _constraints.UserConstraints.ToList();
             var dateRange = GetDateRange();
@@ -1510,6 +1513,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             ShiftEligibilityGuard.StripIneligibleAssignments(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+            PlaceManagerSkeleton(solution);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
             ExactDayShiftQuotaGuard.EnforceAll(solution, _constraints);
             // پوشش ظرفیت اجباری اولویت مطلق دارد (عدالت نرم نباید جای خالی بسازد)
@@ -1771,7 +1775,116 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// </summary>
         public void EnforceShiftManagerMix(ShiftSolution solution)
         {
+            PlaceManagerSkeleton(solution);
             RunShiftManagerRepairPasses(solution);
+        }
+
+        /// <summary>
+        /// فاز ۱ زمان‌بندی سلسله‌مراتبی: برای هر اسلات Evening/Night اول مسئول سطح‌۱ و بقیهٔ مسئول‌ها
+        /// گذاشته می‌شوند؛ ظرفیت باقی‌مانده بعداً با نیروی عادی پر می‌شود.
+        /// </summary>
+        public void PlaceManagerSkeleton(ShiftSolution solution)
+        {
+            var dates = GetDateRange().ToList();
+            var shifts = _constraints.ShiftRequirements
+                .Where(ShiftManagerRules.RequiresAnyManager)
+                .OrderBy(s => s.ShiftLabel == ShiftLabel.Night ? 0
+                    : s.ShiftLabel == ShiftLabel.Evening ? 1 : 2)
+                .ThenBy(s => s.ShiftId)
+                .ToList();
+
+            foreach (var shiftReq in shifts)
+            {
+                foreach (var date in dates)
+                {
+                    if (!SlotHasCoverageDemand(shiftReq, date))
+                    {
+                        continue;
+                    }
+
+                    EnsureShiftManagerMixForSlot(solution, shiftReq, date);
+                }
+            }
+
+            RestoreDeficitNightQuotas(solution);
+        }
+
+        private bool SlotHasCoverageDemand(ShiftRequirement shiftReq, DateTime date)
+        {
+            var holiday = _constraints.IsHoliday(date);
+            return shiftReq.SpecialtyRequirements.Any(s => s.ForDay(holiday).RequiredTotalCount > 0);
+        }
+
+        private bool SlotHasRoomForAnotherManager(
+            ShiftSolution solution,
+            ShiftRequirement shiftReq,
+            DateTime date)
+        {
+            var holiday = _constraints.IsHoliday(date);
+            foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
+            {
+                var needed = specialtyReq.ForDay(holiday).RequiredTotalCount;
+                if (needed <= 0)
+                {
+                    continue;
+                }
+
+                var current = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                    .Count(a => !a.IsOnCall && GetUserSpecialty(a.UserId) == specialtyReq.SpecialtyId);
+                if (current < needed)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool TryAddManagerToSlot(
+            ShiftSolution solution,
+            ShiftRequirement shiftReq,
+            DateTime date,
+            bool needLevel1)
+        {
+            var specialtyId = shiftReq.SpecialtyRequirements
+                .OrderByDescending(s => s.ForDay(_constraints.IsHoliday(date)).RequiredTotalCount)
+                .Select(s => s.SpecialtyId)
+                .FirstOrDefault();
+            if (specialtyId == 0 && shiftReq.SpecialtyRequirements.Count > 0)
+            {
+                specialtyId = shiftReq.SpecialtyRequirements[0].SpecialtyId;
+            }
+
+            foreach (var candidate in RankManagerCandidatePool(
+                         solution, shiftReq, date, needLevel1, specialtyId, UserGender.Female, genderLocked: false))
+            {
+                var backup = solution.Clone();
+                if (!TryClearAdjacencyForManagerInstall(solution, candidate, date, shiftReq.ShiftLabel))
+                {
+                    RestoreSolutionFromQuotaBackup(solution, backup);
+                    continue;
+                }
+
+                if (!IsUserAvailableForManagerInstall(
+                        candidate, date, shiftReq.ShiftLabel, solution,
+                        ignoreSameDayAssignments: true, relaxNightSpacing: true, mandatoryInstall: true))
+                {
+                    RestoreSolutionFromQuotaBackup(solution, backup);
+                    continue;
+                }
+
+                if (!SlotHasRoomForAnotherManager(solution, shiftReq, date)
+                    && !solution.HasAssignment(candidate.UserId, shiftReq.ShiftId, date))
+                {
+                    RestoreSolutionFromQuotaBackup(solution, backup);
+                    continue;
+                }
+
+                AddShiftAssignmentForManagerInstall(solution, candidate, shiftReq, date);
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -1983,9 +2096,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             SealApprovedRequestsThenAdjacency(solution);
+            PlaceManagerSkeleton(solution);
+            MaxConsecutiveWorkdayGuard.Enforce(solution, _constraints);
             if (HasUnmetManagerMix(solution))
             {
-                RunShiftManagerRepairPasses(solution);
+                PlaceManagerSkeleton(solution);
             }
 
             SealApprovedRequestsThenAdjacency(solution);
@@ -2168,11 +2283,6 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             for (var attempt = 0; attempt < maxAttempts; attempt++)
             {
                 var assignees = GetRegularAssignees(solution, shiftReq, date);
-                if (assignees.Count == 0)
-                {
-                    break;
-                }
-
                 if (ShiftManagerRules.IsSatisfied(assignees, requiredTotal, minLevel1))
                 {
                     break;
@@ -2189,7 +2299,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     break;
                 }
 
-                var replaced = TryReplaceForManagerMix(
+                var added = assignees.Count == 0 || SlotHasRoomForAnotherManager(solution, shiftReq, date)
+                    ? TryAddManagerToSlot(solution, shiftReq, date, needLevel1)
+                    : false;
+
+                var replaced = added
+                    || TryReplaceForManagerMix(
                     solution, shiftReq, date, needLevel1, needAnyManager, onlyNeedLevel1, allowQuotaBypass: false)
                     || TryReplaceForManagerMix(
                         solution, shiftReq, date, needLevel1, needAnyManager, onlyNeedLevel1, allowQuotaBypass: true);
@@ -2857,8 +2972,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return false;
             }
 
+            if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
+                    solution, _constraints, user, date))
+            {
+                return false;
+            }
+
             var relaxNightGap = relaxNightSpacing || mandatoryInstall;
-            // الزام مسئول شیفت سخت‌تر از سقف روزهای کاری متوالی و فاصله شب است
             if (shiftLabel == ShiftLabel.Night)
             {
                 var nights = solution.GetUserAllAssignments(user.UserId)
@@ -3368,7 +3488,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 if (!solution.HasAssignment(user.UserId, shiftReq.ShiftId, date) &&
                     !HasDailyConflict(solution, user.UserId, date, shiftReq.ShiftLabel) &&
                     !AdjacentShiftRestRules.WouldConflict(
-                        solution.GetUserAllAssignments(user.UserId), date, shiftReq.ShiftLabel, _constraints))
+                        solution.GetUserAllAssignments(user.UserId), date, shiftReq.ShiftLabel, _constraints) &&
+                    !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
+                        solution, _constraints, user, date))
                 {
                     solution.AddAssignment(user.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall);
                     assigned++;
@@ -3396,7 +3518,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 if (!solution.HasAssignment(user.UserId, shiftReq.ShiftId, date) &&
                     !HasDailyConflict(solution, user.UserId, date, shiftReq.ShiftLabel) &&
                     !AdjacentShiftRestRules.WouldConflict(
-                        solution.GetUserAllAssignments(user.UserId), date, shiftReq.ShiftLabel, _constraints))
+                        solution.GetUserAllAssignments(user.UserId), date, shiftReq.ShiftLabel, _constraints) &&
+                    !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
+                        solution, _constraints, user, date))
                 {
                     solution.AddAssignment(user.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall);
                     current++;

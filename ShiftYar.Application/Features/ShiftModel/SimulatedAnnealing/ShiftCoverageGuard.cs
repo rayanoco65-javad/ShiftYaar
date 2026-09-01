@@ -343,6 +343,29 @@ public static class ShiftCoverageGuard
     {
         var score = 0;
 
+        var shiftReq = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftLabel == label);
+        if (shiftReq != null && ShiftManagerRules.RequiresAnyManager(shiftReq))
+        {
+            var assignees = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                .Where(a => !a.IsOnCall)
+                .Select(a => constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId))
+                .Where(u => u != null)
+                .Cast<UserConstraint>()
+                .ToList();
+            var (requiredTotal, minLevel1) = ShiftManagerRules.GetRequirement(shiftReq);
+            if (!ShiftManagerRules.IsSatisfied(assignees, requiredTotal, minLevel1))
+            {
+                if (ShiftManagerRules.IsLevel1(user))
+                {
+                    score -= 20_000;
+                }
+                else if (ShiftManagerRules.IsManager(user))
+                {
+                    score -= 8_000;
+                }
+            }
+        }
+
         // کسری سهمیه شب اولویت مطلق برای شب
         if (label == ShiftLabel.Night)
         {
