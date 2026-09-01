@@ -1666,6 +1666,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             solution.Score = CalculateSolutionScore(solution);
+            PerformFinalManagerMixRepairSweep(solution);
             ShiftManagerMixGuard.EnsureOrThrow(solution, _constraints);
             solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
             solution.Violations.AddRange(ApprovedRequestGuard.GetUnmetViolations(solution, _constraints));
@@ -2256,6 +2257,107 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     RefreshManagerSkeletonFlags(solution);
                 }
             }
+        }
+
+        /// <summary>
+        /// چتر نجات نهایی و جاروب ترمیم پسا‌بهینه‌سازی (Post-Optimization Repair Sweep & Strict Feasibility Enforcement).
+        /// این متد قبل از تحویل برنامه نهایی، تمام شیفت‌ها را بازرسی کرده و در صورت نبود مسئول سطح-۱، به صورت تهاجمی مسئول سطح-۱ را جایگزین می‌کند.
+        /// در صورت عدم امکان فیزیکی (به دلیل استراحت اجباری)، استثنای صریح InvalidOperationException پرتاب می‌کند.
+        /// </summary>
+        public void PerformFinalManagerMixRepairSweep(ShiftSolution solution)
+        {
+            var dateRange = GetDateRange();
+            foreach (var date in dateRange)
+            {
+                foreach (var shiftReq in _constraints.ShiftRequirements.Where(ShiftManagerRules.RequiresAnyManager))
+                {
+                    if (!SlotHasCoverageDemand(shiftReq, date))
+                    {
+                        continue;
+                    }
+
+                    if (IsSlotManagerMixSatisfied(solution, shiftReq, date))
+                    {
+                        continue;
+                    }
+
+                    // ۱) تلاش اول: اجرای ترمیم اختصاصی برای اسلات
+                    EnsureShiftManagerMixForSlot(solution, shiftReq, date, strictPhase: false, markSkeleton: true);
+
+                    // ۲) تلاش دوم: کشیدن تهاجمی مسئول سطح-۱ با آزادسازی نیروهای غیرضروری
+                    if (!IsSlotManagerMixSatisfied(solution, shiftReq, date))
+                    {
+                        TryForcePullLevel1Manager(solution, shiftReq, date);
+                    }
+
+                    // ۳) در صورت عدم موفقیت قطعی، صدور استثنای عدم امکان فیزیکی تخصیص
+                    if (!IsSlotManagerMixSatisfied(solution, shiftReq, date))
+                    {
+                        var labelName = shiftReq.ShiftLabel == ShiftLabel.Night ? "شب" : shiftReq.ShiftLabel == ShiftLabel.Evening ? "عصر" : "صبح";
+                        throw new InvalidOperationException(
+                            $"Cannot generate valid schedule: Insufficient Level-1 personnel available on {date:yyyy-MM-dd} for {labelName} shift. " +
+                            $"ترکیب مسئول شیفت ({labelName}) در تاریخ {date:yyyy-MM-dd} برآورده نشد: تمامی مسئولان سطح-۱ در این تاریخ به دلیل محدودیت‌های استراحت اجباری، مرخصی یا توالی غیرمجاز ناچاراً غیرقابل استفاده هستند.");
+                    }
+                }
+            }
+        }
+
+        private bool TryForcePullLevel1Manager(ShiftSolution solution, ShiftRequirement shiftReq, DateTime date)
+        {
+            var specialtyId = shiftReq.SpecialtyRequirements
+                .OrderByDescending(s => s.ForDay(_constraints.IsHoliday(date)).RequiredTotalCount)
+                .Select(s => s.SpecialtyId)
+                .FirstOrDefault();
+
+            var eligibleL1Candidates = _constraints.UserConstraints
+                .Where(u => u.IsActive && ShiftManagerRules.IsLevel1(u))
+                .Where(u => u.SpecialtyId == specialtyId)
+                .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, shiftReq.ShiftLabel))
+                .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
+                .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
+                .Where(u => !u.RequiredShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel != shiftReq.ShiftLabel))
+                .OrderBy(u => solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == shiftReq.ShiftLabel && !a.IsOnCall))
+                .ToList();
+
+            foreach (var candidate in eligibleL1Candidates)
+            {
+                if (solution.HasAssignment(candidate.UserId, shiftReq.ShiftId, date))
+                {
+                    continue;
+                }
+
+                var backup = solution.Clone();
+
+                RemoveConflictingDailyAssignments(solution, candidate.UserId, date, shiftReq.ShiftId, shiftReq.ShiftLabel);
+
+                if (!TryClearAdjacencyForManagerInstall(solution, candidate, date, shiftReq.ShiftLabel))
+                {
+                    RestoreSolutionFromQuotaBackup(solution, backup);
+                    continue;
+                }
+
+                if (HasDailyConflict(solution, candidate.UserId, date, shiftReq.ShiftLabel) ||
+                    AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(candidate.UserId), date, shiftReq.ShiftLabel, _constraints) ||
+                    MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(solution, _constraints, candidate, date))
+                {
+                    RestoreSolutionFromQuotaBackup(solution, backup);
+                    continue;
+                }
+
+                MakeRoomInShift(solution, shiftReq, date, candidate);
+
+                solution.AddAssignment(candidate.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall: false, isSkeleton: true);
+                SkeletonAssignmentGuard.LockSlotManagerAssignments(solution, _constraints, shiftReq, date);
+
+                if (IsSlotManagerMixSatisfied(solution, shiftReq, date))
+                {
+                    return true;
+                }
+
+                RestoreSolutionFromQuotaBackup(solution, backup);
+            }
+
+            return false;
         }
 
         private void RefreshManagerSkeletonFlags(ShiftSolution solution) =>

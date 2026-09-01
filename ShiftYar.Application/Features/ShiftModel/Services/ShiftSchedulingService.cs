@@ -892,6 +892,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             EnsureExactNightQuotasOrThrow(scheduler, solution);
             EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
             EnsureHardDailyRulesOrThrow(solution, constraints);
+            scheduler.PerformFinalManagerMixRepairSweep(solution);
             ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
 
@@ -2839,6 +2840,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             EnsureExactNightQuotasOrThrow(scheduler, solution);
             EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
             EnsureHardDailyRulesOrThrow(solution, constraints);
+            scheduler.PerformFinalManagerMixRepairSweep(solution);
             ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
         }
@@ -2895,6 +2897,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             EnsureExactNightQuotasOrThrow(scheduler, solution);
             EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
             EnsureHardDailyRulesOrThrow(solution, constraints);
+            scheduler.PerformFinalManagerMixRepairSweep(solution);
             ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
 
