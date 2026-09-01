@@ -39,6 +39,11 @@ public static class DailyDuplicateAssignmentGuard
 
             foreach (var extra in items.Where(a => !keepers.Contains(a)))
             {
+                if (extra.IsSkeleton)
+                {
+                    continue;
+                }
+
                 solution.RemoveAssignment(extra.UserId, extra.ShiftId, extra.Date);
             }
         }
@@ -70,7 +75,7 @@ public static class DailyDuplicateAssignmentGuard
     {
         // اولویت: اسلات اجباری، سپس شب (سهمیه)، سپس صبح+عصر
         var ordered = items
-            .OrderByDescending(a => IsProtected(user, a))
+            .OrderByDescending(a => IsProtected(user, a) || a.IsSkeleton)
             .ThenByDescending(a => a.ShiftLabel == ShiftLabel.Night && user?.HasExactNightQuota == true)
             .ThenBy(a => AdjacentShiftRestRules.LabelOrder(a.ShiftLabel))
             .ThenBy(a => a.ShiftId)

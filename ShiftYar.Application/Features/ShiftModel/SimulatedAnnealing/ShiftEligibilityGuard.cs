@@ -18,6 +18,11 @@ public static class ShiftEligibilityGuard
         {
             if (!IsAssignmentEligible(solution, constraints, assignment))
             {
+                if (assignment.IsSkeleton)
+                {
+                    continue;
+                }
+
                 solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
             }
         }

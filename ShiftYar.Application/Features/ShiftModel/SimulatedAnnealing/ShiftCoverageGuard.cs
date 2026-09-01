@@ -244,6 +244,11 @@ public static class ShiftCoverageGuard
 
     private static bool IsProtectedAssignment(ShiftConstraints constraints, SaShiftAssignment assignment)
     {
+        if (assignment.IsSkeleton)
+        {
+            return true;
+        }
+
         var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == assignment.UserId);
         if (user == null)
         {

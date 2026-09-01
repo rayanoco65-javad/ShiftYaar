@@ -133,6 +133,8 @@ public static class AdjacentShiftRestGuard
         ShiftSolution solution,
         ShiftConstraints constraints)
     {
+        var earlierSkeleton = earlier.IsSkeleton;
+        var laterSkeleton = later.IsSkeleton;
         var earlierManagerCritical = ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, earlier);
         var laterManagerCritical = ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, later);
         var earlierOn = ApprovedRequestGuard.IsApprovedRequiredSlot(
@@ -142,42 +144,48 @@ public static class AdjacentShiftRestGuard
 
         if (laterOn && !earlierOn)
         {
-            return IsRequestProtected(user, earlier) ? null : earlier;
+            return IsRequestProtected(user, earlier) || earlierSkeleton ? null : earlier;
         }
 
         if (earlierOn && !laterOn)
         {
-            return IsRequestProtected(user, later) ? null : later;
+            return IsRequestProtected(user, later) || laterSkeleton ? null : later;
         }
 
-        // محدودیت تنظیمات: جفت را بشکن، ولی شبِ mix-critical را قربانی نکن
+        // محدودیت تنظیمات: جفت را بشکن، ولی شبِ mix-critical/اسکلت را قربانی نکن
         if (AdjacentShiftRestRules.IsSettingsControlledAfterNightPair(
                 earlier.ShiftLabel, earlier.Date, later.ShiftLabel, later.Date)
             && !IsRequestProtected(user, later))
         {
-            if (laterManagerCritical && !IsRequestProtected(user, earlier) && !earlierManagerCritical)
+            if ((laterManagerCritical || laterSkeleton) && !IsRequestProtected(user, earlier) && !earlierManagerCritical && !earlierSkeleton)
             {
                 return earlier;
             }
 
             if (later.ShiftLabel == ShiftLabel.Night
-                && laterManagerCritical
-                && !IsRequestProtected(user, earlier))
+                && (laterManagerCritical || laterSkeleton)
+                && !IsRequestProtected(user, earlier)
+                && !earlierSkeleton)
             {
                 return earlier;
+            }
+
+            if (laterSkeleton)
+            {
+                return IsRequestProtected(user, earlier) || earlierSkeleton ? null : earlier;
             }
 
             return later;
         }
 
-        if (earlierManagerCritical && laterManagerCritical)
+        if ((earlierManagerCritical || earlierSkeleton) && (laterManagerCritical || laterSkeleton))
         {
             return null;
         }
 
-        if (laterManagerCritical)
+        if (laterManagerCritical || laterSkeleton)
         {
-            if (IsRequestProtected(user, earlier))
+            if (IsRequestProtected(user, earlier) || earlierSkeleton)
             {
                 return null;
             }
@@ -185,9 +193,9 @@ public static class AdjacentShiftRestGuard
             return earlier;
         }
 
-        if (earlierManagerCritical)
+        if (earlierManagerCritical || earlierSkeleton)
         {
-            if (IsRequestProtected(user, later))
+            if (IsRequestProtected(user, later) || laterSkeleton)
             {
                 return null;
             }

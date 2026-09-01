@@ -44,6 +44,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         {
             var stopwatch = Stopwatch.StartNew();
 
+            ManagerMixFeasibilityChecker.ValidateOrThrow(_constraints);
+
             var currentSolution = GenerateFeasibleInitialSolution();
             var bestSolution = currentSolution.Clone();
 
@@ -191,7 +193,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ExactComboShiftQuotaGuard.Enforce(solution, _constraints);
 
             // فاز ۱ (اسکلت مسئول): قبل از پر کردن ظرفیت با نیروی عادی، L1/مسئول روی Evening/Night قفل شود
-            PlaceManagerSkeleton(solution);
+            BuildReservedManagerSkeleton(solution);
 
             // تولید انتساب‌های تصادفی اولیه
             var availableUsers = _constraints.UserConstraints.ToList();
@@ -1513,7 +1515,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             ShiftEligibilityGuard.StripIneligibleAssignments(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
-            PlaceManagerSkeleton(solution);
+            BuildReservedManagerSkeleton(solution);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
             ExactDayShiftQuotaGuard.EnforceAll(solution, _constraints);
             // پوشش ظرفیت اجباری اولویت مطلق دارد (عدالت نرم نباید جای خالی بسازد)
@@ -1780,10 +1782,28 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         }
 
         /// <summary>
+        /// فاز ۱ — لایهٔ محافظت‌شدهٔ مسئول: Night سپس Evening، با قوانین سخت استراحت/متوالی.
+        /// </summary>
+        public void BuildReservedManagerSkeleton(ShiftSolution solution)
+        {
+            solution.ClearAllSkeletonFlags();
+            PlaceManagerLayer(solution, strictPhase: true);
+        }
+
+        /// <summary>
+        /// ترمیم mix بدون پاک‌کردن پرچم اسکلت موجود؛ انتساب‌های جدید مسئول هم اسکلت می‌شوند.
+        /// </summary>
+        public void RepairManagerMix(ShiftSolution solution) =>
+            PlaceManagerLayer(solution, strictPhase: false);
+
+        /// <summary>
         /// فاز ۱ زمان‌بندی سلسله‌مراتبی: برای هر اسلات Evening/Night اول مسئول سطح‌۱ و بقیهٔ مسئول‌ها
         /// گذاشته می‌شوند؛ ظرفیت باقی‌مانده بعداً با نیروی عادی پر می‌شود.
         /// </summary>
-        public void PlaceManagerSkeleton(ShiftSolution solution)
+        public void PlaceManagerSkeleton(ShiftSolution solution) =>
+            RepairManagerMix(solution);
+
+        private void PlaceManagerLayer(ShiftSolution solution, bool strictPhase)
         {
             var dates = GetDateRange().ToList();
             var shifts = _constraints.ShiftRequirements
@@ -1802,7 +1822,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
-                    EnsureShiftManagerMixForSlot(solution, shiftReq, date);
+                    EnsureShiftManagerMixForSlot(solution, shiftReq, date, strictPhase: strictPhase, markSkeleton: true);
+                    SkeletonAssignmentGuard.MarkSlotManagersAsSkeleton(solution, _constraints, shiftReq, date);
                 }
             }
 
@@ -1844,7 +1865,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftSolution solution,
             ShiftRequirement shiftReq,
             DateTime date,
-            bool needLevel1)
+            bool needLevel1,
+            bool strictPhase,
+            bool markSkeleton)
         {
             var specialtyId = shiftReq.SpecialtyRequirements
                 .OrderByDescending(s => s.ForDay(_constraints.IsHoliday(date)).RequiredTotalCount)
@@ -1856,7 +1879,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             foreach (var candidate in RankManagerCandidatePool(
-                         solution, shiftReq, date, needLevel1, specialtyId, UserGender.Female, genderLocked: false))
+                         solution, shiftReq, date, needLevel1, specialtyId, UserGender.Female, genderLocked: false, strictPhase))
             {
                 var backup = solution.Clone();
                 if (!TryClearAdjacencyForManagerInstall(solution, candidate, date, shiftReq.ShiftLabel))
@@ -1867,7 +1890,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                 if (!IsUserAvailableForManagerInstall(
                         candidate, date, shiftReq.ShiftLabel, solution,
-                        ignoreSameDayAssignments: true, relaxNightSpacing: true, mandatoryInstall: true))
+                        ignoreSameDayAssignments: true,
+                        relaxNightSpacing: !strictPhase,
+                        mandatoryInstall: !strictPhase))
                 {
                     RestoreSolutionFromQuotaBackup(solution, backup);
                     continue;
@@ -1880,7 +1905,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     continue;
                 }
 
-                AddShiftAssignmentForManagerInstall(solution, candidate, shiftReq, date);
+                AddShiftAssignmentForManagerInstall(solution, candidate, shiftReq, date, markSkeleton);
                 return true;
             }
 
@@ -2046,7 +2071,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
                 AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
                 DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
-                MaxConsecutiveWorkdayGuard.Enforce(solution, _constraints);
+                MaxConsecutiveWorkdayGuard.Enforce(solution, _constraints, RepairManagerMix);
                 ApprovedRequestGuard.ForceApply(solution, _constraints);
 
                 if (IsMandatoryStable(solution))
@@ -2057,7 +2082,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             ApprovedRequestGuard.ForceApply(solution, _constraints);
-            MaxConsecutiveWorkdayGuard.Enforce(solution, _constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(solution, _constraints, RepairManagerMix);
             FinishWithCoverageManagersAndQuotas(solution);
         }
 
@@ -2097,10 +2122,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             SealApprovedRequestsThenAdjacency(solution);
             PlaceManagerSkeleton(solution);
-            MaxConsecutiveWorkdayGuard.Enforce(solution, _constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(solution, _constraints, RepairManagerMix);
             if (HasUnmetManagerMix(solution))
             {
-                PlaceManagerSkeleton(solution);
+                RepairManagerMix(solution);
             }
 
             SealApprovedRequestsThenAdjacency(solution);
@@ -2109,6 +2134,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         private void SealApprovedRequestsThenAdjacency(ShiftSolution solution)
         {
             ApprovedRequestGuard.ForceApply(solution, _constraints);
+            RepairManagerMix(solution);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
         }
 
@@ -2150,7 +2176,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     assignment.ShiftId,
                     assignment.Date,
                     assignment.ShiftLabel,
-                    assignment.IsOnCall);
+                    assignment.IsOnCall,
+                    assignment.IsSkeleton);
             }
 
             target.Score = backup.Score;
@@ -2210,7 +2237,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     foreach (var shiftReq in _constraints.ShiftRequirements
                                  .OrderByDescending(s => ShiftManagerRules.GetRequirement(s).RequiredTotal))
                     {
-                        if (EnsureShiftManagerMixForSlot(solution, shiftReq, date))
+                        if (EnsureShiftManagerMixForSlot(solution, shiftReq, date, strictPhase: false, markSkeleton: false))
                         {
                             progress = true;
                         }
@@ -2269,7 +2296,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .ToList();
 
         /// <returns>true if at least one replacement/swap succeeded this call.</returns>
-        private bool EnsureShiftManagerMixForSlot(ShiftSolution solution, ShiftRequirement shiftReq, DateTime date)
+        private bool EnsureShiftManagerMixForSlot(
+            ShiftSolution solution,
+            ShiftRequirement shiftReq,
+            DateTime date,
+            bool strictPhase = false,
+            bool markSkeleton = false)
         {
             var (requiredTotal, minLevel1) = ShiftManagerRules.GetRequirement(shiftReq);
             if (requiredTotal <= 0)
@@ -2300,14 +2332,14 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
 
                 var added = assignees.Count == 0 || SlotHasRoomForAnotherManager(solution, shiftReq, date)
-                    ? TryAddManagerToSlot(solution, shiftReq, date, needLevel1)
+                    ? TryAddManagerToSlot(solution, shiftReq, date, needLevel1, strictPhase, markSkeleton)
                     : false;
 
                 var replaced = added
                     || TryReplaceForManagerMix(
-                    solution, shiftReq, date, needLevel1, needAnyManager, onlyNeedLevel1, allowQuotaBypass: false)
+                    solution, shiftReq, date, needLevel1, needAnyManager, onlyNeedLevel1, allowQuotaBypass: false, markSkeleton: markSkeleton)
                     || TryReplaceForManagerMix(
-                        solution, shiftReq, date, needLevel1, needAnyManager, onlyNeedLevel1, allowQuotaBypass: true);
+                        solution, shiftReq, date, needLevel1, needAnyManager, onlyNeedLevel1, allowQuotaBypass: true, markSkeleton: markSkeleton);
 
                 if (replaced)
                 {
@@ -2329,13 +2361,15 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             bool needLevel1,
             bool needAnyManager,
             bool onlyNeedLevel1,
-            bool allowQuotaBypass)
+            bool allowQuotaBypass,
+            bool markSkeleton = false)
         {
             var regulars = solution.GetShiftAssignments(shiftReq.ShiftId, date)
                 .Where(a => !a.IsOnCall)
                 .ToList();
 
             var occupants = regulars
+                .Where(a => !a.IsSkeleton)
                 .Where(a => !IsProtectedAssignment(solution, a, forManagerInstall: allowQuotaBypass))
                 .Select(a => new
                 {
@@ -2389,7 +2423,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
 
                 var backup = solution.Clone();
-                if (TryInstallShiftManager(solution, shiftReq, date, needLevel1, occupant.Assignment, occupant.User!))
+                if (TryInstallShiftManager(solution, shiftReq, date, needLevel1, occupant.Assignment, occupant.User!, markSkeleton))
                 {
                     if (!RestoreAnyDroppedNightQuotas(solution))
                     {
@@ -2413,7 +2447,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             DateTime date,
             bool needLevel1,
             SaShiftAssignment occupantAssignment,
-            UserConstraint occupantUser)
+            UserConstraint occupantUser,
+            bool markSkeleton = false)
         {
             if (targetShift.ShiftLabel != ShiftLabel.Night || !needLevel1)
             {
@@ -2468,9 +2503,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     solution.RemoveAssignment(
                         occupantAssignment.UserId,
                         occupantAssignment.ShiftId,
-                        occupantAssignment.Date);
-                    solution.RemoveAssignment(l1.UserId, donorNight.ShiftId, donorNight.Date);
-                    AddShiftAssignmentForManagerInstall(solution, l1, targetShift, date);
+                        occupantAssignment.Date,
+                        force: true);
+                    solution.RemoveAssignment(l1.UserId, donorNight.ShiftId, donorNight.Date, force: true);
+                    AddShiftAssignmentForManagerInstall(solution, l1, targetShift, date, markSkeleton);
                     AddShiftAssignmentForManagerInstall(solution, occupantUser, targetShift, donorNight.Date);
 
                     if (occupantUser.HasExactNightQuota)
@@ -2504,21 +2540,22 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             DateTime date,
             bool needLevel1,
             SaShiftAssignment occupantAssignment,
-            UserConstraint occupantUser)
+            UserConstraint occupantUser,
+            bool markSkeleton = false)
         {
-            if (TryDirectManagerInstall(solution, shiftReq, date, needLevel1, occupantAssignment, occupantUser))
+            if (TryDirectManagerInstall(solution, shiftReq, date, needLevel1, occupantAssignment, occupantUser, markSkeleton))
             {
                 return true;
             }
 
             if (TrySwapManagerFromOtherShiftSameDay(
-                    solution, shiftReq, date, needLevel1, occupantAssignment, occupantUser))
+                    solution, shiftReq, date, needLevel1, occupantAssignment, occupantUser, markSkeleton))
             {
                 return true;
             }
 
             return TrySwapManagerFromNonAdjacentNight(
-                solution, shiftReq, date, needLevel1, occupantAssignment, occupantUser);
+                solution, shiftReq, date, needLevel1, occupantAssignment, occupantUser, markSkeleton);
         }
 
         private bool TryDirectManagerInstall(
@@ -2527,7 +2564,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             DateTime date,
             bool needLevel1,
             SaShiftAssignment occupantAssignment,
-            UserConstraint occupantUser)
+            UserConstraint occupantUser,
+            bool markSkeleton = false)
         {
             var occupantSpecialty = GetUserSpecialty(occupantAssignment.UserId);
             var occupantGender = GetUserGender(occupantAssignment.UserId);
@@ -2555,8 +2593,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 solution.RemoveAssignment(
                     occupantAssignment.UserId,
                     occupantAssignment.ShiftId,
-                    occupantAssignment.Date);
-                AddShiftAssignmentForManagerInstall(solution, candidate, shiftReq, date);
+                    occupantAssignment.Date,
+                    force: true);
+                AddShiftAssignmentForManagerInstall(solution, candidate, shiftReq, date, markSkeleton);
                 return true;
             }
 
@@ -2572,7 +2611,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             DateTime date,
             bool needLevel1,
             SaShiftAssignment occupantAssignment,
-            UserConstraint occupantUser)
+            UserConstraint occupantUser,
+            bool markSkeleton = false)
         {
             var occupantSpecialty = GetUserSpecialty(occupantAssignment.UserId);
             var occupantGender = GetUserGender(occupantAssignment.UserId);
@@ -2590,6 +2630,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(x => x.User != null && x.ShiftReq != null)
                 .Where(x => ShiftManagerRules.IsManager(x.User!))
                 .Where(x => !needLevel1 || ShiftManagerRules.IsLevel1(x.User!))
+                .Where(x => !x.Assignment.IsSkeleton)
                 .Where(x => !IsProtectedAssignment(solution, x.Assignment, forManagerInstall: true))
                 .Where(x => IsUserAvailableForManagerInstall(
                     x.User!, date, targetShift.ShiftLabel, solution, x.Assignment.ShiftId, ignoreSameDayAssignments: true)
@@ -2667,13 +2708,15 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 solution.RemoveAssignment(
                     occupantAssignment.UserId,
                     occupantAssignment.ShiftId,
-                    occupantAssignment.Date);
+                    occupantAssignment.Date,
+                    force: true);
                 solution.RemoveAssignment(
                     donor.Assignment.UserId,
                     donor.Assignment.ShiftId,
-                    donor.Assignment.Date);
+                    donor.Assignment.Date,
+                    force: true);
 
-                AddShiftAssignmentForManagerInstall(solution, donor.User!, targetShift, date);
+                AddShiftAssignmentForManagerInstall(solution, donor.User!, targetShift, date, markSkeleton);
 
                 if (backfill.UserId != donor.User!.UserId)
                 {
@@ -2696,7 +2739,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             bool needLevel1,
             int specialtyId,
             UserGender occupantGender,
-            bool genderLocked) =>
+            bool genderLocked,
+            bool strictPhase = false) =>
             _constraints.UserConstraints
                 .Where(u => u.IsActive && ShiftManagerRules.IsManager(u))
                 .Where(u => !needLevel1 || ShiftManagerRules.IsLevel1(u))
@@ -2706,12 +2750,34 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, shiftReq.ShiftLabel))
                 .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
                 .OrderByDescending(u => ShiftManagerRules.IsLevel1(u))
+                .ThenBy(u => CountUserLabelAssignments(solution, u.UserId, shiftReq.ShiftLabel))
+                .ThenBy(u => HasRecentSameLabel(solution, u.UserId, date, shiftReq.ShiftLabel) ? 1 : 0)
                 .ThenBy(u => AdjacentShiftRestRules.WouldConflict(
                     solution.GetUserAllAssignments(u.UserId), date, shiftReq.ShiftLabel, _constraints)
                     ? 1
                     : 0)
                 .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
                 .ThenBy(u => u.UserId);
+
+        private static int CountUserLabelAssignments(ShiftSolution solution, int userId, ShiftLabel label) =>
+            solution.GetUserAllAssignments(userId).Count(a => a.ShiftLabel == label && !a.IsOnCall);
+
+        private static bool HasRecentSameLabel(
+            ShiftSolution solution,
+            int userId,
+            DateTime date,
+            ShiftLabel label)
+        {
+            if (label != ShiftLabel.Night)
+            {
+                return false;
+            }
+
+            return solution.GetUserAllAssignments(userId)
+                .Any(a => !a.IsOnCall
+                          && a.ShiftLabel == ShiftLabel.Night
+                          && Math.Abs((a.Date.Date - date.Date).Days) == 1);
+        }
 
         /// <summary>
         /// تداخل غیرِON و غیرِmix-critical را برای نصب مسئول شب/عصر پاک می‌کند.
@@ -2796,12 +2862,17 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return false;
             }
 
+            if (assignment.IsSkeleton)
+            {
+                return false;
+            }
+
             if (ShiftManagerRules.IsCriticalForManagerMix(_constraints, solution, assignment))
             {
                 return false;
             }
 
-            solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+            solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date, force: true);
             return true;
         }
 
@@ -2905,7 +2976,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftSolution solution,
             UserConstraint user,
             ShiftRequirement shiftReq,
-            DateTime date)
+            DateTime date,
+            bool markSkeleton = false)
         {
             RemoveConflictingDailyAssignments(
                 solution,
@@ -2918,7 +2990,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 shiftReq.ShiftId,
                 date,
                 shiftReq.ShiftLabel,
-                isOnCall: false);
+                isOnCall: false,
+                isSkeleton: markSkeleton && ShiftManagerRules.IsLevel1(user));
         }
 
         /// <summary>
@@ -3239,6 +3312,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             if (user == null)
             {
                 return false;
+            }
+
+            if (assignment.IsSkeleton)
+            {
+                return true;
             }
 
             if (user.RequiredShiftSlots.Any(s =>
@@ -3633,13 +3711,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 HasDailyConflict(solution, assignment1.UserId, assignment2.Date, assignment2.ShiftLabel))
             {
                 // برگرداندن
-                solution.AddAssignment(assignment1.UserId, assignment1.ShiftId, assignment1.Date, assignment1.ShiftLabel, assignment1.IsOnCall);
-                solution.AddAssignment(assignment2.UserId, assignment2.ShiftId, assignment2.Date, assignment2.ShiftLabel, assignment2.IsOnCall);
+                solution.AddAssignment(assignment1.UserId, assignment1.ShiftId, assignment1.Date, assignment1.ShiftLabel, assignment1.IsOnCall, assignment1.IsSkeleton);
+                solution.AddAssignment(assignment2.UserId, assignment2.ShiftId, assignment2.Date, assignment2.ShiftLabel, assignment2.IsOnCall, assignment2.IsSkeleton);
                 return;
             }
 
-            solution.AddAssignment(assignment2.UserId, assignment1.ShiftId, assignment1.Date, assignment1.ShiftLabel, assignment1.IsOnCall);
-            solution.AddAssignment(assignment1.UserId, assignment2.ShiftId, assignment2.Date, assignment2.ShiftLabel, assignment2.IsOnCall);
+            solution.AddAssignment(assignment2.UserId, assignment1.ShiftId, assignment1.Date, assignment1.ShiftLabel, assignment1.IsOnCall, assignment1.IsSkeleton);
+            solution.AddAssignment(assignment1.UserId, assignment2.ShiftId, assignment2.Date, assignment2.ShiftLabel, assignment2.IsOnCall, assignment2.IsSkeleton);
         }
 
         private void PerformReassignMove(ShiftSolution solution)

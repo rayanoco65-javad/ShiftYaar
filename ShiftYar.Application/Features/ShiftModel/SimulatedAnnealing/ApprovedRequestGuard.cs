@@ -197,7 +197,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                 if (!IsUserAvailable(user, assignment.Date, assignment.ShiftLabel))
                 {
-                    solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                    solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date, force: true);
                 }
             }
         }
@@ -379,7 +379,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
-                    solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                    solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date, force: true);
                 }
             }
 
@@ -395,7 +395,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                     if (constraints.HardRules.IsForbiddenOnDayAfterNight(assignment.ShiftLabel))
                     {
-                        solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                        solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date, force: true);
                     }
                 }
 
@@ -407,7 +407,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     {
                         if (!IsHardProtectedAssignment(user, assignment))
                         {
-                            solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                            solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date, force: true);
                         }
                     }
                 }
@@ -419,7 +419,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             {
                 if (label == ShiftLabel.Night && !IsHardProtectedAssignment(user, assignment))
                 {
-                    solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                    solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date, force: true);
                 }
             }
         }
@@ -556,7 +556,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     continue;
                 }
 
-                solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date, force: true);
             }
         }
 
@@ -596,7 +596,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     continue;
                 }
 
-                solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date, force: true);
             }
         }
 
@@ -680,7 +680,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     break;
                 }
 
-                solution.RemoveAssignment(removable.UserId, removable.ShiftId, removable.Date);
+                solution.RemoveAssignment(removable.UserId, removable.ShiftId, removable.Date, force: true);
                 regulars = solution.GetShiftAssignments(shiftReq.ShiftId, date)
                     .Where(a => !a.IsOnCall &&
                                 a.UserId != incoming.UserId &&
@@ -699,7 +699,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
-                    solution.RemoveAssignment(occupant.UserId, occupant.ShiftId, occupant.Date);
+                    solution.RemoveAssignment(occupant.UserId, occupant.ShiftId, occupant.Date, force: true);
                 }
             }
         }
@@ -723,7 +723,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     continue;
                 }
 
-                solution.RemoveAssignment(user.UserId, assignment.ShiftId, date);
+                solution.RemoveAssignment(user.UserId, assignment.ShiftId, date, force: true);
             }
         }
 

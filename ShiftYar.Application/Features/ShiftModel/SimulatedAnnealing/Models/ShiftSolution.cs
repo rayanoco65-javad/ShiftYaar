@@ -52,7 +52,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         /// <summary>
         /// اضافه کردن انتساب جدید
         /// </summary>
-        public void AddAssignment(int userId, int shiftId, DateTime date, ShiftLabel shiftLabel, bool isOnCall = false)
+        public void AddAssignment(int userId, int shiftId, DateTime date, ShiftLabel shiftLabel, bool isOnCall = false, bool isSkeleton = false)
         {
             var key = GetAssignmentKey(userId, shiftId, date);
             Assignments[key] = new SaShiftAssignment
@@ -61,17 +61,46 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
                 ShiftId = shiftId,
                 Date = date,
                 ShiftLabel = shiftLabel,
-                IsOnCall = isOnCall
+                IsOnCall = isOnCall,
+                IsSkeleton = isSkeleton
             };
         }
 
         /// <summary>
-        /// حذف انتساب
+        /// حذف انتساب. اسکلت محافظت‌شده بدون force=true حذف نمی‌شود.
         /// </summary>
-        public void RemoveAssignment(int userId, int shiftId, DateTime date)
+        public bool RemoveAssignment(int userId, int shiftId, DateTime date, bool force = false)
         {
             var key = GetAssignmentKey(userId, shiftId, date);
-            Assignments.Remove(key);
+            if (!force && Assignments.TryGetValue(key, out var existing) && existing.IsSkeleton)
+            {
+                return false;
+            }
+
+            return Assignments.Remove(key);
+        }
+
+        public bool TryGetAssignment(int userId, int shiftId, DateTime date, out SaShiftAssignment assignment)
+        {
+            var key = GetAssignmentKey(userId, shiftId, date);
+            return Assignments.TryGetValue(key, out assignment!);
+        }
+
+        public void MarkSkeleton(int userId, int shiftId, DateTime date, bool isSkeleton = true)
+        {
+            var key = GetAssignmentKey(userId, shiftId, date);
+            if (Assignments.TryGetValue(key, out var assignment))
+            {
+                assignment.IsSkeleton = isSkeleton;
+            }
+        }
+
+        public void ClearAllSkeletonFlags()
+        {
+            foreach (var assignment in Assignments.Values)
+            {
+                assignment.IsSkeleton = false;
+            }
         }
 
         /// <summary>
@@ -126,6 +155,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public ShiftLabel ShiftLabel { get; set; }
         public bool IsOnCall { get; set; }
 
+        /// <summary>
+        /// انتساب محافظت‌شدهٔ لایهٔ مسئول (Phase 1) — گاردهای بعدی بدون force یا ON نباید حذف کنند.
+        /// </summary>
+        public bool IsSkeleton { get; set; }
+
         public SaShiftAssignment Clone()
         {
             return new SaShiftAssignment
@@ -134,7 +168,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
                 ShiftId = this.ShiftId,
                 Date = this.Date,
                 ShiftLabel = this.ShiftLabel,
-                IsOnCall = this.IsOnCall
+                IsOnCall = this.IsOnCall,
+                IsSkeleton = this.IsSkeleton
             };
         }
     }

@@ -10,10 +10,14 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 
 /// <summary>
 /// شکستن بازه‌های کار متوالی بیش از سقف با حذف انتساب غیرمحافظت‌شده (جای خالی بعداً با پوشش پر می‌شود).
+/// انتساب‌های اسکلت مسئول بدون جایگزین L1 حذف نمی‌شوند.
 /// </summary>
 public static class MaxConsecutiveWorkdayGuard
 {
-    public static void Enforce(ShiftSolution solution, ShiftConstraints constraints)
+    public static void Enforce(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        Action<ShiftSolution>? repairSkeletonMix = null)
     {
         if (!constraints.HardRules.EnforceMaxConsecutiveShifts)
         {
@@ -23,14 +27,15 @@ public static class MaxConsecutiveWorkdayGuard
         foreach (var user in constraints.UserConstraints.Where(u =>
                      u.IsActive && u.ShiftType != ShiftTypes.FixedShift))
         {
-            BreakLongRuns(solution, constraints, user);
+            BreakLongRuns(solution, constraints, user, repairSkeletonMix);
         }
     }
 
     private static void BreakLongRuns(
         ShiftSolution solution,
         ShiftConstraints constraints,
-        UserConstraint user)
+        UserConstraint user,
+        Action<ShiftSolution>? repairSkeletonMix)
     {
         var max = Math.Max(1, user.MaxConsecutiveShifts);
         for (var pass = 0; pass < 16; pass++)
@@ -49,7 +54,11 @@ public static class MaxConsecutiveWorkdayGuard
                 return;
             }
 
-            RemoveClearableAssignmentsOnDate(solution, user, restDate.Value);
+            if (!RemoveClearableAssignmentsOnDate(solution, constraints, user, restDate.Value, repairSkeletonMix))
+            {
+                return;
+            }
+
             if (MaxConsecutiveWorkdayRules.GetWorkDates(solution, user.UserId).Contains(restDate.Value))
             {
                 return;
@@ -109,7 +118,7 @@ public static class MaxConsecutiveWorkdayGuard
             return false;
         }
 
-        if (assignments.Any(a => IsOnProtected(user, a)))
+        if (assignments.Any(a => IsOnProtected(user, a) || a.IsSkeleton))
         {
             return false;
         }
@@ -133,16 +142,29 @@ public static class MaxConsecutiveWorkdayGuard
             s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel)
         || user.RequiredPresenceDates.Any(d => d.Date == assignment.Date.Date);
 
-    private static void RemoveClearableAssignmentsOnDate(
+    private static bool RemoveClearableAssignmentsOnDate(
         ShiftSolution solution,
+        ShiftConstraints constraints,
         UserConstraint user,
-        DateTime date)
+        DateTime date,
+        Action<ShiftSolution>? repairSkeletonMix)
     {
+        var removedSkeletonSlot = false;
         foreach (var assignment in solution.GetUserAssignments(user.UserId, date)
                      .Where(a => !a.IsOnCall)
-                     .Where(a => !IsOnProtected(user, a))
                      .ToList())
         {
+            if (IsOnProtected(user, assignment))
+            {
+                continue;
+            }
+
+            if (assignment.IsSkeleton)
+            {
+                removedSkeletonSlot = true;
+                continue;
+            }
+
             if (assignment.ShiftLabel == ShiftLabel.Night && user.ExactNightShiftCount.HasValue)
             {
                 var nights = solution.GetUserAllAssignments(user.UserId)
@@ -155,5 +177,12 @@ public static class MaxConsecutiveWorkdayGuard
 
             solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
         }
+
+        if (removedSkeletonSlot)
+        {
+            repairSkeletonMix?.Invoke(solution);
+        }
+
+        return !solution.GetUserAssignments(user.UserId, date).Any(a => !a.IsOnCall && !IsOnProtected(user, a));
     }
 }
