@@ -972,7 +972,7 @@ public class ShiftManagerRulesTests
         var solution = new ShiftSolution();
         foreach (var offset in new[] { 2, 4, 6, 8, 10 })
         {
-            solution.AddAssignment(19, 6, start.AddDays(offset), ShiftLabel.Night, false);
+            solution.AddAssignment(19, 6, start.AddDays(offset), ShiftLabel.Night, false, isSkeleton: true);
         }
 
         solution.AddAssignment(20, 5, start, ShiftLabel.Evening, false);

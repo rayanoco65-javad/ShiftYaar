@@ -1572,6 +1572,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             BuildReservedManagerSkeleton(solution);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
             ExactDayShiftQuotaGuard.EnforceAll(solution, _constraints);
             // پوشش ظرفیت اجباری اولویت مطلق دارد (عدالت نرم نباید جای خالی بسازد)
             ShiftCoverageGuard.Enforce(solution, _constraints);
@@ -1867,7 +1868,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         }
 
         /// <summary>
-        /// فاز ۱ — لایهٔ محافظت‌شدهٔ مسئول: Night سپس Evening، با قوانین سخت استراحت/متوالی.
+        /// فاز ۱ — لایهٔ محافظت‌شدهٔ مسئول: پیش‌تخصیص قطعی مسئولان سطح-۱ قبل از فاز بهینه‌سازی SA
         /// </summary>
         public void BuildReservedManagerSkeleton(ShiftSolution solution)
         {
@@ -2078,35 +2079,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// </summary>
         private void RestoreDeficitNightQuotas(ShiftSolution solution)
         {
-            var progress = true;
-            for (var pass = 0; pass < 4 && progress; pass++)
-            {
-                progress = false;
-                foreach (var user in _constraints.UserConstraints.Where(u => u.ExactNightShiftCount.HasValue))
-                {
-                    var nights = solution.GetUserAllAssignments(user.UserId)
-                        .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
-                    if (nights >= user.ExactNightShiftCount.Value)
-                    {
-                        continue;
-                    }
-
-                    var before = nights;
-                    ExactNightQuotaGuard.EnforceExactNightQuotaForUser(solution, _constraints, user);
-                    var after = solution.GetUserAllAssignments(user.UserId)
-                        .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
-                    if (after > before)
-                    {
-                        progress = true;
-                    }
-                }
-            }
-
-            if (GetExactNightQuotaViolations(solution).Count > 0)
-            {
-                ExactNightQuotaGuard.Enforce(solution, _constraints);
-                ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
-            }
+            ExactNightQuotaGuard.Enforce(solution, _constraints);
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
         }
 
         /// <summary>
@@ -2668,7 +2642,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var occupants = regulars
                 .Where(a => !solution.IsLockedSkeleton(a.UserId, a.ShiftId, a.Date))
                 .Where(a => !a.IsSkeleton || (needLevel1 && !_constraints.UserConstraints.Any(u => u.UserId == a.UserId && ShiftManagerRules.IsLevel1(u))))
-                .Where(a => !IsProtectedAssignment(solution, a, forManagerInstall: allowQuotaBypass) || (needLevel1 && !_constraints.UserConstraints.Any(u => u.UserId == a.UserId && ShiftManagerRules.IsLevel1(u))))
+                .Where(a => !IsProtectedAssignment(solution, a))
                 .Select(a => new
                 {
                     Assignment = a,
@@ -2779,7 +2753,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
-                    if (IsProtectedAssignment(solution, donorNight, forManagerInstall: true))
+                    if (IsProtectedAssignment(solution, donorNight, forManagerInstall: true) ||
+                        !ExactNightQuotaGuard.CanDonateNight(solution, _constraints, l1, donorNight))
                     {
                         continue;
                     }
@@ -3164,6 +3139,19 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             if (solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
                 || assignment.IsSkeleton)
             {
+                var shiftReq = _constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftId == assignment.ShiftId);
+                if (shiftReq != null)
+                {
+                    var otherL1 = _constraints.UserConstraints
+                        .Where(u => u.UserId != user.UserId && ShiftManagerRules.IsLevel1(u) && u.SpecialtyId == user.SpecialtyId && u.IsActive)
+                        .FirstOrDefault(u => IsUserAvailableForManagerInstall(u, assignment.Date, assignment.ShiftLabel, solution, assignment.ShiftId, ignoreSameDayAssignments: false, relaxNightSpacing: true));
+                    if (otherL1 != null)
+                    {
+                        solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date, force: true);
+                        solution.AddAssignment(otherL1.UserId, assignment.ShiftId, assignment.Date, assignment.ShiftLabel, assignment.IsOnCall, isSkeleton: true);
+                        return true;
+                    }
+                }
                 return false;
             }
 
