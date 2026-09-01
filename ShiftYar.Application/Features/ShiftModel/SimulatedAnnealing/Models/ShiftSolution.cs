@@ -16,6 +16,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public double Score { get; set; }
         public List<string> Violations { get; set; } = new List<string>();
 
+        /// <summary>
+        /// تقویم قفل‌شدهٔ بی‌قید فاز ۱ — گاردهای میانی بدون force/ON حق حذف ندارند.
+        /// </summary>
+        public HashSet<(int UserId, int ShiftId, DateTime Date)> LockedSkeletonAssignments { get; } = new();
+
         public ShiftSolution()
         {
             Score = double.MaxValue; // شروع با بدترین امتیاز
@@ -38,6 +43,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
                 clone.Assignments[assignment.Key] = assignment.Value.Clone();
             }
 
+            foreach (var locked in LockedSkeletonAssignments)
+            {
+                clone.LockedSkeletonAssignments.Add(locked);
+            }
+
             return clone;
         }
 
@@ -47,6 +57,27 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public static string GetAssignmentKey(int userId, int shiftId, DateTime date)
         {
             return $"{userId}_{shiftId}_{date:yyyyMMdd}";
+        }
+
+        public bool IsLockedSkeleton(int userId, int shiftId, DateTime date) =>
+            LockedSkeletonAssignments.Contains((userId, shiftId, date.Date));
+
+        public void LockSkeletonAssignment(int userId, int shiftId, DateTime date)
+        {
+            LockedSkeletonAssignments.Add((userId, shiftId, date.Date));
+            MarkSkeleton(userId, shiftId, date, isSkeleton: true);
+        }
+
+        public void UnlockSkeletonAssignment(int userId, int shiftId, DateTime date)
+        {
+            LockedSkeletonAssignments.Remove((userId, shiftId, date.Date));
+            MarkSkeleton(userId, shiftId, date, isSkeleton: false);
+        }
+
+        public void ClearLockedSkeletonAssignments()
+        {
+            LockedSkeletonAssignments.Clear();
+            ClearAllSkeletonFlags();
         }
 
         /// <summary>
@@ -62,21 +93,27 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
                 Date = date,
                 ShiftLabel = shiftLabel,
                 IsOnCall = isOnCall,
-                IsSkeleton = isSkeleton
+                IsSkeleton = isSkeleton || IsLockedSkeleton(userId, shiftId, date)
             };
         }
 
         /// <summary>
-        /// حذف انتساب. اسکلت محافظت‌شده بدون force=true حذف نمی‌شود.
+        /// حذف انتساب. اسکلت/قفل بدون force=true حذف نمی‌شود.
         /// </summary>
         public bool RemoveAssignment(int userId, int shiftId, DateTime date, bool force = false)
         {
+            if (!force && IsLockedSkeleton(userId, shiftId, date))
+            {
+                return false;
+            }
+
             var key = GetAssignmentKey(userId, shiftId, date);
             if (!force && Assignments.TryGetValue(key, out var existing) && existing.IsSkeleton)
             {
                 return false;
             }
 
+            LockedSkeletonAssignments.Remove((userId, shiftId, date.Date));
             return Assignments.Remove(key);
         }
 
@@ -91,7 +128,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
             var key = GetAssignmentKey(userId, shiftId, date);
             if (Assignments.TryGetValue(key, out var assignment))
             {
-                assignment.IsSkeleton = isSkeleton;
+                assignment.IsSkeleton = isSkeleton || IsLockedSkeleton(userId, shiftId, date);
             }
         }
 
@@ -99,7 +136,17 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         {
             foreach (var assignment in Assignments.Values)
             {
-                assignment.IsSkeleton = false;
+                assignment.IsSkeleton = IsLockedSkeleton(
+                    assignment.UserId, assignment.ShiftId, assignment.Date);
+            }
+        }
+
+        public void SyncSkeletonFlagsFromLockSet()
+        {
+            foreach (var assignment in Assignments.Values)
+            {
+                assignment.IsSkeleton = IsLockedSkeleton(
+                    assignment.UserId, assignment.ShiftId, assignment.Date);
             }
         }
 
@@ -156,7 +203,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public bool IsOnCall { get; set; }
 
         /// <summary>
-        /// انتساب محافظت‌شدهٔ لایهٔ مسئول (Phase 1) — گاردهای بعدی بدون force یا ON نباید حذف کنند.
+        /// آینهٔ LockedSkeletonAssignments — برای سازگاری با کد قدیمی.
         /// </summary>
         public bool IsSkeleton { get; set; }
 

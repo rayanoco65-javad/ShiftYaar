@@ -35,11 +35,11 @@ public static class DailyDuplicateAssignmentGuard
             }
 
             var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == group.Key.UserId);
-            var keepers = SelectKeepers(items, user, maxPerDay, forbidDup);
+            var keepers = SelectKeepers(solution, items, user, maxPerDay, forbidDup);
 
             foreach (var extra in items.Where(a => !keepers.Contains(a)))
             {
-                if (extra.IsSkeleton)
+                if (solution.IsLockedSkeleton(extra.UserId, extra.ShiftId, extra.Date) || extra.IsSkeleton)
                 {
                     continue;
                 }
@@ -68,6 +68,7 @@ public static class DailyDuplicateAssignmentGuard
     }
 
     private static HashSet<SaShiftAssignment> SelectKeepers(
+        ShiftSolution solution,
         List<SaShiftAssignment> items,
         UserConstraint? user,
         int maxPerDay,
@@ -75,7 +76,7 @@ public static class DailyDuplicateAssignmentGuard
     {
         // اولویت: اسلات اجباری، سپس شب (سهمیه)، سپس صبح+عصر
         var ordered = items
-            .OrderByDescending(a => IsProtected(user, a) || a.IsSkeleton)
+            .OrderByDescending(a => IsProtected(solution, user, a) || a.IsSkeleton)
             .ThenByDescending(a => a.ShiftLabel == ShiftLabel.Night && user?.HasExactNightQuota == true)
             .ThenBy(a => AdjacentShiftRestRules.LabelOrder(a.ShiftLabel))
             .ThenBy(a => a.ShiftId)
@@ -109,8 +110,13 @@ public static class DailyDuplicateAssignmentGuard
         return keepers.ToHashSet();
     }
 
-    private static bool IsProtected(UserConstraint? user, SaShiftAssignment assignment)
+    private static bool IsProtected(ShiftSolution solution, UserConstraint? user, SaShiftAssignment assignment)
     {
+        if (solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date))
+        {
+            return true;
+        }
+
         if (user == null)
         {
             return false;

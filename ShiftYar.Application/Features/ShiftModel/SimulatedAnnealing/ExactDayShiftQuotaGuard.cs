@@ -261,7 +261,7 @@ public static class ExactDayShiftQuotaGuard
             {
                 var removable = solution.GetUserAllAssignments(user.UserId)
                     .Where(a => a.ShiftLabel == label && !a.IsOnCall)
-                    .Where(a => !IsProtected(constraints, user, a))
+                    .Where(a => !IsProtected(solution, constraints, user, a))
                     .OrderByDescending(a => constraints.IsHoliday(a.Date) ? 0 : 1)
                     .ThenByDescending(a => a.Date)
                     .FirstOrDefault();
@@ -315,10 +315,13 @@ public static class ExactDayShiftQuotaGuard
     }
 
     private static bool IsProtected(
+        ShiftSolution solution,
         ShiftConstraints constraints,
         UserConstraint user,
         SaShiftAssignment assignment) =>
-        ApprovedRequestGuard.IsApprovedRequiredSlot(
+        solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
+        || assignment.IsSkeleton
+        || ApprovedRequestGuard.IsApprovedRequiredSlot(
             user, assignment.Date, assignment.ShiftLabel, assignment.ShiftId);
 
     private static bool HasAnyQuota(UserConstraint user, ShiftLabel label) =>

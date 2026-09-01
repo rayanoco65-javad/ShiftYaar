@@ -118,7 +118,9 @@ public static class MaxConsecutiveWorkdayGuard
             return false;
         }
 
-        if (assignments.Any(a => IsOnProtected(user, a) || a.IsSkeleton))
+        if (assignments.Any(a => IsOnProtected(user, a)
+                                 || solution.IsLockedSkeleton(a.UserId, a.ShiftId, a.Date)
+                                 || a.IsSkeleton))
         {
             return false;
         }
@@ -159,7 +161,8 @@ public static class MaxConsecutiveWorkdayGuard
                 continue;
             }
 
-            if (assignment.IsSkeleton)
+            if (solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
+                || assignment.IsSkeleton)
             {
                 removedSkeletonSlot = true;
                 continue;

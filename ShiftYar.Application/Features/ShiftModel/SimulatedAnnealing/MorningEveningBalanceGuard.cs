@@ -237,13 +237,13 @@ public static class MorningEveningBalanceGuard
     {
         var mAssignments = solution.GetUserAllAssignments(mHeavyUser.UserId)
             .Where(a => a.ShiftLabel == ShiftLabel.Morning && !a.IsOnCall)
-            .Where(a => !IsProtected(constraints, mHeavyUser, a))
+            .Where(a => !IsProtected(constraints, solution, mHeavyUser, a))
             .OrderByDescending(a => constraints.IsHoliday(a.Date))
             .ToList();
 
         var eAssignments = solution.GetUserAllAssignments(eHeavyUser.UserId)
             .Where(a => a.ShiftLabel == ShiftLabel.Evening && !a.IsOnCall)
-            .Where(a => !IsProtected(constraints, eHeavyUser, a))
+            .Where(a => !IsProtected(constraints, solution, eHeavyUser, a))
             .OrderByDescending(a => constraints.IsHoliday(a.Date))
             .ToList();
 
@@ -567,8 +567,9 @@ public static class MorningEveningBalanceGuard
         return true;
     }
 
-    private static bool IsProtected(ShiftConstraints constraints, UserConstraint user, SaShiftAssignment assignment) =>
-        assignment.IsSkeleton
+    private static bool IsProtected(ShiftConstraints constraints, ShiftSolution solution, UserConstraint user, SaShiftAssignment assignment) =>
+        solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
+        || assignment.IsSkeleton
         || user.RequiredShiftSlots.Any(s =>
             s.Date.Date == assignment.Date.Date &&
             s.ShiftLabel == assignment.ShiftLabel &&

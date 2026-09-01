@@ -892,6 +892,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             EnsureExactNightQuotasOrThrow(scheduler, solution);
             EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
             EnsureHardDailyRulesOrThrow(solution, constraints);
+            ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
 
             var result = await ConvertSolutionToResultAsync(solution, constraints);
@@ -2838,6 +2839,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             EnsureExactNightQuotasOrThrow(scheduler, solution);
             EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
             EnsureHardDailyRulesOrThrow(solution, constraints);
+            ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
         }
 
@@ -2893,6 +2895,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             EnsureExactNightQuotasOrThrow(scheduler, solution);
             EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
             EnsureHardDailyRulesOrThrow(solution, constraints);
+            ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
 
             var result = await ConvertSolutionToResultAsync(solution, constraints);

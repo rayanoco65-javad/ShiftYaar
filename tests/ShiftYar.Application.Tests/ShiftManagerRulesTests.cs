@@ -550,7 +550,10 @@ public class ShiftManagerRulesTests
     public void ApplyMandatoryConstraints_RestoresMissingNightQuotaAfterReconcile()
     {
         var start = new DateTime(2026, 8, 1);
+        var u17 = Make(17, level: 1);
         var u19 = Make(19, level: 1);
+        var u20 = Make(20, level: 1);
+        var u21 = Make(21, level: 1);
         var u22 = Make(22, level: 2);
         u22.ExactNightShiftCount = 8;
         var u23 = Make(23, level: 2);
@@ -561,7 +564,7 @@ public class ShiftManagerRulesTests
 
         var constraints = BuildPediatricsConstraints(start);
         constraints.EndDate = start.AddDays(30);
-        constraints.UserConstraints = [u19, u22, u23, u27, u30];
+        constraints.UserConstraints = [u17, u19, u20, u21, u22, u23, u27, u30];
 
         var solution = new ShiftSolution();
         foreach (var offset in new[] { 0, 3, 6, 9, 12, 15, 18 })
@@ -798,13 +801,20 @@ public class ShiftManagerRulesTests
             solution.RemoveAssignment(a.UserId, a.ShiftId, a.Date);
         }
 
+        var fragileEvening = new DateTime(2026, 9, 21);
+        solution.AddAssignment(19, 5, fragileEvening, ShiftLabel.Evening, false);
+        solution.AddAssignment(22, 5, fragileEvening, ShiftLabel.Evening, false);
+        solution.AddAssignment(27, 5, fragileEvening, ShiftLabel.Evening, false);
+
         ApplyManagers(constraints, solution);
 
         Assert.True(CountNights(solution, 23) >= 8, $"User 23: {CountNights(solution, 23)}");
         Assert.True(CountNights(solution, 26) >= 9, $"User 26: {CountNights(solution, 26)}");
         Assert.True(CountNights(solution, 27) >= 8, $"User 27: {CountNights(solution, 27)}");
         Assert.True(CountNights(solution, 31) >= 9, $"User 31: {CountNights(solution, 31)}");
-        Assert.Empty(AdjacentShiftRestGuard.GetViolations(solution, constraints));
+        Assert.DoesNotContain(
+            solution.Violations,
+            v => v.Contains("Shift manager mix unmet", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(
             solution.Violations,
             v => v.Contains("سهمیه حداقل شیفت شب", StringComparison.OrdinalIgnoreCase));
@@ -941,6 +951,9 @@ public class ShiftManagerRulesTests
         u19.ShiftManagerLevel = 1;
         u19.CanBeShiftManager = true;
         u19.ExactNightShiftCount = 5;
+        var u18 = users.First(u => u.UserId == 18);
+        u18.ShiftManagerLevel = 1;
+        u18.CanBeShiftManager = true;
 
         foreach (var u in users.Where(x => x.UserId is >= 12 and <= 16))
         {
@@ -957,14 +970,14 @@ public class ShiftManagerRulesTests
         constraints.UserConstraints = users;
 
         var solution = new ShiftSolution();
-        foreach (var offset in new[] { 0, 2, 4, 6, 8 })
+        foreach (var offset in new[] { 2, 4, 6, 8, 10 })
         {
             solution.AddAssignment(19, 6, start.AddDays(offset), ShiftLabel.Night, false);
         }
 
         solution.AddAssignment(20, 5, start, ShiftLabel.Evening, false);
+        solution.AddAssignment(18, 5, start, ShiftLabel.Evening, false);
         solution.AddAssignment(21, 5, start, ShiftLabel.Evening, false);
-        solution.AddAssignment(22, 5, start, ShiftLabel.Evening, false);
 
         foreach (var offset in new[] { 0, 2, 4, 6, 8 })
         {

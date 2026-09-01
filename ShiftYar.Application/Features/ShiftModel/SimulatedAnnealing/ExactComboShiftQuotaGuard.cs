@@ -44,6 +44,7 @@ public static class ExactComboShiftQuotaGuard
                 solution, constraints, user.UserId);
 
             var removable = assignments
+                .Where(a => !solution.IsLockedSkeleton(a.UserId, a.ShiftId, a.Date) && !a.IsSkeleton)
                 .Select(a => (
                     Assignment: a,
                     IsHoliday: constraints.IsHoliday(a.Date),
@@ -92,6 +93,7 @@ public static class ExactComboShiftQuotaGuard
                 solution, constraints, user.UserId);
 
             var removable = assignments
+                .Where(a => !solution.IsLockedSkeleton(a.UserId, a.ShiftId, a.Date) && !a.IsSkeleton)
                 .Select(a => (
                     Assignment: a,
                     IsHoliday: constraints.IsHoliday(a.Date),

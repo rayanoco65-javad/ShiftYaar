@@ -32,7 +32,8 @@ public static class AdjacentShiftRestGuard
                 // انتساب غیرمحافظت‌شدهٔ قبلی را حذف کن؛ هر دو محافظت‌شده → نگه دار.
                 if (IsWaivedByApprovedLaterSlot(user, earlier, later))
                 {
-                    if (IsRequestProtected(user, earlier))
+                    if (IsRequestProtected(user, earlier)
+                        || SkeletonAssignmentGuard.IsLocked(solution, earlier))
                     {
                         break;
                     }
@@ -42,7 +43,8 @@ public static class AdjacentShiftRestGuard
                 }
 
                 var remove = ChooseRemovable(user, earlier, later, solution, constraints);
-                if (remove == null)
+                if (remove == null
+                    || SkeletonAssignmentGuard.IsLocked(solution, remove))
                 {
                     // هر دو ON تأییدشده‌اند — این جفت گزارش نمی‌شود؛ حلقه را قطع کن
                     break;
@@ -133,8 +135,8 @@ public static class AdjacentShiftRestGuard
         ShiftSolution solution,
         ShiftConstraints constraints)
     {
-        var earlierMixSkeleton = SkeletonAssignmentGuard.IsLevel1MixSkeleton(constraints, earlier);
-        var laterMixSkeleton = SkeletonAssignmentGuard.IsLevel1MixSkeleton(constraints, later);
+        var earlierMixSkeleton = SkeletonAssignmentGuard.IsLocked(solution, earlier);
+        var laterMixSkeleton = SkeletonAssignmentGuard.IsLocked(solution, later);
         var earlierManagerCritical = ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, earlier);
         var laterManagerCritical = ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, later);
         var earlierOn = ApprovedRequestGuard.IsApprovedRequiredSlot(

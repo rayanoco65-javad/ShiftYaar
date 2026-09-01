@@ -473,7 +473,16 @@ public class SimulatedAnnealingSchedulerTests
             var eveningRequired = start.AddDays(28); // 31 شهریور
 
             var users = Enumerable.Range(1, 10)
-                .Select(i => User(i, i % 2 == 0 ? UserGender.Female : UserGender.Male, canBeShiftManager: i == 1))
+                .Select(i =>
+                {
+                    var u = User(i, i % 2 == 0 ? UserGender.Female : UserGender.Male, canBeShiftManager: i <= 4);
+                    if (i <= 4)
+                    {
+                        u.ShiftManagerLevel = i == 1 ? (byte)1 : (byte)2;
+                    }
+
+                    return u;
+                })
                 .ToArray();
 
             var specialty = new SpecialtyRequirement
@@ -751,6 +760,14 @@ public class SimulatedAnnealingSchedulerTests
                 ShiftId = 1
             });
 
+            var u15 = User(15, UserGender.Female, canBeShiftManager: true);
+            u15.ShiftManagerLevel = 1;
+            u15.MaxConsecutiveShifts = 2;
+
+            var u16 = User(16, UserGender.Male, canBeShiftManager: true);
+            u16.ShiftManagerLevel = 1;
+            u16.MaxConsecutiveShifts = 2;
+
             var others = Enumerable.Range(2, 7)
                 .Select(id =>
                 {
@@ -764,20 +781,27 @@ public class SimulatedAnnealingSchedulerTests
             var constraints = BuildConstraints(
                 start: prev,
                 days: 2,
-                users: new[] { u14 }.Concat(others).ToArray(),
+                users: new[] { u14, u15, u16 }.Concat(others).ToArray(),
                 specialty: specialty);
 
-            constraints.ShiftRequirements[0].ManagerRequiredCount = 2;
-            constraints.ShiftRequirements[0].ManagerMinLevel1Count = 1;
+            constraints.ShiftRequirements[0].ManagerRequiredCount = 0;
+            constraints.ShiftRequirements[0].ManagerMinLevel1Count = 0;
             constraints.ShiftRequirements.Add(new ShiftRequirement
             {
                 ShiftId = 2,
                 ShiftLabel = ShiftLabel.Evening,
                 DepartmentId = 1,
                 DurationHours = 12,
-                ManagerRequiredCount = 2,
-                ManagerMinLevel1Count = 1,
-                SpecialtyRequirements = new List<SpecialtyRequirement> { CloneSpecialty(specialty) }
+                ManagerRequiredCount = 0,
+                ManagerMinLevel1Count = 0,
+                SpecialtyRequirements = new List<SpecialtyRequirement>
+                {
+                    new()
+                    {
+                        SpecialtyId = 10,
+                        RequiredTotalCount = 1
+                    }
+                }
             });
             constraints.ShiftRequirements.Add(new ShiftRequirement
             {
@@ -795,12 +819,13 @@ public class SimulatedAnnealingSchedulerTests
             constraints.HardRules.AllowNightShiftAfterNightShift = false;
 
             var solution = new ShiftSolution();
-            solution.AddAssignment(14, 3, prev, ShiftLabel.Night, false);
-            solution.AddAssignment(2, 1, day, ShiftLabel.Morning, false);
-            solution.AddAssignment(3, 2, day, ShiftLabel.Evening, false);
-            solution.AddAssignment(4, 2, day, ShiftLabel.Evening, false);
+            solution.AddAssignment(15, 3, prev, ShiftLabel.Night, false);
+            solution.AddAssignment(3, 3, prev, ShiftLabel.Night, false);
+            solution.AddAssignment(8, 1, day, ShiftLabel.Morning, false);
+            solution.AddAssignment(14, 1, day, ShiftLabel.Morning, false);
+            solution.AddAssignment(16, 2, day, ShiftLabel.Evening, false);
+            solution.AddAssignment(15, 3, day, ShiftLabel.Night, false);
             solution.AddAssignment(5, 3, day, ShiftLabel.Night, false);
-            solution.AddAssignment(6, 3, day, ShiftLabel.Night, false);
 
             var scheduler = new SimulatedAnnealingScheduler(constraints, FastParameters);
             scheduler.ApplyMandatoryConstraints(solution);

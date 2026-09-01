@@ -174,7 +174,7 @@ public static class ShiftCoverageGuard
 
             var excess = assignments.Count - maxAllowed;
             var removable = RankForRemoval(solution, constraints, assignments)
-                .Where(a => !IsProtectedAssignment(constraints, a))
+                .Where(a => !IsProtectedAssignment(constraints, solution, a))
                 .Take(excess)
                 .ToList();
 
@@ -232,7 +232,7 @@ public static class ShiftCoverageGuard
                     }
                 }
 
-                return (Assignment: a, NightSurplus: nightSurplus, DayShiftSurplus: dayShiftSurplus, LabelCount: labelCount, Protected: IsProtectedAssignment(constraints, a));
+                return (Assignment: a, NightSurplus: nightSurplus, DayShiftSurplus: dayShiftSurplus, LabelCount: labelCount, Protected: IsProtectedAssignment(constraints, solution, a));
             })
             .OrderByDescending(x => x.DayShiftSurplus)
             .ThenByDescending(x => x.NightSurplus)
@@ -242,9 +242,13 @@ public static class ShiftCoverageGuard
             .Select(x => x.Assignment);
     }
 
-    private static bool IsProtectedAssignment(ShiftConstraints constraints, SaShiftAssignment assignment)
+    private static bool IsProtectedAssignment(
+        ShiftConstraints constraints,
+        ShiftSolution solution,
+        SaShiftAssignment assignment)
     {
-        if (assignment.IsSkeleton)
+        if (solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
+            || assignment.IsSkeleton)
         {
             return true;
         }

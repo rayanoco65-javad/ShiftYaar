@@ -439,7 +439,7 @@ public static class ShiftSeniorityDistributionGuard
         foreach (var assignment in solution.GetUserAllAssignments(donor.UserId)
                      .Where(a => !a.IsOnCall
                                  && (a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening))
-                     .Where(a => !IsProtected(donor, a))
+                     .Where(a => !IsProtected(solution, donor, a))
                      .OrderBy(a => a.ShiftLabel == ShiftLabel.Evening ? 0 : 1)
                      .ThenBy(a => a.Date))
         {
@@ -504,7 +504,7 @@ public static class ShiftSeniorityDistributionGuard
     {
         foreach (var assignment in solution.GetUserAllAssignments(donor.UserId)
                      .Where(a => a.ShiftLabel == label && !a.IsOnCall)
-                     .Where(a => !IsProtected(donor, a))
+                     .Where(a => !IsProtected(solution, donor, a))
                      .OrderByDescending(a => constraints.IsHoliday(a.Date) ? 0 : 1)
                      .ThenBy(a => a.Date))
         {
@@ -647,8 +647,9 @@ public static class ShiftSeniorityDistributionGuard
     private static int CountLabel(ShiftSolution solution, int userId, ShiftLabel label) =>
         solution.GetUserAllAssignments(userId).Count(a => a.ShiftLabel == label && !a.IsOnCall);
 
-    private static bool IsProtected(UserConstraint user, SaShiftAssignment assignment) =>
-        assignment.IsSkeleton
+    private static bool IsProtected(ShiftSolution solution, UserConstraint user, SaShiftAssignment assignment) =>
+        solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
+        || assignment.IsSkeleton
         || user.RequiredShiftSlots.Any(s =>
             s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel);
 }

@@ -106,7 +106,8 @@ public static class HolidayMorningEveningFairnessGuard
                         continue;
                     }
 
-                    if (assignment.IsSkeleton)
+                    if (solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
+                        || assignment.IsSkeleton)
                     {
                         continue;
                     }

@@ -182,7 +182,7 @@ public static class ProductivityHourFillGuard
                 foreach (var d in donors)
                 {
                     foreach (var assignment in solution.GetUserAllAssignments(d.UserId)
-                                 .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, a))
+                                 .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, solution, a))
                                  .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, d, a))
                                  .Where(a => ShiftEligibilityResolver.MayEverTakeLabel(receiver, a.ShiftLabel))
                                  .OrderBy(a => DonationPriorityForReceiver(receiver, a))
@@ -298,7 +298,7 @@ public static class ProductivityHourFillGuard
 
             var moved = false;
             foreach (var assignment in solution.GetUserAllAssignments(donor.UserId)
-                         .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, a))
+                         .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, solution, a))
                          .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, donor, a))
                          .OrderBy(a => DonationPriority(a))
                          .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints, donor)))
@@ -377,7 +377,7 @@ public static class ProductivityHourFillGuard
                 }
 
                 foreach (var assignment in solution.GetUserAllAssignments(user.UserId)
-                             .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, a))
+                             .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, solution, a))
                              .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, user, a))
                              .OrderBy(a => DonationPriority(a))
                              .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints, user)))
@@ -514,7 +514,7 @@ public static class ProductivityHourFillGuard
                 foreach (var donor in donors.Where(d => d.UserId != receiver.UserId))
                 {
                     foreach (var assignment in solution.GetUserAllAssignments(donor.UserId)
-                                 .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, a))
+                                 .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, solution, a))
                                  .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, donor, a))
                                  .Where(a => ShiftEligibilityResolver.MayEverTakeLabel(receiver, a.ShiftLabel))
                                  .OrderBy(a => DonationPriorityForReceiver(receiver, a))
@@ -931,7 +931,7 @@ public static class ProductivityHourFillGuard
                 var moved = false;
                 foreach (var assignment in solution.GetUserAllAssignments(donor.User.UserId)
                              .Where(a => a.ShiftLabel == label && !a.IsOnCall)
-                             .Where(a => !IsProtectedAssignment(constraints, a))
+                             .Where(a => !IsProtectedAssignment(constraints, solution, a))
                              .Where(a => !preferHoliday || constraints.IsHoliday(a.Date))
                              .OrderByDescending(a => CountConsecutiveEnding(solution, donor.User.UserId, a.Date.Date)))
                 {
@@ -1042,7 +1042,7 @@ public static class ProductivityHourFillGuard
                 var moved = false;
                 foreach (var assignment in solution.GetUserAllAssignments(donorEntry.User.UserId)
                              .Where(a => a.ShiftLabel == label && !a.IsOnCall)
-                             .Where(a => !IsProtectedAssignment(constraints, a))
+                             .Where(a => !IsProtectedAssignment(constraints, solution, a))
                              .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, donorEntry.User, a))
                              .OrderByDescending(a => constraints.IsHoliday(a.Date)))
                 {
@@ -1319,7 +1319,10 @@ public static class ProductivityHourFillGuard
         return Math.Max(0, (double)user.ProductivityRequiredHours.Value - worked);
     }
 
-    private static bool IsProtectedAssignment(ShiftConstraints constraints, SaShiftAssignment assignment)
+    private static bool IsProtectedAssignment(
+        ShiftConstraints constraints,
+        ShiftSolution solution,
+        SaShiftAssignment assignment)
     {
         var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == assignment.UserId);
         if (user == null)
@@ -1329,6 +1332,7 @@ public static class ProductivityHourFillGuard
 
         return user.RequiredShiftSlots.Any(s =>
             s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel)
+            || solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
             || assignment.IsSkeleton;
     }
 }

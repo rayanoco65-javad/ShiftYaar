@@ -1373,6 +1373,7 @@ public static class ExactNightQuotaGuard
                 return (Assignment: a, Donor: donor);
             })
             .Where(x => x.Donor != null && CanDonateNight(solution, constraints, x.Donor!, x.Assignment, forHolidayClaim: holidayClaim))
+            .Where(x => !solution.IsLockedSkeleton(x.Assignment.UserId, x.Assignment.ShiftId, x.Assignment.Date))
             .Where(x => !x.Assignment.IsSkeleton)
             .Where(x => !ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, x.Assignment))
             .OrderBy(x => ShiftManagerRules.IsLevel1(x.Donor!) ? 1 : 0)
@@ -1434,7 +1435,8 @@ public static class ExactNightQuotaGuard
             return false;
         }
 
-        if (assignment.IsSkeleton)
+        if (solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
+            || assignment.IsSkeleton)
         {
             return false;
         }
@@ -2224,6 +2226,7 @@ public static class ExactNightQuotaGuard
         int userId,
         SaShiftAssignment assignment) =>
         IsProtected(constraints, userId, assignment)
+        || solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
         || assignment.IsSkeleton
         || ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, assignment);
 
