@@ -1,4 +1,4 @@
-﻿using ShiftYar.Application.Common.Models.ResponseModel;
+using ShiftYar.Application.Common.Models.ResponseModel;
 using ShiftYar.Application.DTOs.ShiftModel.ShiftSchedulingModel;
 using ShiftYar.Application.Features.ShiftModel.Filters;
 using System;
@@ -15,26 +15,27 @@ namespace ShiftYar.Application.Interfaces.ShiftModel
     public interface IShiftSchedulingService
     {
         /// اجرای الگوریتم بهینه‌سازی شیفت‌بندی
-        Task<ApiResponse<ShiftSchedulingResultDto>> OptimizeShiftScheduleAsync(ShiftSchedulingRequestDto request);
+        Task<ApiResponse<ShiftSchedulingResultDto>> OptimizeShiftScheduleAsync(ShiftSchedulingRequestDto request, CancellationToken cancellationToken = default);
 
 
         /// اجرای الگوریتم بهینه‌سازی شیفت‌بندی (نسخه داخلی با تاریخ میلادی)
-        Task<ApiResponse<ShiftSchedulingResultDto>> OptimizeShiftScheduleInternalAsync(ShiftSchedulingRequestInternalDto request);
+        Task<ApiResponse<ShiftSchedulingResultDto>> OptimizeShiftScheduleInternalAsync(ShiftSchedulingRequestInternalDto request, CancellationToken cancellationToken = default);
 
 
         /// اجرای کامل فرآیند بهینه‌سازی و ذخیره (اعتبارسنجی + بهینه‌سازی + ذخیره)
         Task<ApiResponse<object>> OptimizeAndSaveAsync(
             ShiftSchedulingRequestDto request,
             bool isBackgroundExecution = false,
-            string backgroundJobId = null);
+            string backgroundJobId = null,
+            CancellationToken cancellationToken = default);
 
 
         /// دریافت آمارهای الگوریتم
-        Task<ApiResponse<object>> GetAlgorithmStatisticsAsync(ShiftSchedulingRequestDto request);
+        Task<ApiResponse<object>> GetAlgorithmStatisticsAsync(ShiftSchedulingRequestDto request, CancellationToken cancellationToken = default);
 
 
         /// اعتبارسنجی محدودیت‌های شیفت‌بندی
-        Task<ApiResponse<List<string>>> ValidateConstraintsAsync(ShiftSchedulingRequestDto request);
+        Task<ApiResponse<List<string>>> ValidateConstraintsAsync(ShiftSchedulingRequestDto request, CancellationToken cancellationToken = default);
 
 
         Task<ApiResponse<PagedResponse<ShiftScheduleDtoGet>>> GetFilteredShiftSchedulesAsync(ShiftScheduleFilter filter);

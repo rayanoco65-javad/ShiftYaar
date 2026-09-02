@@ -40,7 +40,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// <summary>
         /// اجرای الگوریتم Simulated Annealing
         /// </summary>
-        public ShiftSolution Optimize()
+        public ShiftSolution Optimize(CancellationToken cancellationToken = default)
         {
             var stopwatch = Stopwatch.StartNew();
 
@@ -52,7 +52,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             _statistics.BestScore = currentSolution.Score;
             _statistics.CurrentScore = currentSolution.Score;
 
-            RunAnnealingLoop(ref currentSolution, ref bestSolution);
+            RunAnnealingLoop(ref currentSolution, ref bestSolution, cancellationToken);
 
             // تضمین نهایی: درخواست‌های تأییدشده آخرین حرف را می‌زنند
             ApplyMandatoryConstraints(bestSolution);
@@ -68,7 +68,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// <summary>
         /// اجرای الگوریتم Simulated Annealing با راه‌حل اولیه مشخص
         /// </summary>
-        public ShiftSolution OptimizeWithInitialSolution(ShiftSolution initialSolution)
+        public ShiftSolution OptimizeWithInitialSolution(ShiftSolution initialSolution, CancellationToken cancellationToken = default)
         {
             var stopwatch = Stopwatch.StartNew();
 
@@ -79,7 +79,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             _statistics.BestScore = currentSolution.Score;
             _statistics.CurrentScore = currentSolution.Score;
 
-            RunAnnealingLoop(ref currentSolution, ref bestSolution);
+            RunAnnealingLoop(ref currentSolution, ref bestSolution, cancellationToken);
 
             ApplyMandatoryConstraints(bestSolution);
             PerformFinalManagerMixRepairSweep(bestSolution);
@@ -91,13 +91,17 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             return bestSolution;
         }
 
-        private void RunAnnealingLoop(ref ShiftSolution currentSolution, ref ShiftSolution bestSolution)
+        private void RunAnnealingLoop(ref ShiftSolution currentSolution, ref ShiftSolution bestSolution, CancellationToken cancellationToken = default)
         {
             double temperature = _parameters.InitialTemperature;
             int iterationsWithoutImprovement = 0;
 
             for (int iteration = 0; iteration < _parameters.MaxIterations; iteration++)
             {
+                if (iteration % 50 == 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
                 _statistics.TotalIterations = iteration + 1;
                 _statistics.CurrentTemperature = temperature;
 

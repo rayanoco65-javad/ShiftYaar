@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -38,7 +38,7 @@ namespace ShiftYar.Api.Controllers.ShiftModel
 
         /// اجرای الگوریتم بهینه‌سازی شیفت‌بندی
         [HttpPost("optimize")]
-        public async Task<IActionResult> OptimizeShiftSchedule([FromBody] ShiftSchedulingRequestDto request)
+        public async Task<IActionResult> OptimizeShiftSchedule([FromBody] ShiftSchedulingRequestDto request, CancellationToken cancellationToken)
         {
             try
             {
@@ -56,7 +56,7 @@ namespace ShiftYar.Api.Controllers.ShiftModel
                     Algorithm = request.Algorithm
                 };
 
-                var result = await _shiftSchedulingService.OptimizeShiftScheduleInternalAsync(internalRequest);
+                var result = await _shiftSchedulingService.OptimizeShiftScheduleInternalAsync(internalRequest, cancellationToken);
 
                 if (result.IsSuccess)
                 {
@@ -67,6 +67,10 @@ namespace ShiftYar.Api.Controllers.ShiftModel
                     return BadRequest(result);
                 }
             }
+            catch (OperationCanceledException)
+            {
+                return StatusCode(499, ApiResponse<ShiftSchedulingResultDto>.Fail("درخواست بهینه‌سازی توسط کاربر یا تایم‌آوت کلاینت لغو شد."));
+            }
             catch (Exception ex)
             {
                 return StatusCode(500, ApiResponse<ShiftSchedulingResultDto>.Fail($"Internal server error: {ex.Message}"));
@@ -75,7 +79,7 @@ namespace ShiftYar.Api.Controllers.ShiftModel
 
         /// دریافت آمارهای الگوریتم
         [HttpPost("statistics")]
-        public async Task<IActionResult> GetAlgorithmStatistics([FromBody] ShiftSchedulingRequestDto request)
+        public async Task<IActionResult> GetAlgorithmStatistics([FromBody] ShiftSchedulingRequestDto request, CancellationToken cancellationToken)
         {
             try
             {
@@ -94,7 +98,7 @@ namespace ShiftYar.Api.Controllers.ShiftModel
                 };
 
                 // دریافت آمار با اجرای سبک (می‌توانید یک مسیر آمار داخلی جداگانه اضافه کنید)
-                var result = await _shiftSchedulingService.GetAlgorithmStatisticsAsync(request);
+                var result = await _shiftSchedulingService.GetAlgorithmStatisticsAsync(request, cancellationToken);
 
                 if (result.IsSuccess)
                 {
@@ -113,7 +117,7 @@ namespace ShiftYar.Api.Controllers.ShiftModel
 
         /// اعتبارسنجی محدودیت‌های شیفت‌بندی
         [HttpPost("validate")]
-        public async Task<IActionResult> ValidateConstraints([FromBody] ShiftSchedulingRequestDto request)
+        public async Task<IActionResult> ValidateConstraints([FromBody] ShiftSchedulingRequestDto request, CancellationToken cancellationToken)
         {
             try
             {
@@ -123,7 +127,7 @@ namespace ShiftYar.Api.Controllers.ShiftModel
                 }
 
                 // استفاده از متد اصلی که هنوز با DTO اصلی کار می‌کند
-                var result = await _shiftSchedulingService.ValidateConstraintsAsync(request);
+                var result = await _shiftSchedulingService.ValidateConstraintsAsync(request, cancellationToken);
 
                 if (result.IsSuccess)
                 {
@@ -197,7 +201,7 @@ namespace ShiftYar.Api.Controllers.ShiftModel
         /// اجرای کامل فرآیند بهینه‌سازی و ذخیره (همزمان)
         /// توجه: برای الگوریتم‌های سنگین (OR-Tools/Hybrid) از نسخهٔ پس‌زمینه استفاده کنید تا از timeout پروکسی (502) جلوگیری شود.
         [HttpPost("optimize-and-save")]
-        public async Task<IActionResult> OptimizeAndSave([FromBody] ShiftSchedulingRequestDto request)
+        public async Task<IActionResult> OptimizeAndSave([FromBody] ShiftSchedulingRequestDto request, CancellationToken cancellationToken)
         {
             try
             {
@@ -206,8 +210,12 @@ namespace ShiftYar.Api.Controllers.ShiftModel
                     return BadRequest(ApiResponse<object>.Fail("Invalid request data"));
                 }
 
-                var result = await _shiftSchedulingService.OptimizeAndSaveAsync(request);
+                var result = await _shiftSchedulingService.OptimizeAndSaveAsync(request, isBackgroundExecution: false, backgroundJobId: null, cancellationToken: cancellationToken);
                 return result.IsSuccess ? Ok(result) : BadRequest(result);
+            }
+            catch (OperationCanceledException)
+            {
+                return StatusCode(499, ApiResponse<object>.Fail("درخواست بهینه‌سازی و ذخیره توسط کاربر لغو گردید."));
             }
             catch (Exception ex)
             {
