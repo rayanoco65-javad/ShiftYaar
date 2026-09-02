@@ -2895,6 +2895,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             ShiftConstraints constraints,
             CancellationToken cancellationToken = default)
         {
+            _logger.LogInformation("[Phase 1/4 Initialization] Department {DepartmentId}: Loading SA parameters & pre-validating constraints.", request.DepartmentId);
             var saParamsFromDb = await GetAlgorithmSettingsAsync(request.DepartmentId, SchedulingAlgorithm.SimulatedAnnealing, request.AllowExtendedSolverTime);
             var parameters = new SimulatedAnnealingParameters
             {
@@ -2913,11 +2914,14 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 ? TimeSpan.FromMinutes(6)
                 : TimeSpan.FromMinutes(3);
 
+            _logger.LogInformation("[Phase 2/4 Optimization] Department {DepartmentId}: Invoking SA Annealing loop with {MaxIterations} max iterations.", request.DepartmentId, parameters.MaxIterations);
+
             var solution = await RunCpuBoundWithTimeoutAsync(
                 () => scheduler.Optimize(cancellationToken), 
                 maxAllowedTime, 
                 cancellationToken);
 
+            _logger.LogInformation("[Phase 3/4 Post-Validation Sweeps] Department {DepartmentId}: Executing mandatory constraint checks.", request.DepartmentId);
             var statistics = scheduler.GetStatistics();
 
             // Optimize() already runs ApplyMandatoryConstraints once at the end.
@@ -2929,6 +2933,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
 
+            _logger.LogInformation("[Phase 4/4 Result Conversion] Department {DepartmentId}: Converting solution to result DTO.", request.DepartmentId);
             var result = await ConvertSolutionToResultAsync(solution, constraints);
             result.AlgorithmUsed = SchedulingAlgorithm.SimulatedAnnealing;
             result.AlgorithmStatus = "Completed";

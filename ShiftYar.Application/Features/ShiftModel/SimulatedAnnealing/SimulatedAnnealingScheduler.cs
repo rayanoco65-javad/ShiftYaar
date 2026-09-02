@@ -96,12 +96,27 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             double temperature = _parameters.InitialTemperature;
             int iterationsWithoutImprovement = 0;
 
-            for (int iteration = 0; iteration < _parameters.MaxIterations; iteration++)
+            // سقف‌های ایمنی قطعی و غیرقابل دور زدن
+            int maxAllowedIterations = Math.Min(_parameters.MaxIterations > 0 ? _parameters.MaxIterations : 5000, 10000);
+            int maxWithoutImprovement = Math.Min(_parameters.MaxIterationsWithoutImprovement > 0 ? _parameters.MaxIterationsWithoutImprovement : 1000, 1500);
+
+            // تایمر نگهبان (Watchdog Timer) برای جلوگیری از معلق ماندن حلقه SA
+            var watchdog = Stopwatch.StartNew();
+            var maxLoopDuration = TimeSpan.FromSeconds(15);
+
+            for (int iteration = 0; iteration < maxAllowedIterations; iteration++)
             {
-                if (iteration % 50 == 0)
+                if (iteration % 25 == 0)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+
+                    // قطع تکرارهای بی‌فایده در صورت اتمام مهلت زمان‌بندی حلقه
+                    if (watchdog.Elapsed > maxLoopDuration)
+                    {
+                        break;
+                    }
                 }
+
                 _statistics.TotalIterations = iteration + 1;
                 _statistics.CurrentTemperature = temperature;
 
@@ -114,7 +129,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     _statistics.CurrentScore = currentSolution.Score;
                     _statistics.ScoreHistory.Add(currentSolution.Score);
                     _statistics.TemperatureHistory.Add(temperature);
-                    if (iterationsWithoutImprovement >= _parameters.MaxIterationsWithoutImprovement ||
+
+                    if (iterationsWithoutImprovement >= maxWithoutImprovement ||
                         temperature <= _parameters.FinalTemperature)
                     {
                         break;
@@ -153,7 +169,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                 temperature *= _parameters.CoolingRate;
 
-                if (iterationsWithoutImprovement >= _parameters.MaxIterationsWithoutImprovement ||
+                if (iterationsWithoutImprovement >= maxWithoutImprovement ||
                     temperature <= _parameters.FinalTemperature)
                 {
                     break;

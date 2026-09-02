@@ -163,7 +163,7 @@ public static class ShiftCoverageGuard
         int maxAllowed,
         bool isOnCall)
     {
-        while (true)
+        for (var pass = 0; pass < 10; pass++)
         {
             var assignments = GetSpecialtyAssignments(
                 solution, constraints, shiftReq, date, specialtyReq.SpecialtyId, isOnCall);
@@ -177,6 +177,11 @@ public static class ShiftCoverageGuard
                 .Where(a => !IsProtectedAssignment(constraints, solution, a))
                 .Take(excess)
                 .ToList();
+
+            if (removable.Count == 0)
+            {
+                break;
+            }
 
             foreach (var assignment in removable)
             {
