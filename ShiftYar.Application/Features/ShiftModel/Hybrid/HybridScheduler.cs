@@ -1,4 +1,4 @@
-﻿using ShiftYar.Application.Features.ShiftModel.OrTools.Models;
+using ShiftYar.Application.Features.ShiftModel.OrTools.Models;
 using ShiftYar.Application.Features.ShiftModel.OrTools;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
@@ -222,9 +222,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Hybrid
                 return ortoolsScheduler.Optimize();
             });
 
-            // انتظار برای تکمیل هر دو (به‌صورت متوالی تا از قفل thread pool جلوگیری شود)
-            var saSolution = saTask.GetAwaiter().GetResult();
-            var ortoolsSolution = ortoolsTask.GetAwaiter().GetResult();
+            // انتظار غیربلوکه‌کننده با سقف زمان مجاز ۲ دقیقه
+            Task.WaitAll(new Task[] { saTask, ortoolsTask }, TimeSpan.FromMinutes(2));
+            var saSolution = saTask.IsCompletedSuccessfully ? saTask.Result : new ShiftSolution();
+            var ortoolsSolution = ortoolsTask.IsCompletedSuccessfully ? ortoolsTask.Result : new OrToolsShiftSolution();
 
             parallelStopwatch.Stop();
 

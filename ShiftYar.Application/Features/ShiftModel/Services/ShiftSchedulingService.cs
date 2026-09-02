@@ -1046,7 +1046,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
             try
             {
-                return await Task.Run(work, timeoutCts.Token);
+                return await Task.Run(work, timeoutCts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {

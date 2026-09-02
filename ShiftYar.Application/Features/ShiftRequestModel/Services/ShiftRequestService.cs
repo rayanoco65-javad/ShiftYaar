@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using Microsoft.Extensions.Logging;
 using ShiftYar.Application.Common.Filters;
 using ShiftYar.Application.Common.Models.ResponseModel;
@@ -66,13 +66,15 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
             try
             {
                 //استخراج دپارتمان کاربر، برای دسترسی به سوپروایزر دپارتمان
-                var userDepatmentId = _repositoryUser.GetByIdAsync(dto.UserId).Result.DepartmentId;
+                var userDepatment = await _repositoryUser.GetByIdAsync(dto.UserId);
+                var userDepatmentId = userDepatment?.DepartmentId;
 
                 if(!userDepatmentId.HasValue)
                     return ApiResponse<ShiftRequestDtoGet>.Fail("کاربر درخواست دهنده، متعلق به هیچ دپارتمانی نیست.");
 
                 //استخراج شناسه سوپروایزر
-                var supervisorId = _repositorDepartment.GetByIdAsync(userDepatmentId).Result.SupervisorId;
+                var department = await _repositorDepartment.GetByIdAsync(userDepatmentId.Value);
+                var supervisorId = department?.SupervisorId;
 
                 if(!supervisorId.HasValue)
                     return ApiResponse<ShiftRequestDtoGet>.Fail("fبرای دپارتمان کاربر درخواست دهنده، سوپروایزر تعیین نشده است.");
@@ -139,13 +141,15 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
             try
             {
                 //استخراج دپارتمان کاربر، برای دسترسی به سوپروایزر دپارتمان
-                var userDepatmentId = _repositoryUser.GetByIdAsync(dto.UserId).Result.DepartmentId;
+                var userDepatment = await _repositoryUser.GetByIdAsync(dto.UserId);
+                var userDepatmentId = userDepatment?.DepartmentId;
 
                 if (!userDepatmentId.HasValue)
                     return ApiResponse<ShiftRequestDtoGet>.Fail("کاربر درخواست دهنده، متعلق به هیچ دپارتمانی نیست.");
 
                 //استخراج شناسه سوپروایزر
-                var supervisorId = _repositorDepartment.GetByIdAsync(userDepatmentId).Result.SupervisorId;
+                var department = await _repositorDepartment.GetByIdAsync(userDepatmentId.Value);
+                var supervisorId = department?.SupervisorId;
 
                 if (!supervisorId.HasValue)
                     return ApiResponse<ShiftRequestDtoGet>.Fail("برای دپارتمان کاربر درخواست دهنده، سوپروایزر تعیین نشده است.");
