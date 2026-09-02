@@ -25,18 +25,15 @@ public static class ExactNightQuotaGuard
         // اول کسری‌های شدیدتر (شب تعطیل، سپس کل)، بعد سهمیه‌های کوچک‌تر تا روی صندلی‌های کمیاب گیر نکنند
         for (var pass = 0; pass < 6; pass++)
         {
-            foreach (var user in OrderUsersByDeficit(solution, constraints))
+            var deficits = OrderUsersByDeficit(solution, constraints).ToList();
+            if (deficits.Count == 0) break;
+            foreach (var user in deficits)
             {
                 EnforceForUser(solution, constraints, user, nightShift);
             }
         }
 
-        // پخش شب‌ها برای همه سهمیه‌دارها (حتی اگر حداقلشان پر باشد)
-        foreach (var user in constraints.UserConstraints
-                     .Where(u => u.HasExactNightQuota || u.ExactHolidayWeekendNightShiftCount.HasValue))
-        {
-            ImproveNightSpread(solution, constraints, user, nightShift);
-        }
+
 
         // پخش ممکن است جای خالی برای کسری باقی‌مانده باز کند — یک دور نهایی جبران
         for (var pass = 0; pass < 4; pass++)
@@ -55,6 +52,16 @@ public static class ExactNightQuotaGuard
 
         // وقتی مجموع سهمیه = ظرفیت ماه است، رزرو شب تعطیل نباید مانع تکمیل حداقل کل شود
         ForceFillRemainingTotalIgnoringHolidayReservation(solution, constraints, nightShift);
+    }
+
+    public static void OptimizeSpread(ShiftSolution solution, ShiftConstraints constraints)
+    {
+        var nightShift = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftLabel == ShiftYar.Domain.Enums.ShiftModel.ShiftEnums.ShiftLabel.Night);
+        if (nightShift == null) return;
+        foreach (var user in constraints.UserConstraints.Where(u => u.HasExactNightQuota || u.ExactHolidayWeekendNightShiftCount.HasValue))
+        {
+            ImproveNightSpread(solution, constraints, user, nightShift);
+        }
     }
 
     /// <summary>
@@ -104,6 +111,7 @@ public static class ExactNightQuotaGuard
         for (var pass = 0; pass < 10 && stalePasses < 2; pass++)
         {
             var deficits = OrderUsersByDeficit(solution, constraints).ToList();
+            if (deficits.Count == 0) break;
             if (deficits.Count == 0)
             {
                 return;

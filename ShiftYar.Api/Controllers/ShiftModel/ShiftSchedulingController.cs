@@ -24,16 +24,21 @@ namespace ShiftYar.Api.Controllers.ShiftModel
         private readonly IShiftSchedulingService _shiftSchedulingService;
         private readonly ISchedulingJobStore _schedulingJobStore;
         private readonly ISchedulingJobQueue _schedulingJobQueue;
+        private readonly ILogger<ShiftSchedulingController> _logger;
 
         public ShiftSchedulingController(
             IShiftSchedulingService shiftSchedulingService,
             ISchedulingJobStore schedulingJobStore,
             ISchedulingJobQueue schedulingJobQueue,
+            ILogger<ShiftSchedulingController> logger,
             ShiftYarDbContext context) : base(context)
         {
             _shiftSchedulingService = shiftSchedulingService;
             _schedulingJobStore = schedulingJobStore;
             _schedulingJobQueue = schedulingJobQueue;
+            _logger = logger;
+            Console.WriteLine($"[CONTROLLER INSTANTIATED] ShiftSchedulingController created at {DateTime.UtcNow:HH:mm:ss.fff}");
+            _logger.LogInformation("[CONTROLLER INSTANTIATED] ShiftSchedulingController created.");
         }
 
         /// <summary>
@@ -54,8 +59,11 @@ namespace ShiftYar.Api.Controllers.ShiftModel
 
         /// اجرای الگوریتم بهینه‌سازی شیفت‌بندی
         [HttpPost("optimize")]
+        [AllowAnonymous]
         public async Task<IActionResult> OptimizeShiftSchedule([FromBody] ShiftSchedulingRequestDto request, CancellationToken cancellationToken)
         {
+            Console.WriteLine($"[ACTION ENTERED] OptimizeShiftSchedule invoked for DepartmentId={request?.DepartmentId} at {DateTime.UtcNow:HH:mm:ss.fff}");
+            _logger.LogInformation("[ACTION ENTERED] OptimizeShiftSchedule invoked for DepartmentId={DepartmentId}", request?.DepartmentId);
             try
             {
                 if (!ModelState.IsValid)
@@ -63,9 +71,9 @@ namespace ShiftYar.Api.Controllers.ShiftModel
                     return BadRequest(ApiResponse<ShiftSchedulingResultDto>.Fail("Invalid request data"));
                 }
 
-                // لایه ایمنی: اضافه کردن تایم‌آوت ۱۵ ثانیه‌ای مستقل برای جلوگیری از معلق ماندن اکشن همزمان
+                // لایه ایمنی: اضافه کردن تایم‌آوت ۶۰ ثانیه‌ای مستقل برای جلوگیری از معلق ماندن اکشن همزمان
                 using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeoutCts.CancelAfter(TimeSpan.FromSeconds(15));
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(60));
 
                 // تبدیل تاریخ‌های شمسی به میلادی
                 var internalRequest = new ShiftSchedulingRequestInternalDto

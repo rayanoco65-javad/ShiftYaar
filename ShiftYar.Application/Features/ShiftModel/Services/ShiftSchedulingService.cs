@@ -201,6 +201,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                 return ApiResponse<ShiftSchedulingResultDto>.Success(result);
             }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("Shift scheduling optimization timed out or was canceled for department {DepartmentId}", request.DepartmentId);
+                return ApiResponse<ShiftSchedulingResultDto>.Fail("زمان پردازش الگوریتم بهینه‌سازی فراتر از سقف مجاز رفت. لطفاً درخواست را به صورت پس‌زمینه (Background Job) ثبت فرمایید.");
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error occurred during shift scheduling optimization");
@@ -1041,17 +1046,17 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             TimeSpan timeout, 
             CancellationToken cancellationToken = default)
         {
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(timeout);
+            var workTask = Task.Run(work, cancellationToken);
+            var delayTask = Task.Delay(timeout, cancellationToken);
 
-            try
-            {
-                return await Task.Run(work, timeoutCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            var completedTask = await Task.WhenAny(workTask, delayTask).ConfigureAwait(false);
+
+            if (completedTask == delayTask)
             {
                 throw new TimeoutException($"زمان بهینه‌سازی شیفت‌بندی از سقف مجاز ({timeout.TotalMinutes:0.#} دقیقه) فراتر رفت.");
             }
+
+            return await workTask.ConfigureAwait(false);
         }
 
         private async Task ApplyAlgorithmSettingsFromDbAsync(ShiftSchedulingRequestDto request)
@@ -2921,16 +2926,26 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 maxAllowedTime, 
                 cancellationToken);
 
-            _logger.LogInformation("[Phase 3/4 Post-Validation Sweeps] Department {DepartmentId}: Executing mandatory constraint checks.", request.DepartmentId);
             var statistics = scheduler.GetStatistics();
+            _logger.LogInformation("[Phase 2/4 Done] Department {DepartmentId}: SA completed in {Elapsed:0.##}s — {Iterations} iterations, score={Score:0.##}.",
+                request.DepartmentId, statistics.ExecutionTime.TotalSeconds, statistics.TotalIterations, statistics.BestScore);
+
+            _logger.LogInformation("[Phase 3/4 Post-Validation Sweeps] Department {DepartmentId}: Executing mandatory constraint checks.", request.DepartmentId);
 
             // Optimize() already runs ApplyMandatoryConstraints once at the end.
+            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureApprovedRequests...", request.DepartmentId);
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
+            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureExactNightQuotas...", request.DepartmentId);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
+            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureExactDayShiftQuotas...", request.DepartmentId);
             EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
+            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureHardDailyRules...", request.DepartmentId);
             EnsureHardDailyRulesOrThrow(solution, constraints);
+            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: PerformFinalManagerMixRepairSweep...", request.DepartmentId);
             scheduler.PerformFinalManagerMixRepairSweep(solution);
+            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: ShiftManagerMixGuard.EnsureOrThrow...", request.DepartmentId);
             ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
+            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureSpecialtyCapacityNotExceeded...", request.DepartmentId);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
 
             _logger.LogInformation("[Phase 4/4 Result Conversion] Department {DepartmentId}: Converting solution to result DTO.", request.DepartmentId);

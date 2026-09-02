@@ -13,6 +13,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
     public class ShiftSolution
     {
         public Dictionary<string, SaShiftAssignment> Assignments { get; set; } = new Dictionary<string, SaShiftAssignment>();
+        private Dictionary<int, List<SaShiftAssignment>> _userAssignmentsCache = null;
         public double Score { get; set; }
         public List<string> Violations { get; set; } = new List<string>();
 
@@ -95,6 +96,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public void AddAssignment(int userId, int shiftId, DateTime date, ShiftLabel shiftLabel, bool isOnCall = false, bool isSkeleton = false)
         {
             var key = GetAssignmentKey(userId, shiftId, date);
+            _userAssignmentsCache = null;  _shiftAssignmentsCache = null;
             Assignments[key] = new SaShiftAssignment
             {
                 UserId = userId,
@@ -123,6 +125,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
             }
 
             LockedSkeletonAssignments.Remove((userId, shiftId, date.Date));
+            _userAssignmentsCache = null;  _shiftAssignmentsCache = null;
             return Assignments.Remove(key);
         }
 
@@ -172,22 +175,44 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         /// <summary>
         /// دریافت انتساب‌های یک شیفت در تاریخ مشخص
         /// </summary>
+        private Dictionary<string, List<SaShiftAssignment>> _shiftAssignmentsCache = null;
         public List<SaShiftAssignment> GetShiftAssignments(int shiftId, DateTime date)
         {
-            return Assignments.Values
-                .Where(a => a.ShiftId == shiftId && a.Date.Date == date.Date)
-                .ToList();
+            if (_shiftAssignmentsCache == null)
+            {
+                _shiftAssignmentsCache = new Dictionary<string, List<SaShiftAssignment>>();
+                foreach (var a in Assignments.Values)
+                {
+                    string key = a.ShiftId + "_" + a.Date.Date.ToString("yyyyMMdd");
+                    if (!_shiftAssignmentsCache.TryGetValue(key, out var list))
+                    {
+                        list = new List<SaShiftAssignment>();
+                        _shiftAssignmentsCache[key] = list;
+                    }
+                    list.Add(a);
+                }
+            }
+            string reqKey = shiftId + "_" + date.Date.ToString("yyyyMMdd");
+            if (_shiftAssignmentsCache.TryGetValue(reqKey, out var res)) return res;
+            return new List<SaShiftAssignment>();
         }
 
         /// <summary>
         /// دریافت تمام انتساب‌های یک کاربر
         /// </summary>
-        public List<SaShiftAssignment> GetUserAllAssignments(int userId)
+                public List<SaShiftAssignment> GetUserAllAssignments(int userId)
         {
-            return Assignments.Values
-                .Where(a => a.UserId == userId)
-                .OrderBy(a => a.Date)
-                .ToList();
+            if (_userAssignmentsCache == null)
+            {
+                _userAssignmentsCache = Assignments.Values
+                    .GroupBy(a => a.UserId)
+                    .ToDictionary(g => g.Key, g => g.OrderBy(a => a.Date).ToList());
+            }
+            if (_userAssignmentsCache.TryGetValue(userId, out var list))
+            {
+                return list;
+            }
+            return new List<SaShiftAssignment>();
         }
 
         /// <summary>

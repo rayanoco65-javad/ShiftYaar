@@ -15,7 +15,9 @@ public static class ManagerMixFeasibilityChecker
 {
     public static void ValidateOrThrow(ShiftConstraints constraints)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         var reason = TryGetInfeasibilityReason(constraints);
+        System.IO.File.AppendAllText(@"d:\Hampadco\RealProjects\ShiftYar\sa_perf3.txt", $"ManagerMixFeasibilityChecker took {sw.ElapsedMilliseconds}ms\n");
         if (reason != null)
         {
             throw new InvalidOperationException(reason);

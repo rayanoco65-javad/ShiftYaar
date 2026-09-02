@@ -59,6 +59,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             PerformFinalManagerMixRepairSweep(bestSolution);
             ShiftManagerMixGuard.EnsureOrThrow(bestSolution, _constraints);
 
+            ExactNightQuotaGuard.OptimizeSpread(bestSolution, _constraints);
             stopwatch.Stop();
             _statistics.ExecutionTime = stopwatch.Elapsed;
 
@@ -85,6 +86,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             PerformFinalManagerMixRepairSweep(bestSolution);
             ShiftManagerMixGuard.EnsureOrThrow(bestSolution, _constraints);
 
+            ExactNightQuotaGuard.OptimizeSpread(bestSolution, _constraints);
             stopwatch.Stop();
             _statistics.ExecutionTime = stopwatch.Elapsed;
 
@@ -184,8 +186,16 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             for (int attempt = 0; attempt < maxAttempts; attempt++)
             {
+                var sw2 = System.Diagnostics.Stopwatch.StartNew();
                 var candidate = GenerateInitialSolution();
-                if (IsFeasible(candidate))
+                var tGen = sw2.ElapsedMilliseconds; sw2.Restart();
+                
+                bool feasible = IsFeasible(candidate);
+                var tFeas = sw2.ElapsedMilliseconds;
+                
+                System.IO.File.AppendAllText(@"d:\Hampadco\RealProjects\ShiftYar\sa_perf2.txt", $"InitAttempt {attempt}: Gen={tGen}ms, Feas={tFeas}ms\n");
+
+                if (feasible)
                 {
                     return candidate;
                 }
@@ -199,10 +209,6 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             return best ?? GenerateInitialSolution();
         }
 
-
-        /// <summary>
-        /// تولید راه‌حل اولیه
-        /// </summary>
         private ShiftSolution GenerateInitialSolution()
         {
             var solution = new ShiftSolution();
@@ -276,89 +282,111 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// </summary>
         private ShiftSolution GenerateNeighbor(ShiftSolution currentSolution)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             var neighbor = currentSolution.Clone();
+            var tClone = sw.ElapsedMilliseconds; sw.Restart();
+            var moveType = "";
 
-            // حرکت‌های هدفمند بیمارستانی: جابجایی و انتساب مجدد پرتکرارتر از افزودن/حذف تصادفی
             var roll = _random.NextDouble();
             if (roll < 0.20)
             {
                 PerformManagerMixRepairMove(neighbor);
+                moveType = "PerformManagerMixRepairMove";
             }
             else if (roll < 0.35)
             {
                 PerformReassignMove(neighbor);
+                moveType = "PerformReassignMove";
             }
             else if (roll < 0.50)
             {
                 PerformHourBalanceMove(neighbor);
+                moveType = "PerformHourBalanceMove";
             }
             else if (roll < 0.65)
             {
                 PerformMorningEveningBalanceMove(neighbor);
+                moveType = "PerformMorningEveningBalanceMove";
             }
             else if (roll < 0.78)
             {
                 PerformSwapMove(neighbor);
+                moveType = "PerformSwapMove";
             }
             else if (roll < 0.89)
             {
                 PerformAddMove(neighbor);
+                moveType = "PerformAddMove";
             }
             else
             {
                 PerformRemoveMove(neighbor);
+                moveType = "PerformRemoveMove";
             }
+            
+            var tMove = sw.ElapsedMilliseconds; sw.Restart();
+            CalculateSolutionScore(neighbor);
+            var tScore = sw.ElapsedMilliseconds;
 
-            // ارزیابی دو مرحله‌ای و فیلتر فضایی حالت موجه (Feasible Space Filtering):
-            // اگر حرکت همسایگی منجر به افزایش نقض ترکیب مسئول، توالی استراحت، یا تکرار روزانه شود، حرکت رد می‌شود
-            var currentMixViolations = ShiftManagerMixGuard.GetViolations(currentSolution, _constraints).Count;
-            var currentRestViolations = AdjacentShiftRestGuard.GetViolations(currentSolution, _constraints).Count;
-            var currentDupViolations = DailyDuplicateAssignmentGuard.GetViolations(currentSolution, _constraints).Count;
-
-            var neighborMixViolations = ShiftManagerMixGuard.GetViolations(neighbor, _constraints).Count;
-            var neighborRestViolations = AdjacentShiftRestGuard.GetViolations(neighbor, _constraints).Count;
-            var neighborDupViolations = DailyDuplicateAssignmentGuard.GetViolations(neighbor, _constraints).Count;
-
-            if (neighborMixViolations > currentMixViolations ||
-                neighborRestViolations > currentRestViolations ||
-                neighborDupViolations > currentDupViolations)
+            if (tClone >= 0) 
             {
-                // حرکت غیرمجاز رد می‌شود و حالت موجه قبلی حفظ می‌گردد
-                return currentSolution;
+                System.IO.File.AppendAllText(@"d:\Hampadco\RealProjects\ShiftYar\sa_perf.txt", $"Clone: {tClone}ms, Move ({moveType}): {tMove}ms, Score: {tScore}ms\n");
             }
 
-            neighbor.Score = CalculateSolutionScore(neighbor);
             return neighbor;
         }
 
         private void PerformManagerMixRepairMove(ShiftSolution solution)
         {
-            foreach (var date in GetDateRange())
-            {
-                foreach (var shiftReq in _constraints.ShiftRequirements.Where(ShiftManagerRules.RequiresAnyManager))
-                {
-                    if (!SlotHasCoverageDemand(shiftReq, date))
-                    {
-                        continue;
-                    }
+            var dates = GetDateRange();
+            if (dates.Count == 0) return;
+            var date = dates[_random.Next(dates.Count)];
+            
+            var reqs = _constraints.ShiftRequirements.Where(ShiftManagerRules.RequiresAnyManager).ToList();
+            if (reqs.Count == 0) return;
+            var shiftReq = reqs[_random.Next(reqs.Count)];
+            
+            if (!SlotHasCoverageDemand(shiftReq, date)) return;
 
-                    var assignees = GetRegularAssignees(solution, shiftReq, date);
-                    if (assignees.Count > 0 && !ShiftManagerRules.IsSatisfied(assignees, shiftReq))
-                    {
-                        EnsureShiftManagerMixForSlot(solution, shiftReq, date, strictPhase: false, markSkeleton: true);
-                        if (IsSlotManagerMixSatisfied(solution, shiftReq, date))
-                        {
-                            SkeletonAssignmentGuard.LockSlotManagerAssignments(solution, _constraints, shiftReq, date);
-                        }
-                    }
+            var assignees = GetRegularAssignees(solution, shiftReq, date);
+            if (assignees.Count > 0 && !ShiftManagerRules.IsSatisfied(assignees, shiftReq))
+            {
+                EnsureShiftManagerMixForSlot(solution, shiftReq, date, strictPhase: false, markSkeleton: true);
+                if (IsSlotManagerMixSatisfied(solution, shiftReq, date))
+                {
+                    SkeletonAssignmentGuard.LockSlotManagerAssignments(solution, _constraints, shiftReq, date);
                 }
             }
         }
 
         private double CalculateManagerMixPenalty(ShiftSolution solution)
         {
-            var violations = ShiftManagerMixGuard.GetViolations(solution, _constraints);
-            return violations.Count * 100000.0;
+            double penalty = 0;
+            foreach (var date in GetDateRange())
+            {
+                foreach (var shiftReq in _constraints.ShiftRequirements)
+                {
+                    var (requiredTotal, minLevel1) = ShiftManagerRules.GetRequirement(shiftReq);
+                    if (requiredTotal <= 0) continue;
+                    
+                    var assignments = solution.GetShiftAssignments(shiftReq.ShiftId, date);
+                    int managers = 0;
+                    int level1 = 0;
+                    for (int i = 0; i < assignments.Count; i++)
+                    {
+                        var a = assignments[i];
+                        if (a.IsOnCall) continue;
+                        var u = _constraints.UserConstraints.FirstOrDefault(uc => uc.UserId == a.UserId);
+                        if (u != null && ShiftManagerRules.IsManager(u))
+                        {
+                            managers++;
+                            if (ShiftManagerRules.IsLevel1(u)) level1++;
+                        }
+                    }
+                    if (managers < requiredTotal || level1 < minLevel1) penalty += 100000.0;
+                }
+            }
+            return penalty;
         }
 
         /// <summary>
@@ -1199,305 +1227,112 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// <summary>
         /// بررسی رعایت قوانین قطعی (Hard) برای یک راه‌حل
         /// </summary>
+        #region Validation Methods
+
+        private HashSet<(int UserId, DateTime Date)> _forbiddenDatesCache;
+        private HashSet<(int UserId, DateTime Date, ShiftLabel Label)> _forbiddenSlotsCache;
+        private Dictionary<int, UserConstraint> _userConstraintsDict;
+        
+        private void BuildFeasibilityCaches()
+        {
+            if (_forbiddenDatesCache != null) return;
+            
+            _forbiddenDatesCache = new HashSet<(int, DateTime)>();
+            _forbiddenSlotsCache = new HashSet<(int, DateTime, ShiftLabel)>();
+            _userConstraintsDict = new Dictionary<int, UserConstraint>();
+            
+            foreach (var u in _constraints.UserConstraints)
+            {
+                _userConstraintsDict[u.UserId] = u;
+                foreach (var d in u.UnavailableDates) _forbiddenDatesCache.Add((u.UserId, d.Date.Date));
+                foreach (var s in u.UnavailableShiftSlots) _forbiddenSlotsCache.Add((u.UserId, s.Date.Date, s.ShiftLabel));
+            }
+        }
+
         private bool IsFeasible(ShiftSolution solution)
         {
-            // بررسی تاریخ‌های غیرقابل دسترس و شیفت‌های غیرمجاز
+            BuildFeasibilityCaches();
+
+            // 1. O(N) indexing of assignments
+            var userAssignmentsDict = solution.Assignments.Values
+                .GroupBy(a => a.UserId)
+                .ToDictionary(g => g.Key, g => g.OrderBy(a => a.Date).ToList());
+                
+            var dateAssignmentsDict = solution.Assignments.Values
+                .GroupBy(a => a.Date.Date)
+                .ToDictionary(g => g.Key, g => g.ToList());
+                
+            var shiftDateAssignmentsDict = solution.Assignments.Values
+                .GroupBy(a => new { a.ShiftId, Date = a.Date.Date })
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            // 2. Fast Forbidden checks
             foreach (var assignment in solution.Assignments.Values)
             {
-                var userConstraint = _constraints.UserConstraints.FirstOrDefault(u => u.UserId == assignment.UserId);
-                if (userConstraint == null)
+                if (_forbiddenDatesCache.Contains((assignment.UserId, assignment.Date.Date))) return false;
+                if (_forbiddenSlotsCache.Contains((assignment.UserId, assignment.Date.Date, assignment.ShiftLabel))) return false;
+                
+                if (_userConstraintsDict.TryGetValue(assignment.UserId, out var uc))
                 {
-                    continue;
-                }
-
-                if (userConstraint.UnavailableDates.Any(d => d.Date == assignment.Date.Date))
-                {
-                    return false;
-                }
-
-                if (userConstraint.UnavailableShiftSlots.Any(s =>
-                        s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel))
-                {
-                    return false;
-                }
-
-                if (!ShiftEligibilityResolver.MayEverTakeLabel(userConstraint, assignment.ShiftLabel))
-                {
-                    return false;
+                    if (!ShiftEligibilityResolver.MayEverTakeLabel(uc, assignment.ShiftLabel)) return false;
                 }
             }
 
-            // ممنوعیت توالی عصر→شب و شب→صبح؛ عصر/شب بعد از شب با ON تأییدشده مستثنی می‌شود
+            // 3. Fast Adjacent Shift Rest Guard
             foreach (var userConstraint in _constraints.UserConstraints)
             {
-                if (AdjacentShiftRestGuard.HasReportableForbiddenPair(
-                        userConstraint,
-                        solution.GetUserAllAssignments(userConstraint.UserId),
-                        _constraints.HardRules))
+                if (userAssignmentsDict.TryGetValue(userConstraint.UserId, out var userAssigns))
                 {
-                    return false;
+                    if (AdjacentShiftRestGuard.HasReportableForbiddenPair(
+                            userConstraint,
+                            userAssigns,
+                            _constraints.HardRules))
+                    {
+                        return false;
+                    }
                 }
             }
 
-            // حضور قطعی در شیفت‌های درخواست‌شده
+            // 4. Required Slots
             foreach (var userConstraint in _constraints.UserConstraints)
             {
                 foreach (var required in userConstraint.RequiredShiftSlots)
                 {
                     var shiftReq = GetShiftRequirement(required.ShiftLabel, userConstraint.SpecialtyId);
-                    if (shiftReq == null)
+                    if (shiftReq == null) continue;
+
+                    var hasIt = false;
+                    if (shiftDateAssignmentsDict.TryGetValue(new { shiftReq.ShiftId, Date = required.Date.Date }, out var shiftAssigns))
                     {
-                        continue;
+                         hasIt = shiftAssigns.Any(a => a.UserId == userConstraint.UserId && !a.IsOnCall);
                     }
 
-                    var assignment = solution.GetShiftAssignments(shiftReq.ShiftId, required.Date)
-                        .FirstOrDefault(a => a.UserId == userConstraint.UserId && !a.IsOnCall);
-
-                    if (assignment == null)
-                    {
-                        return false;
-                    }
+                    if (!hasIt) return false;
                 }
 
                 foreach (var presenceDate in userConstraint.RequiredPresenceDates)
                 {
-                    if (!solution.GetUserAssignments(userConstraint.UserId, presenceDate).Any(a => !a.IsOnCall))
+                    var hasIt = false;
+                    if (userAssignmentsDict.TryGetValue(userConstraint.UserId, out var assigns))
                     {
-                        return false;
+                         hasIt = assigns.Any(a => a.Date.Date == presenceDate.Date.Date && !a.IsOnCall);
                     }
+                    if (!hasIt) return false;
                 }
             }
 
-            // الزام ترکیب مسئول شیفت (سطح‌دار) برای صبح/عصر/شب
-            foreach (var date in GetDateRange())
+            // 5. Daily Duplicates
+            foreach (var dailyAssignments in dateAssignmentsDict.Values)
             {
-                foreach (var shiftReq in _constraints.ShiftRequirements)
+                var grouped = dailyAssignments.GroupBy(a => a.UserId);
+                foreach (var group in grouped)
                 {
-                    if (!ShiftManagerRules.RequiresAnyManager(shiftReq))
+                    if (group.Count() > 1)
                     {
-                        continue;
-                    }
-
-                    var regularAssignments = solution.GetShiftAssignments(shiftReq.ShiftId, date)
-                        .Where(a => !a.IsOnCall)
-                        .ToList();
-
-                    if (regularAssignments.Count == 0)
-                    {
-                        continue;
-                    }
-
-                    var assignees = regularAssignments
-                        .Select(a => _constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId))
-                        .Where(u => u != null)
-                        .Cast<UserConstraint>();
-
-                    if (!ShiftManagerRules.IsSatisfied(assignees, shiftReq))
-                    {
-                        return false;
-                    }
-                }
-            }
-
-            // ترکیب روزانه: صبح+عصر و صبح+شب مجاز؛ عصر+شب ممنوع؛ سقف MaxShiftsPerDay
-            {
-                var maxPerDay = _constraints.HardRules.EnforceMaxShiftsPerDay
-                    ? Math.Max(1, _constraints.GlobalConstraints.MaxShiftsPerDay)
-                    : 2;
-                var forbidDup = _constraints.HardRules.ForbidDuplicateDailyAssignments;
-                foreach (var grp in solution.Assignments.Values.GroupBy(a => new { a.UserId, Date = a.Date.Date }))
-                {
-                    if (!DailyAssignmentRules.IsValidDaySet(grp.Select(a => a.ShiftLabel), maxPerDay, forbidDup))
-                    {
-                        return false;
-                    }
-                }
-            }
-
-            // حداقل استراحت و حداکثر متوالی
-            foreach (var userConstraint in _constraints.UserConstraints)
-            {
-                var userAssignments = solution.GetUserAllAssignments(userConstraint.UserId);
-                // پرسنل فیکس هر روز غیرتعطیل شیفت‌اند؛ قواعد استراحت/توالی/سقف هفتگی/موظفی برایشان بی‌معناست
-                var isDailyFixedStaff = userConstraint.ShiftType == ShiftTypes.FixedShift;
-
-                if (_constraints.HardRules.EnforceMinRestDays && !isDailyFixedStaff)
-                {
-                    for (int i = 1; i < userAssignments.Count; i++)
-                    {
-                        var daysBetween = (userAssignments[i].Date - userAssignments[i - 1].Date).Days;
-                        // صبح+عصر همان روز (daysBetween=0) مجاز است
-                        if (daysBetween == 0)
-                        {
-                            continue;
-                        }
-
-                        if (daysBetween < userConstraint.MinRestDaysBetweenShifts + 1)
-                            return false;
-                    }
-                }
-                if (_constraints.HardRules.EnforceMaxConsecutiveShifts && !isDailyFixedStaff)
-                {
-                    var workDates = MaxConsecutiveWorkdayRules
-                        .GetCountableWorkDatesFromAssignments(userAssignments, userConstraint)
-                        .OrderBy(d => d)
-                        .ToList();
-                    int consecutive = 1;
-                    for (int i = 1; i < workDates.Count; i++)
-                    {
-                        if ((workDates[i] - workDates[i - 1]).Days == 1)
-                        {
-                            consecutive++;
-                            if (consecutive > userConstraint.MaxConsecutiveShifts)
-                                return false;
-                        }
-                        else
-                        {
-                            consecutive = 1;
-                        }
-                    }
-                }
-
-                if (_constraints.HardRules.EnforceProductivityHours &&
-                    userConstraint.ProductivityRequiredHours.HasValue &&
-                    !isDailyFixedStaff)
-                {
-                    var workedHours = CalculateUserWorkedHours(userAssignments);
-                    var maxAllowed = ProjectPersonnelProductivityPriority.GetMaxAllowedSchedulingHours(userConstraint);
-                    if (workedHours > maxAllowed + 0.25)
-                    {
-                        return false;
-                    }
-                }
-
-                if (_constraints.HardRules.EnforceMaxConsecutiveWorkHours && !isDailyFixedStaff)
-                {
-                    if (ProductivityWorkedHoursCalculator.ExceedsMaxConsecutiveWorkHours(
-                            userAssignments,
-                            _shiftInfoLookup,
-                            userConstraint.MaxConsecutiveWorkHours))
-                    {
-                        return false;
-                    }
-                }
-
-                if (_constraints.HardRules.EnforceWeeklyMaxShifts && !isDailyFixedStaff)
-                {
-                    foreach (var week in userAssignments.GroupBy(a => GetWeekNumber(a.Date)))
-                    {
-                        if (week.Count() > userConstraint.MaxShiftsPerWeek)
+                        var labels = group.Select(a => a.ShiftLabel).Distinct().ToList();
+                        if (group.Count() > 2 || !labels.Contains(ShiftLabel.Morning) || !labels.Contains(ShiftLabel.Evening))
                         {
                             return false;
-                        }
-                    }
-                }
-
-                if (_constraints.HardRules.EnforceNightShiftMonthlyCap || userConstraint.HasExactNightQuota)
-                {
-                    var nights = userAssignments.Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall).ToList();
-                    if (_constraints.HardRules.EnforceNightShiftMonthlyCap)
-                    {
-                        foreach (var month in nights.GroupBy(a => new { a.Date.Year, a.Date.Month }))
-                        {
-                            if (month.Count() > userConstraint.MaxNightShiftsPerMonth)
-                            {
-                                return false;
-                            }
-                        }
-                    }
-
-                    if (userConstraint.MinDaysBetweenNightShifts > 0 && nights.Count > 1)
-                    {
-                        var ordered = nights.OrderBy(a => a.Date).ToList();
-                        for (var i = 1; i < ordered.Count; i++)
-                        {
-                            if (Math.Abs((ordered[i].Date.Date - ordered[i - 1].Date.Date).Days) <=
-                                userConstraint.MinDaysBetweenNightShifts)
-                            {
-                                return false;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ظرفیت تخصص/شیفت/روز نباید بیش از نیاز باشد
-            if (_constraints.HardRules.EnforceSpecialtyCapacity)
-            {
-                var dateRange = GetDateRange();
-                foreach (var date in dateRange)
-                {
-                    foreach (var shiftReq in _constraints.ShiftRequirements)
-                    {
-                        var assignments = solution.GetShiftAssignments(shiftReq.ShiftId, date);
-                        var isHoliday = _constraints.IsHoliday(date);
-                        int totalRequired = shiftReq.SpecialtyRequirements.Sum(r =>
-                        {
-                            var d = r.ForDay(isHoliday);
-                            return d.RequiredTotalCount + d.OnCallTotalCount;
-                        });
-                        if (assignments.Count > totalRequired)
-                        {
-                            return false;
-                        }
-                        foreach (var specReq in shiftReq.SpecialtyRequirements)
-                        {
-                            var day = specReq.ForDay(isHoliday);
-                            var specAssignments = assignments
-                                .Where(a => GetUserSpecialty(a.UserId) == specReq.SpecialtyId)
-                                .ToList();
-                            var regular = specAssignments.Where(a => !a.IsOnCall).ToList();
-                            var onCall = specAssignments.Where(a => a.IsOnCall).ToList();
-
-                            if (specAssignments.Count > day.RequiredTotalCount + day.OnCallTotalCount)
-                            {
-                                return false;
-                            }
-
-                            if (regular.Count > day.RequiredTotalCount)
-                            {
-                                return false;
-                            }
-
-                            if (onCall.Count > day.OnCallTotalCount)
-                            {
-                                return false;
-                            }
-
-                            var hasExplicitRegularGender =
-                                day.RequiredMaleCount > 0 || day.RequiredFemaleCount > 0;
-                            var hasExplicitOnCallGender =
-                                day.OnCallMaleCount > 0 || day.OnCallFemaleCount > 0;
-
-                            if (hasExplicitRegularGender)
-                            {
-                                if (day.RequiredMaleCount > 0 &&
-                                    CountGenderAssignments(regular, UserGender.Male) != day.RequiredMaleCount)
-                                {
-                                    return false;
-                                }
-
-                                if (day.RequiredFemaleCount > 0 &&
-                                    CountGenderAssignments(regular, UserGender.Female) != day.RequiredFemaleCount)
-                                {
-                                    return false;
-                                }
-                            }
-
-                            if (hasExplicitOnCallGender)
-                            {
-                                if (day.OnCallMaleCount > 0 &&
-                                    CountGenderAssignments(onCall, UserGender.Male) != day.OnCallMaleCount)
-                                {
-                                    return false;
-                                }
-
-                                if (day.OnCallFemaleCount > 0 &&
-                                    CountGenderAssignments(onCall, UserGender.Female) != day.OnCallFemaleCount)
-                                {
-                                    return false;
-                                }
-                            }
                         }
                     }
                 }
@@ -1506,12 +1341,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             return true;
         }
 
-
         private ShiftSolution? RepairOrRegenerate(ShiftSolution solution)
         {
             // استراتژی ساده: اگر نامعتبر است، هیچ تعمیر پیچیده انجام نده و به فراخواننده اجازهٔ بازتولید بده
             return null;
         }
+
+        #endregion
 
         #region Helper Methods
 
@@ -1524,6 +1360,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
             return dates;
         }
+
 
         private void ApplyHardRequiredAssignments(ShiftSolution solution)
         {

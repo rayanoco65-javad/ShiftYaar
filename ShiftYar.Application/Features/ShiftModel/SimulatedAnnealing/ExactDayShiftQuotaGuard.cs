@@ -33,7 +33,10 @@ public static class ExactDayShiftQuotaGuard
 
         for (var pass = 0; pass < 5; pass++)
         {
-            foreach (var user in OrderUsersByDeficit(solution, constraints, label))
+            var deficits = OrderUsersByDeficit(solution, constraints, label).ToList();
+            if (deficits.Count == 0) break;
+
+            foreach (var user in deficits)
             {
                 EnforceForUser(solution, constraints, user, shiftReq, label);
             }
