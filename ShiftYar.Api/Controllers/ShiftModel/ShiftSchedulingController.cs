@@ -36,6 +36,22 @@ namespace ShiftYar.Api.Controllers.ShiftModel
             _schedulingJobQueue = schedulingJobQueue;
         }
 
+        /// <summary>
+        /// اکشن تست ایزوله‌شده (Mock Endpoint) جهت تست سلامت شبکه و خط لوله HTTP در زیر ۱ میلی‌ثانیه
+        /// </summary>
+        [HttpPost("test-mock-optimize")]
+        [AllowAnonymous]
+        public IActionResult TestMockOptimize([FromBody] ShiftSchedulingRequestDto request)
+        {
+            return Ok(ApiResponse<object>.Success(new
+            {
+                Status = "Healthy",
+                Message = "خط لوله HTTP و سریال‌سازی پاسخ کاملاً سالم و پاسخ‌گو است.",
+                DepartmentId = request.DepartmentId,
+                Timestamp = DateTime.UtcNow
+            }));
+        }
+
         /// اجرای الگوریتم بهینه‌سازی شیفت‌بندی
         [HttpPost("optimize")]
         public async Task<IActionResult> OptimizeShiftSchedule([FromBody] ShiftSchedulingRequestDto request, CancellationToken cancellationToken)
