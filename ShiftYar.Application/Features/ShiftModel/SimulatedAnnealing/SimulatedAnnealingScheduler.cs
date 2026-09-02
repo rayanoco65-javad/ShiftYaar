@@ -3402,6 +3402,16 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 var shiftReq = _constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftId == assignment.ShiftId);
                 if (shiftReq != null)
                 {
+                    if (assignment.ShiftLabel == ShiftLabel.Night && user.ExactNightShiftCount.HasValue)
+                    {
+                        var currentNights = solution.GetUserAllAssignments(user.UserId)
+                            .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+                        if (currentNights <= user.ExactNightShiftCount.Value)
+                        {
+                            return false;
+                        }
+                    }
+
                     var otherL1 = _constraints.UserConstraints
                         .Where(u => u.UserId != user.UserId && ShiftManagerRules.IsLevel1(u) && (user.SpecialtyId == 0 || u.SpecialtyId == 0 || u.SpecialtyId == user.SpecialtyId) && u.IsActive)
                         .FirstOrDefault(u => IsUserAvailableForManagerInstall(u, assignment.Date, assignment.ShiftLabel, solution, assignment.ShiftId, ignoreSameDayAssignments: false, relaxNightSpacing: true));
