@@ -47,6 +47,10 @@ namespace ShiftYar.Api.Controllers.ShiftModel
                     return BadRequest(ApiResponse<ShiftSchedulingResultDto>.Fail("Invalid request data"));
                 }
 
+                // لایه ایمنی: اضافه کردن تایم‌آوت ۱۵ ثانیه‌ای مستقل برای جلوگیری از معلق ماندن اکشن همزمان
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(15));
+
                 // تبدیل تاریخ‌های شمسی به میلادی
                 var internalRequest = new ShiftSchedulingRequestInternalDto
                 {
@@ -56,7 +60,7 @@ namespace ShiftYar.Api.Controllers.ShiftModel
                     Algorithm = request.Algorithm
                 };
 
-                var result = await _shiftSchedulingService.OptimizeShiftScheduleInternalAsync(internalRequest, cancellationToken);
+                var result = await _shiftSchedulingService.OptimizeShiftScheduleInternalAsync(internalRequest, timeoutCts.Token);
 
                 if (result.IsSuccess)
                 {
@@ -67,9 +71,13 @@ namespace ShiftYar.Api.Controllers.ShiftModel
                     return BadRequest(result);
                 }
             }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return StatusCode(408, ApiResponse<ShiftSchedulingResultDto>.Fail("زمان بهینه‌سازی از سقف مجاز ۱۵ ثانیه فراتر رفت. لطفاً درخواست را به صورت پس‌زمینه اجرا نمایید."));
+            }
             catch (OperationCanceledException)
             {
-                return StatusCode(499, ApiResponse<ShiftSchedulingResultDto>.Fail("درخواست بهینه‌سازی توسط کاربر یا تایم‌آوت کلاینت لغو شد."));
+                return StatusCode(499, ApiResponse<ShiftSchedulingResultDto>.Fail("درخواست بهینه‌سازی توسط کاربر یا کلاینت لغو شد."));
             }
             catch (Exception ex)
             {
@@ -88,6 +96,9 @@ namespace ShiftYar.Api.Controllers.ShiftModel
                     return BadRequest(ApiResponse<object>.Fail("Invalid request data"));
                 }
 
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(15));
+
                 // تبدیل تاریخ‌های شمسی به میلادی
                 var internalRequest = new ShiftSchedulingRequestInternalDto
                 {
@@ -97,8 +108,7 @@ namespace ShiftYar.Api.Controllers.ShiftModel
                     Algorithm = request.Algorithm
                 };
 
-                // دریافت آمار با اجرای سبک (می‌توانید یک مسیر آمار داخلی جداگانه اضافه کنید)
-                var result = await _shiftSchedulingService.GetAlgorithmStatisticsAsync(request, cancellationToken);
+                var result = await _shiftSchedulingService.GetAlgorithmStatisticsAsync(request, timeoutCts.Token);
 
                 if (result.IsSuccess)
                 {
@@ -126,7 +136,6 @@ namespace ShiftYar.Api.Controllers.ShiftModel
                     return BadRequest(ApiResponse<List<string>>.Fail("Invalid request data"));
                 }
 
-                // استفاده از متد اصلی که هنوز با DTO اصلی کار می‌کند
                 var result = await _shiftSchedulingService.ValidateConstraintsAsync(request, cancellationToken);
 
                 if (result.IsSuccess)
@@ -210,8 +219,15 @@ namespace ShiftYar.Api.Controllers.ShiftModel
                     return BadRequest(ApiResponse<object>.Fail("Invalid request data"));
                 }
 
-                var result = await _shiftSchedulingService.OptimizeAndSaveAsync(request, isBackgroundExecution: false, backgroundJobId: null, cancellationToken: cancellationToken);
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(20));
+
+                var result = await _shiftSchedulingService.OptimizeAndSaveAsync(request, isBackgroundExecution: false, backgroundJobId: null, cancellationToken: timeoutCts.Token);
                 return result.IsSuccess ? Ok(result) : BadRequest(result);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return StatusCode(408, ApiResponse<object>.Fail("زمان بهینه‌سازی و ذخیره از سقف مجاز ۲۰ ثانیه فراتر رفت."));
             }
             catch (OperationCanceledException)
             {
