@@ -286,6 +286,33 @@ namespace ShiftYar.Api.Controllers.ShiftModel
             return Ok(result);
         }
 
+        /// <summary>
+        /// شروع فرآیند بهینه‌سازی به‌صورت پس‌زمینه (فقط بهینه‌سازی، بدون ذخیره نهایی).
+        /// بلافاصله یک jobId برمی‌گرداند تا در بک‌گراند اجرا شود و با Polling نتیجه را بگیرید.
+        /// </summary>
+        [HttpPost("optimize-async")]
+        public async Task<IActionResult> EnqueueOptimize([FromBody] ShiftSchedulingRequestDto request)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ApiResponse<object>.Fail("Invalid request data"));
+            }
+
+            request.SaveAfterOptimize = false;
+
+            var job = await _schedulingJobStore.CreateAsync(request);
+            await _schedulingJobQueue.EnqueueAsync(job.Id);
+
+            var payload = new
+            {
+                jobId = job.Id,
+                status = job.Status.ToString(),
+                statusUrl = $"/api/ShiftScheduling/scheduling-jobs/{job.Id}"
+            };
+
+            return Accepted(ApiResponse<object>.Success(payload, "Scheduling job queued. Poll the status URL for the result."));
+        }
+
         /// شروع فرآیند بهینه‌سازی و ذخیره به‌صورت پس‌زمینه.
         /// بلافاصله یک jobId برمی‌گرداند و حل سنگین خارج از درخواست HTTP اجرا می‌شود (بدون 502).
         [HttpPost("optimize-and-save-async")]
@@ -295,6 +322,8 @@ namespace ShiftYar.Api.Controllers.ShiftModel
             {
                 return BadRequest(ApiResponse<object>.Fail("Invalid request data"));
             }
+
+            request.SaveAfterOptimize = true;
 
             try
             {
@@ -319,11 +348,12 @@ namespace ShiftYar.Api.Controllers.ShiftModel
             {
                 jobId = job.Id,
                 status = job.Status.ToString(),
-                statusUrl = $"/scheduling-jobs/{job.Id}"
+                statusUrl = $"/api/ShiftScheduling/scheduling-jobs/{job.Id}"
             };
 
             return Accepted(ApiResponse<object>.Success(payload, "Scheduling job queued. Poll the status URL for the result."));
         }
+
 
         /// دریافت وضعیت/نتیجهٔ یک کار زمان‌بندی پس‌زمینه.
         [HttpGet("scheduling-jobs/{jobId}")]

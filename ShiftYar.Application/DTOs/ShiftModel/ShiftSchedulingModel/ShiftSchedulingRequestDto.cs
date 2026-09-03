@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using ShiftYar.Application.Common.Utilities;
@@ -22,6 +22,8 @@ namespace ShiftYar.Application.DTOs.ShiftModel.ShiftSchedulingModel
         [RegularExpression(@"^\d{4}/\d{2}/\d{2}$", ErrorMessage = "تاریخ پایان باید در قالب yyyy/MM/dd باشد.")]
         public string EndDate { get; set; } = string.Empty; // تاریخ پایان بازه (شمسی)
         public SchedulingAlgorithm Algorithm { get; set; } = SchedulingAlgorithm.SimulatedAnnealing; // الگوریتم انتخابی
+
+        public bool SaveAfterOptimize { get; set; } = false; // تعیین اینکه آیا بعد از بهینه‌سازی ذخیره شود یا خیر
 
         public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
         {

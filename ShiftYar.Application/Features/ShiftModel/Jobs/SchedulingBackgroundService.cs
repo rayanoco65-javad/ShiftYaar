@@ -256,7 +256,21 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
         {
             using var scope = _scopeFactory.CreateScope();
             var schedulingService = scope.ServiceProvider.GetRequiredService<IShiftSchedulingService>();
-            return await schedulingService.OptimizeAndSaveAsync(request, isBackgroundExecution: true, backgroundJobId: jobId);
+            
+            if (request.SaveAfterOptimize)
+            {
+                return await schedulingService.OptimizeAndSaveAsync(request, isBackgroundExecution: true, backgroundJobId: jobId);
+            }
+            else
+            {
+                var result = await schedulingService.OptimizeShiftScheduleAsync(request, default);
+                return new Application.Common.Models.ResponseModel.ApiResponse<object>
+                {
+                    IsSuccess = result.IsSuccess,
+                    Message = result.Message,
+                    Data = result.Data
+                };
+            }
         }
     }
 }
