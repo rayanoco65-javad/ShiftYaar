@@ -222,7 +222,14 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
                 }
 
                 job.CompletedAtUtc = DateTime.UtcNow;
-                await _store.UpdateAsync(job);
+                try
+                {
+                    await _store.UpdateAsync(job);
+                }
+                catch (Exception updateEx)
+                {
+                    _logger.LogError(updateEx, "Critical error updating database in finally block for job {JobId}.", job.Id);
+                }
             }
         }
 

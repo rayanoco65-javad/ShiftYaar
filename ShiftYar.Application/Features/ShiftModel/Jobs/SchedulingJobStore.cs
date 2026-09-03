@@ -85,7 +85,19 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
             record.Status = (int)job.Status;
             record.IsSuccess = job.IsSuccess;
             record.Message = job.Message;
-            record.ResultJson = job.Result == null ? null : JsonSerializer.Serialize(job.Result, JsonOptions);
+            
+            try
+            {
+                record.ResultJson = job.Result == null ? null : JsonSerializer.Serialize(job.Result, JsonOptions);
+            }
+            catch (Exception ex)
+            {
+                record.ResultJson = null;
+                record.Message = $"Result serialization failed: {ex.Message}";
+                record.IsSuccess = false;
+                record.Status = (int)SchedulingJobStatus.Failed;
+            }
+
             record.StartedAtUtc = job.StartedAtUtc;
             record.CompletedAtUtc = job.CompletedAtUtc;
             record.UpdateDate = DateTime.UtcNow;
