@@ -134,18 +134,18 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     case SchedulingAlgorithm.SimulatedAnnealing:
                         // بارگذاری پارامترها از DB در صورت NULL بودن
                         await ApplyAlgorithmSettingsFromDbAsync(request);
-                        result = await OptimizeWithSimulatedAnnealingAsync(request, constraints);
+                        result = await OptimizeWithSimulatedAnnealingAsync(request, constraints, cancellationToken);
                         break;
                     case SchedulingAlgorithm.OrToolsCPSat:
                         await ApplyAlgorithmSettingsFromDbAsync(request);
-                        result = await OptimizeWithOrToolsAsync(request, constraints);
+                        result = await OptimizeWithOrToolsAsync(request, constraints, cancellationToken);
                         break;
                     case SchedulingAlgorithm.Hybrid:
                         await ApplyAlgorithmSettingsFromDbAsync(request);
-                        result = await OptimizeWithHybridAsync(request, constraints);
+                        result = await OptimizeWithHybridAsync(request, constraints, cancellationToken);
                         break;
                     default:
-                        result = await OptimizeWithSimulatedAnnealingAsync(request, constraints);
+                        result = await OptimizeWithSimulatedAnnealingAsync(request, constraints, cancellationToken);
                         break;
                 }
 
@@ -882,24 +882,31 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         #region Algorithm-Specific Optimization Methods
 
         /// <summary>
+        /// <summary>
         /// بهینه‌سازی با الگوریتم Simulated Annealing
         /// </summary>
-        private async Task<ShiftSchedulingResultDto> OptimizeWithSimulatedAnnealingAsync(ShiftSchedulingRequestDto request, ShiftConstraints constraints) // اجرای SA با پارامترهای ورودی و داده‌های DB
+        private async Task<ShiftSchedulingResultDto> OptimizeWithSimulatedAnnealingAsync(
+            ShiftSchedulingRequestDto request,
+            ShiftConstraints constraints,
+            CancellationToken cancellationToken = default) // اجرای SA با پارامترهای ورودی و داده‌های DB
         {
-                var saParamsFromDb = await GetAlgorithmSettingsAsync(request.DepartmentId, SchedulingAlgorithm.SimulatedAnnealing);
-                var parameters = new SimulatedAnnealingParameters
-                {
-                    InitialTemperature = saParamsFromDb.InitialTemperature,
-                    FinalTemperature = saParamsFromDb.FinalTemperature,
-                    CoolingRate = saParamsFromDb.CoolingRate,
-                    MaxIterations = saParamsFromDb.MaxIterations,
-                    MaxIterationsWithoutImprovement = saParamsFromDb.MaxIterationsWithoutImprovement
-                };
+            var saParamsFromDb = await GetAlgorithmSettingsAsync(request.DepartmentId, SchedulingAlgorithm.SimulatedAnnealing);
+            var parameters = new SimulatedAnnealingParameters
+            {
+                InitialTemperature = saParamsFromDb.InitialTemperature,
+                FinalTemperature = saParamsFromDb.FinalTemperature,
+                CoolingRate = saParamsFromDb.CoolingRate,
+                MaxIterations = saParamsFromDb.MaxIterations,
+                MaxIterationsWithoutImprovement = saParamsFromDb.MaxIterationsWithoutImprovement
+            };
 
             var scheduler = new SimulatedAnnealingScheduler(constraints, parameters);
             EnsureNightQuotaRequestsFeasibleOrThrow(constraints);
             EnsureConflictingApprovedRequestsOrThrow(constraints);
-            var solution = scheduler.Optimize();
+            var solution = await RunCpuBoundWithTimeoutAsync(
+                () => scheduler.Optimize(cancellationToken),
+                TimeSpan.FromMinutes(4),
+                cancellationToken);
             var statistics = scheduler.GetStatistics();
 
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
@@ -922,7 +929,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         /// <summary>
         /// بهینه‌سازی با الگوریتم OR-Tools CP-SAT
         /// </summary>
-        private async Task<ShiftSchedulingResultDto> OptimizeWithOrToolsAsync(ShiftSchedulingRequestDto request, ShiftConstraints constraints) // اجرای OR-Tools با تبدیل قیود و برگرداندن نتیجه
+        private async Task<ShiftSchedulingResultDto> OptimizeWithOrToolsAsync(
+            ShiftSchedulingRequestDto request,
+            ShiftConstraints constraints,
+            CancellationToken cancellationToken = default) // اجرای OR-Tools با تبدیل قیود و برگرداندن نتیجه
         {
             // تبدیل محدودیت‌ها به فرمت OR-Tools
             var ortoolsConstraints = await ConvertToOrToolsConstraintsAsync(constraints, request);
@@ -940,7 +950,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             var scheduler = new OrToolsCPSatScheduler(ortoolsConstraints, parameters);
             EnsureNightQuotaRequestsFeasibleOrThrow(constraints);
             EnsureConflictingApprovedRequestsOrThrow(constraints);
-            var solution = scheduler.Optimize();
+            var solution = await RunCpuBoundWithTimeoutAsync(
+                () => scheduler.Optimize(),
+                TimeSpan.FromMinutes(4),
+                cancellationToken);
 
             var saSolution = ConvertOrToolsToShiftSolution(solution);
             ApplyMandatoryConstraints(saSolution, constraints);
@@ -957,7 +970,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         /// <summary>
         /// بهینه‌سازی با الگوریتم ترکیبی
         /// </summary>
-        private async Task<ShiftSchedulingResultDto> OptimizeWithHybridAsync(ShiftSchedulingRequestDto request, ShiftConstraints constraints) // اجرای الگوریتم ترکیبی با استراتژی خواسته‌شده
+        private async Task<ShiftSchedulingResultDto> OptimizeWithHybridAsync(
+            ShiftSchedulingRequestDto request,
+            ShiftConstraints constraints,
+            CancellationToken cancellationToken = default) // اجرای الگوریتم ترکیبی با استراتژی خواسته‌شده
         {
             // تبدیل محدودیت‌ها به فرمت OR-Tools
             var ortoolsConstraints = await ConvertToOrToolsConstraintsAsync(constraints, request);
@@ -991,7 +1007,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             };
 
             var scheduler = new HybridScheduler(constraints, ortoolsConstraints, saParameters, ortoolsParameters, hybridParameters);
-            var solution = scheduler.Optimize();
+            var solution = await RunCpuBoundWithTimeoutAsync(
+                () => scheduler.Optimize(),
+                TimeSpan.FromMinutes(4),
+                cancellationToken);
             var statistics = scheduler.GetStatistics();
 
             var result = await ConvertHybridSolutionToResultAsync(solution, constraints);

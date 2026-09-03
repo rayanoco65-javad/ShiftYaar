@@ -177,7 +177,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
 
                 // LongRunning: OR-Tools/Hybrid از thread pool جدا می‌شود تا قفل thread pool (Task.WaitAll) رخ ندهد.
                 var workTask = Task.Factory.StartNew(
-                    () => ExecuteJobInScopeAsync(job.Id, job.Request),
+                    () => ExecuteJobInScopeAsync(job.Id, job.Request, stoppingToken),
                     stoppingToken,
                     TaskCreationOptions.LongRunning,
                     TaskScheduler.Default).Unwrap();
@@ -259,18 +259,19 @@ namespace ShiftYar.Application.Features.ShiftModel.Jobs
 
         private async Task<Application.Common.Models.ResponseModel.ApiResponse<object>> ExecuteJobInScopeAsync(
             string jobId,
-            Application.DTOs.ShiftModel.ShiftSchedulingModel.ShiftSchedulingRequestDto request)
+            Application.DTOs.ShiftModel.ShiftSchedulingModel.ShiftSchedulingRequestDto request,
+            CancellationToken cancellationToken = default)
         {
             using var scope = _scopeFactory.CreateScope();
             var schedulingService = scope.ServiceProvider.GetRequiredService<IShiftSchedulingService>();
             
             if (request.SaveAfterOptimize)
             {
-                return await schedulingService.OptimizeAndSaveAsync(request, isBackgroundExecution: true, backgroundJobId: jobId);
+                return await schedulingService.OptimizeAndSaveAsync(request, isBackgroundExecution: true, backgroundJobId: jobId, cancellationToken: cancellationToken);
             }
             else
             {
-                var result = await schedulingService.OptimizeShiftScheduleAsync(request, default);
+                var result = await schedulingService.OptimizeShiftScheduleAsync(request, cancellationToken);
                 return new Application.Common.Models.ResponseModel.ApiResponse<object>
                 {
                     IsSuccess = result.IsSuccess,
