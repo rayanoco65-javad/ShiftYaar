@@ -264,7 +264,7 @@ public static class ExactDayShiftQuotaGuard
             {
                 var removable = solution.GetUserAllAssignments(user.UserId)
                     .Where(a => a.ShiftLabel == label && !a.IsOnCall)
-                    .Where(a => !IsProtected(solution, constraints, user, a))
+                    .Where(a => !IsProtected(solution, constraints, user, a) && !solution.IsLockedSkeleton(a.UserId, a.ShiftId, a.Date))
                     .OrderByDescending(a => constraints.IsHoliday(a.Date) ? 0 : 1)
                     .ThenByDescending(a => a.Date)
                     .FirstOrDefault();
@@ -273,7 +273,11 @@ public static class ExactDayShiftQuotaGuard
                     break;
                 }
 
-                solution.RemoveAssignment(removable.UserId, removable.ShiftId, removable.Date);
+                var removed = solution.RemoveAssignment(removable.UserId, removable.ShiftId, removable.Date);
+                if (!removed)
+                {
+                    break;
+                }
             }
         }
     }

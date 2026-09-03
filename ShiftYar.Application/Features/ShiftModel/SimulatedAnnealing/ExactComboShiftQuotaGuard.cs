@@ -59,7 +59,8 @@ public static class ExactComboShiftQuotaGuard
                 break;
             }
 
-            solution.RemoveAssignment(removable.UserId, removable.ShiftId, removable.Date);
+            var removed = solution.RemoveAssignment(removable.UserId, removable.ShiftId, removable.Date);
+            if (!removed) break;
             holidayCount = ComboShiftQuotaEligibility.CountMorningEveningHolidayAssignments(
                 solution, constraints, user.UserId);
         }
@@ -111,7 +112,8 @@ public static class ExactComboShiftQuotaGuard
                 break;
             }
 
-            solution.RemoveAssignment(removable.UserId, removable.ShiftId, removable.Date);
+            var removed = solution.RemoveAssignment(removable.UserId, removable.ShiftId, removable.Date);
+            if (!removed) break;
             if (removable.ShiftLabel == ShiftLabel.Night)
             {
                 nightCount--;

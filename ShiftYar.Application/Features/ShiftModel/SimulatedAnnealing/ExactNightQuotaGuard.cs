@@ -676,7 +676,11 @@ public static class ExactNightQuotaGuard
                 break;
             }
 
-            solution.RemoveAssignment(removable.UserId, removable.ShiftId, removable.Date);
+            var removed = solution.RemoveAssignment(removable.UserId, removable.ShiftId, removable.Date);
+            if (!removed)
+            {
+                break;
+            }
         }
     }
 
@@ -1525,13 +1529,16 @@ public static class ExactNightQuotaGuard
         {
             var removableMorning = solution.GetUserAllAssignments(user.UserId)
                 .Where(a => !a.IsOnCall && a.ShiftLabel == ShiftLabel.Morning)
-                .Where(a => !IsProtected(constraints, user.UserId, a))
+                .Where(a => !IsProtected(constraints, user.UserId, a) && !solution.IsLockedSkeleton(a.UserId, a.ShiftId, a.Date))
                 .OrderByDescending(a => a.Date)
                 .FirstOrDefault();
             if (removableMorning != null)
             {
-                solution.RemoveAssignment(removableMorning.UserId, removableMorning.ShiftId, removableMorning.Date);
-                continue;
+                var removed = solution.RemoveAssignment(removableMorning.UserId, removableMorning.ShiftId, removableMorning.Date);
+                if (removed)
+                {
+                    continue;
+                }
             }
 
             break;
