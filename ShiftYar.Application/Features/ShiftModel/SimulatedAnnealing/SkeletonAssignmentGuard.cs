@@ -22,7 +22,8 @@ public static class SkeletonAssignmentGuard
         solution.IsLockedSkeleton(userId, shiftId, date);
 
     /// <summary>
-    /// قفل بی‌قید همهٔ مسئول‌های فعلی اسلات (فاز ۱).
+    /// قفل فقط مسئول‌های موردنیاز ترکیب اسلات (تا سقف minLevel1 برای سطح ۱ و requiredTotal در کل).
+    /// مسئولین مازاد قفل نمی‌شوند تا سهمیه‌های سخت دیگران مسدود نشود.
     /// </summary>
     public static void LockSlotManagerAssignments(
         ShiftSolution solution,
@@ -30,16 +31,45 @@ public static class SkeletonAssignmentGuard
         ShiftRequirement shiftReq,
         DateTime date)
     {
-        foreach (var assignment in solution.GetShiftAssignments(shiftReq.ShiftId, date)
-                     .Where(a => !a.IsOnCall))
+        var (requiredTotal, minLevel1) = ShiftManagerRules.GetRequirement(shiftReq);
+        if (requiredTotal <= 0)
         {
-            var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == assignment.UserId);
-            if (user == null || !ShiftManagerRules.IsManager(user))
-            {
-                continue;
-            }
+            return;
+        }
 
-            solution.LockSkeletonAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+        var assignees = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+            .Where(a => !a.IsOnCall)
+            .ToList();
+
+        var managerAssignees = assignees
+            .Select(a => new { Assignment = a, User = constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId) })
+            .Where(x => x.User != null && ShiftManagerRules.IsManager(x.User))
+            .ToList();
+
+        var lockedL1 = managerAssignees.Count(x => ShiftManagerRules.IsLevel1(x.User) && solution.IsLockedSkeleton(x.Assignment.UserId, x.Assignment.ShiftId, x.Assignment.Date));
+        var lockedTotal = managerAssignees.Count(x => solution.IsLockedSkeleton(x.Assignment.UserId, x.Assignment.ShiftId, x.Assignment.Date));
+
+        // اول فقط تا سقف minLevel1 از مسئولین سطح ۱ قفل می‌شوند
+        foreach (var m in managerAssignees.Where(x => ShiftManagerRules.IsLevel1(x.User) && !solution.IsLockedSkeleton(x.Assignment.UserId, x.Assignment.ShiftId, x.Assignment.Date)))
+        {
+            if (lockedL1 < minLevel1 && lockedTotal < requiredTotal)
+            {
+                solution.LockSkeletonAssignment(m.Assignment.UserId, m.Assignment.ShiftId, m.Assignment.Date);
+                lockedL1++;
+                lockedTotal++;
+            }
+        }
+
+        // سپس بقیه مسئول‌ها تا سقف requiredTotal قفل می‌شوند (ترجیحاً سطح ۲ تا سطح ۱ برای شیفت‌های نیازمند آزاد بماند)
+        foreach (var m in managerAssignees
+                     .Where(x => !solution.IsLockedSkeleton(x.Assignment.UserId, x.Assignment.ShiftId, x.Assignment.Date))
+                     .OrderBy(x => ShiftManagerRules.IsLevel1(x.User) ? 1 : 0))
+        {
+            if (lockedTotal < requiredTotal)
+            {
+                solution.LockSkeletonAssignment(m.Assignment.UserId, m.Assignment.ShiftId, m.Assignment.Date);
+                lockedTotal++;
+            }
         }
     }
 

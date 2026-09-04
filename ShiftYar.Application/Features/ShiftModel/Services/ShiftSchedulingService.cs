@@ -1604,7 +1604,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         /// <summary>
         /// بارگذاری محدودیت‌ها از دیتابیس
         /// </summary>
-        private async Task<ShiftConstraints> LoadConstraintsAsync(ShiftSchedulingRequestDto request) // بارگذاری قیود زمان‌بندی از DB
+        public async Task<ShiftConstraints> LoadConstraintsAsync(ShiftSchedulingRequestDto request) // بارگذاری قیود زمان‌بندی از DB
         {
             try
             {

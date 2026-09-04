@@ -14,6 +14,9 @@ namespace ShiftYar.Application.Interfaces.ShiftModel
     /// </summary>
     public interface IShiftSchedulingService
     {
+        /// بارگذاری محدودیت‌ها از دیتابیس
+        Task<ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models.ShiftConstraints> LoadConstraintsAsync(ShiftSchedulingRequestDto request);
+
         /// اجرای الگوریتم بهینه‌سازی شیفت‌بندی
         Task<ApiResponse<ShiftSchedulingResultDto>> OptimizeShiftScheduleAsync(ShiftSchedulingRequestDto request, CancellationToken cancellationToken = default);
 

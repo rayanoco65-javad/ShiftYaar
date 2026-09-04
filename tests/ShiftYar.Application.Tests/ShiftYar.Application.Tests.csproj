@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\ShiftYar.Application\ShiftYar.Application.csproj" />
+    <ProjectReference Include="..\..\ShiftYar.Infrastructure\ShiftYar.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>
