@@ -37,7 +37,7 @@ public class DiagnoseDept2NightQuotasTests
         });
 
         var sw = Stopwatch.StartNew();
-        ShiftSolution solution;
+        ShiftSolution solution = null;
         try
         {
             solution = scheduler.Optimize();

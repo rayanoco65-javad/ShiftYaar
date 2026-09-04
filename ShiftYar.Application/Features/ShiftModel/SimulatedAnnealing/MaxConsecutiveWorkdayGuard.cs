@@ -87,11 +87,17 @@ public static class MaxConsecutiveWorkdayGuard
             var runLength = runEnd - runStart + 1;
             if (runLength > max)
             {
-                var kept = 0;
+                for (var j = runEnd; j >= runStart; j--)
+                {
+                    if (j - runStart >= max && CanClearWorkDay(solution, constraints, user, workDates[j]))
+                    {
+                        return workDates[j];
+                    }
+                }
+
                 for (var j = runStart; j <= runEnd; j++)
                 {
-                    kept++;
-                    if (kept > max && CanClearWorkDay(solution, constraints, user, workDates[j]))
+                    if (CanClearWorkDay(solution, constraints, user, workDates[j]))
                     {
                         return workDates[j];
                     }

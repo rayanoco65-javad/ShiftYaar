@@ -33,7 +33,7 @@ public static class ExactNightQuotaGuard
             }
         }
 
-
+        OptimizeSpread(solution, constraints);
 
         // پخش ممکن است جای خالی برای کسری باقی‌مانده باز کند — یک دور نهایی جبران
         for (var pass = 0; pass < 4; pass++)
@@ -291,23 +291,15 @@ public static class ExactNightQuotaGuard
                 RestoreSolutionFrom(solution, backup);
             }
 
-            // اگر گیرنده مستقیماً نتوانست شب مسئول مازاد را بگیرد (مثلاً به‌خاطر ترکیب مسئولین)،
-            // از چرخش ۲ مرحله‌ای مدیران استفاده کن:
-            // مدیر واسط intermediate شب date را از donor می‌گیرد، و شب دیگر خودش (date2) را به receiver می‌دهد.
-            if (ShiftManagerRules.IsManager(donor) && !ShiftManagerRules.IsManager(receiver))
+            // اگر گیرنده مستقیماً نتوانست شب مازاد را بگیرد،
+            // از چرخش ۲ مرحله‌ای استفاده کن: واسط intermediate شب date را از donor می‌گیرد، و شب دیگر خودش (date2) را به receiver می‌دهد.
+            foreach (var intermediate in constraints.UserConstraints.Where(u => u.IsActive && u.UserId != donor.UserId && u.UserId != receiver.UserId))
             {
-                foreach (var intermediate in constraints.UserConstraints.Where(u => u.IsActive && u.UserId != donor.UserId && u.UserId != receiver.UserId && ShiftManagerRules.IsManager(u)))
+                if (!IsPersonallyFeasibleNightDate(solution, constraints, intermediate, nightShift, date, holidayOnly: false)
+                    || !CanAcceptNightAfterClearing(solution, constraints, intermediate, nightShift, date))
                 {
-                    if (ShiftManagerRules.IsLevel1(donor) && !ShiftManagerRules.IsLevel1(intermediate))
-                    {
-                        continue;
-                    }
-
-                    if (!IsPersonallyFeasibleNightDate(solution, constraints, intermediate, nightShift, date, holidayOnly: false)
-                        || !CanAcceptNightAfterClearing(solution, constraints, intermediate, nightShift, date))
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
                     var intermediateNights = GetNights(solution, intermediate.UserId).Select(a => a.Date.Date).ToList();
                     foreach (var date2 in intermediateNights)
@@ -341,10 +333,9 @@ public static class ExactNightQuotaGuard
                     }
                 }
             }
-        }
 
-        return false;
-    }
+            return false;
+        }
 
     private static IEnumerable<(UserConstraint Donor, SaShiftAssignment Night)> EnumerateSurplusNights(
         ShiftSolution solution,
@@ -361,12 +352,18 @@ public static class ExactNightQuotaGuard
                 continue;
             }
 
+            var holidayNights = donor.ExactHolidayWeekendNightShiftCount.HasValue
+                ? nights.Count(a => constraints.IsHolidayWeekendNight(a.Date))
+                : 0;
+
             foreach (var night in nights
                          .Where(a => !IsProtected(constraints, donor.UserId, a))
                          .OrderByDescending(a => constraints.IsHolidayWeekendNight(a.Date) ? 0 : 1)
                          .ThenByDescending(a => a.Date))
             {
-                if (!CanDonateNight(solution, constraints, donor, night, forHolidayClaim: false))
+                if (donor.ExactHolidayWeekendNightShiftCount.HasValue
+                    && constraints.IsHolidayWeekendNight(night.Date)
+                    && holidayNights <= donor.ExactHolidayWeekendNightShiftCount.Value)
                 {
                     continue;
                 }
@@ -493,7 +490,8 @@ public static class ExactNightQuotaGuard
                     solution, constraints, donor, nightShift, depth + 1, visitedUsers, allowCriticalDonor);
             }
 
-            if (donorOk && CountNights(solution, user.UserId) > receiverBefore)
+            if (donorOk && CountNights(solution, user.UserId) > receiverBefore
+                && IsSlotManagerMixSatisfied(solution, constraints, nightShift, date))
             {
                 return true;
             }
