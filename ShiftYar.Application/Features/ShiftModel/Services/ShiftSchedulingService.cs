@@ -922,6 +922,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 ExactNightQuotaGuard.Enforce(solution, constraints);
             }
             EnsureExactNightQuotasOrThrow(scheduler, solution);
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
 
             var result = await ConvertSolutionToResultAsync(solution, constraints);
@@ -2898,6 +2899,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 ExactNightQuotaGuard.Enforce(solution, constraints);
             }
             EnsureExactNightQuotasOrThrow(scheduler, solution);
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
         }
 
@@ -2987,6 +2989,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 ExactNightQuotaGuard.Enforce(solution, constraints);
             }
             EnsureExactNightQuotasOrThrow(scheduler, solution);
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
             _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureSpecialtyCapacityNotExceeded...", request.DepartmentId);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
 

@@ -54,9 +54,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             RunAnnealingLoop(ref currentSolution, ref bestSolution, cancellationToken);
 
-            // تضمین نهایی: درخواست‌های تأییدشده آخرین حرف را می‌زنند
             ApplyMandatoryConstraints(bestSolution);
-
             PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: false);
 
             ExactNightQuotaGuard.Enforce(bestSolution, _constraints);
@@ -2256,11 +2254,14 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                 if (helper != null)
                 {
+                    var backupHelper = solution.Clone();
+                    MakeRoomInShift(solution, shiftReq, date, helper);
                     solution.AddAssignment(helper.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall: false);
                     if (IsSlotManagerMixSatisfied(solution, shiftReq, date))
                     {
                         return true;
                     }
+                    RestoreSolutionFromQuotaBackup(solution, backupHelper);
                 }
             }
 

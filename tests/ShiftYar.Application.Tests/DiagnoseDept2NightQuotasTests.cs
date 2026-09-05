@@ -40,6 +40,7 @@ public class DiagnoseDept2NightQuotasTests
         Trace.Listeners.Clear();
         Trace.Listeners.Add(new DefaultTraceListener());
         Trace.Listeners.Add(new ConsoleTraceListener());
+        ExactNightQuotaGuard.LogAction = msg => _output.WriteLine(msg);
         var nightReq = constraints.ShiftRequirements.First(s => s.ShiftLabel == ShiftLabel.Night);
         var totalQuota = constraints.UserConstraints.Sum(u => u.ExactNightShiftCount ?? 0);
         _output.WriteLine($"Total exact night quota requested: {totalQuota}");
@@ -71,8 +72,29 @@ public class DiagnoseDept2NightQuotasTests
             if (!ok)
             {
                 _output.WriteLine($"FAILED ON RUN {run}: {string.Join(" | ", unmetErrors)}");
+                _output.WriteLine("=== ASSIGNMENTS FROM 09-02 to 09-06 ===");
+                for (var cd = new DateTime(2026, 9, 2); cd <= new DateTime(2026, 9, 6); cd = cd.AddDays(1))
+                {
+                    var asgs = solution.Assignments.Values.Where(a => a.Date.Date == cd.Date && !a.IsOnCall)
+                        .OrderBy(a => a.ShiftLabel).ThenBy(a => a.UserId);
+                    _output.WriteLine($"  {cd:yyyy-MM-dd}: " + string.Join(", ", asgs.Select(a => $"{a.UserId}:{a.ShiftLabel}")));
+                }
+                foreach (var u in constraints.UserConstraints.Where(u => u.HasExactNightQuota))
+                {
+                    var cnt = solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+                    if (cnt < u.ExactNightShiftCount)
+                    {
+                        _output.WriteLine($"  Deficit User {u.UserId} ({u.UserName}): {cnt}/{u.ExactNightShiftCount}");
+                        _output.WriteLine($"    All assignments: {string.Join(", ", solution.GetUserAllAssignments(u.UserId).OrderBy(a => a.Date).Select(a => $"{a.Date:MM-dd}:{a.ShiftLabel}"))}");
+                        _output.WriteLine($"    UnavailableDates: {string.Join(", ", u.UnavailableDates.Select(d => d.ToString("MM-dd")))}");
+                        _output.WriteLine($"    UnavailableSlots: {string.Join(", ", u.UnavailableShiftSlots.Select(s => $"{s.Date:MM-dd}:{s.ShiftLabel}"))}");
+                    }
+                }
             }
             Assert.True(ok, $"Run {run} failed: " + string.Join("\n", unmetErrors));
+
+            var runOverCapacity = ShiftCoverageGuard.GetOverCapacityViolations(solution, constraints);
+            Assert.Empty(runOverCapacity);
         }
 
         var unmet = new List<string>();
@@ -118,6 +140,9 @@ public class DiagnoseDept2NightQuotasTests
         Assert.True(scheduler.AreExactNightQuotasSatisfied(solution, out var quotaErrors),
             "AreExactNightQuotasSatisfied should be true. Errors:\n" + string.Join("\n", quotaErrors));
         Assert.Empty(unmet);
+
+        var finalOverCapacity = ShiftCoverageGuard.GetOverCapacityViolations(solution, constraints);
+        Assert.Empty(finalOverCapacity);
     }
 
     private static ShiftConstraints BuildDept2Constraints()
