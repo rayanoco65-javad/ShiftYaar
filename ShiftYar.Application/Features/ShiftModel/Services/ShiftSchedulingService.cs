@@ -909,20 +909,26 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 cancellationToken);
             var statistics = scheduler.GetStatistics();
 
-            EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
-            EnsureExactNightQuotasOrThrow(scheduler, solution);
-            EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
-            EnsureHardDailyRulesOrThrow(solution, constraints);
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+            ExactNightQuotaGuard.Enforce(solution, constraints);
+
             scheduler.PerformFinalManagerMixRepairSweep(solution);
-            ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
+
             if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
             {
                 ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
                 ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
                 ExactNightQuotaGuard.Enforce(solution, constraints);
             }
-            EnsureExactNightQuotasOrThrow(scheduler, solution);
+
             ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+
+            EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
+            EnsureExactNightQuotasOrThrow(scheduler, solution);
+            EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
+            EnsureHardDailyRulesOrThrow(solution, constraints);
+            ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
 
             var result = await ConvertSolutionToResultAsync(solution, constraints);
@@ -2886,20 +2892,26 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 ExactNightQuotaGuard.Enforce(solution, constraints);
             }
 
-            EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
-            EnsureExactNightQuotasOrThrow(scheduler, solution);
-            EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
-            EnsureHardDailyRulesOrThrow(solution, constraints);
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+            ExactNightQuotaGuard.Enforce(solution, constraints);
+
             scheduler.PerformFinalManagerMixRepairSweep(solution);
-            ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
+
             if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
             {
                 ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
                 ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
                 ExactNightQuotaGuard.Enforce(solution, constraints);
             }
-            EnsureExactNightQuotasOrThrow(scheduler, solution);
+
             ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+
+            EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
+            EnsureExactNightQuotasOrThrow(scheduler, solution);
+            EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
+            EnsureHardDailyRulesOrThrow(solution, constraints);
+            ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
         }
 
@@ -2970,6 +2982,24 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             _logger.LogInformation("[Phase 3/4 Post-Validation Sweeps] Department {DepartmentId}: Executing mandatory constraint checks.", request.DepartmentId);
 
             // Optimize() already runs ApplyMandatoryConstraints once at the end.
+            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: Repairing night quotas and manager mix...", request.DepartmentId);
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+            ExactNightQuotaGuard.Enforce(solution, constraints);
+
+            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: PerformFinalManagerMixRepairSweep...", request.DepartmentId);
+            scheduler.PerformFinalManagerMixRepairSweep(solution);
+
+            if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
+            {
+                ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+                ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+                ExactNightQuotaGuard.Enforce(solution, constraints);
+            }
+
+            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: StripExcessCoverage...", request.DepartmentId);
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+
             _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureApprovedRequests...", request.DepartmentId);
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureExactNightQuotas...", request.DepartmentId);
@@ -2978,18 +3008,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
             _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureHardDailyRules...", request.DepartmentId);
             EnsureHardDailyRulesOrThrow(solution, constraints);
-            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: PerformFinalManagerMixRepairSweep...", request.DepartmentId);
-            scheduler.PerformFinalManagerMixRepairSweep(solution);
             _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: ShiftManagerMixGuard.EnsureOrThrow...", request.DepartmentId);
             ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
-            if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
-            {
-                ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
-                ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
-                ExactNightQuotaGuard.Enforce(solution, constraints);
-            }
-            EnsureExactNightQuotasOrThrow(scheduler, solution);
-            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
             _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureSpecialtyCapacityNotExceeded...", request.DepartmentId);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
 

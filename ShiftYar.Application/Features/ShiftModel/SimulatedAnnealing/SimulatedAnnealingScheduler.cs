@@ -2361,12 +2361,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 var finalAssignees = GetRegularAssignees(solution, shiftReq, date);
                 var isSat = IsSlotManagerMixSatisfied(solution, shiftReq, date);
 
-                if (isSat)
+                var noOverCap = !ShiftCoverageGuard.HasAnyOverCapacity(solution, _constraints);
+                if (isSat && noOverCap)
                 {
                     return true;
                 }
 
-                if (finalAssignees.Count(ShiftManagerRules.IsLevel1) >= reqL1 && finalAssignees.Count(ShiftManagerRules.IsManager) >= reqTotal)
+                if (finalAssignees.Count(ShiftManagerRules.IsLevel1) >= reqL1 && finalAssignees.Count(ShiftManagerRules.IsManager) >= reqTotal && noOverCap)
                 {
                     return true;
                 }

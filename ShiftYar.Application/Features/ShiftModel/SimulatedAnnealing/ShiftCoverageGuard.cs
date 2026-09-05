@@ -264,8 +264,54 @@ public static class ShiftCoverageGuard
             return false;
         }
 
-        return ApprovedRequestGuard.IsApprovedRequiredSlot(
-            user, assignment.Date, assignment.ShiftLabel, assignment.ShiftId);
+        if (ApprovedRequestGuard.IsApprovedRequiredSlot(
+            user, assignment.Date, assignment.ShiftLabel, assignment.ShiftId))
+        {
+            return true;
+        }
+
+        if (assignment.ShiftLabel == ShiftLabel.Night)
+        {
+            if (user.ExactNightShiftCount.HasValue)
+            {
+                var userNights = solution.GetUserAllAssignments(user.UserId)
+                    .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+                if (userNights <= user.ExactNightShiftCount.Value)
+                {
+                    return true;
+                }
+            }
+
+            if (user.ExactHolidayWeekendNightShiftCount.HasValue && constraints.IsHolidayWeekendNight(assignment.Date))
+            {
+                var userHolNights = solution.GetUserAllAssignments(user.UserId)
+                    .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall && constraints.IsHolidayWeekendNight(a.Date));
+                if (userHolNights <= user.ExactHolidayWeekendNightShiftCount.Value)
+                {
+                    return true;
+                }
+            }
+        }
+        else if (assignment.ShiftLabel == ShiftLabel.Morning && user.ExactMorningShiftCount.HasValue)
+        {
+            var userMornings = solution.GetUserAllAssignments(user.UserId)
+                .Count(a => a.ShiftLabel == ShiftLabel.Morning && !a.IsOnCall);
+            if (userMornings <= user.ExactMorningShiftCount.Value)
+            {
+                return true;
+            }
+        }
+        else if (assignment.ShiftLabel == ShiftLabel.Evening && user.ExactEveningShiftCount.HasValue)
+        {
+            var userEvenings = solution.GetUserAllAssignments(user.UserId)
+                .Count(a => a.ShiftLabel == ShiftLabel.Evening && !a.IsOnCall);
+            if (userEvenings <= user.ExactEveningShiftCount.Value)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

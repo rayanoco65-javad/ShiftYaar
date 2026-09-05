@@ -60,6 +60,18 @@ public class DiagnoseDept2NightQuotasTests
             solution = scheduler.Optimize();
             _output.WriteLine($"Optimize run {run} completed in {sw.ElapsedMilliseconds}ms");
 
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+            ExactNightQuotaGuard.Enforce(solution, constraints);
+            scheduler.PerformFinalManagerMixRepairSweep(solution);
+            if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
+            {
+                ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+                ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+                ExactNightQuotaGuard.Enforce(solution, constraints);
+            }
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+
             var totNights = solution.Assignments.Values.Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
             _output.WriteLine($"Run {run}: Total assigned nights in solution = {totNights} / 124");
             foreach (var u in constraints.UserConstraints.Where(u => u.HasExactNightQuota).OrderBy(u => u.UserId))

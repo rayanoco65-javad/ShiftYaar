@@ -749,7 +749,10 @@ public static class ExactNightQuotaGuard
             if (HasSpecialtyCapacity(solution, constraints, nightShift, date, user.SpecialtyId))
             {
                 AddNightSafely(solution, constraints, user, nightShift, date);
-                if (CountNights(solution, user.UserId) > receiverBefore)
+                if (CountNights(solution, user.UserId) > receiverBefore
+                    && IsSlotManagerMixSatisfied(solution, constraints, nightShift, date)
+                    && !ShiftCoverageGuard.HasAnyOverCapacity(solution, constraints)
+                    && !AdjacentShiftRestRules.HasForbiddenAdjacentPair(solution.GetUserAllAssignments(user.UserId), constraints.HardRules))
                 {
                     return true;
                 }
