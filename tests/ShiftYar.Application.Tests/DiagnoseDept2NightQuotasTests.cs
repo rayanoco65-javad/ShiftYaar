@@ -3,9 +3,16 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using ShiftYar.Application.Common.Utilities;
+using ShiftYar.Application.DTOs.ShiftModel.ShiftSchedulingModel;
+using ShiftYar.Application.Features.ShiftModel.Jobs;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
+using ShiftYar.Application.Interfaces.ShiftModel;
+using ShiftYar.Infrastructure;
 using Xunit;
 using Xunit.Abstractions;
 using static ShiftYar.Domain.Enums.ShiftModel.ShiftEnums;
@@ -19,6 +26,187 @@ public class DiagnoseDept2NightQuotasTests
     public DiagnoseDept2NightQuotasTests(ITestOutputHelper output)
     {
         _output = output;
+    }
+
+
+    [Fact]
+    public void Test_FromSavedConstraintsFile()
+    {
+        var path = @"C:\Users\Paria\.gemini\antigravity\brain\2e803de5-ca99-49b4-a5e7-a2d4d5605940\scratch\dept2_loaded_constraints.json";
+        var json = System.IO.File.ReadAllText(path);
+        var constraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(json);
+
+        _output.WriteLine($"Loaded constraints from file: {constraints.UserConstraints.Count} users");
+
+        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            MaxIterations = 4000,
+            MaxIterationsWithoutImprovement = 600
+        });
+
+        var solution = scheduler.Optimize();
+
+        ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+        ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+        scheduler.PerformFinalManagerMixRepairSweep(solution);
+        if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
+        {
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+            ExactNightQuotaGuard.Enforce(solution, constraints);
+        }
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+
+        var nightShift = constraints.ShiftRequirements.First(s => s.ShiftLabel == ShiftLabel.Night);
+        var u14 = constraints.UserConstraints.First(u => u.UserId == 14);
+        var u26 = constraints.UserConstraints.First(u => u.UserId == 26);
+
+        var u14Nights = solution.GetUserAllAssignments(14).Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall).OrderBy(a => a.Date).ToList();
+        _output.WriteLine($"=== USER 14 NIGHTS ({u14Nights.Count}/4) ===");
+        foreach (var n in u14Nights)
+        {
+            var others = solution.Assignments.Values.Where(a => a.Date.Date == n.Date.Date && a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall).ToList();
+            var details = string.Join(", ", others.Select(o => $"{o.UserId}(L={constraints.UserConstraints.First(u => u.UserId == o.UserId).ShiftManagerLevel})"));
+            var isReq = u14.RequiredShiftSlots.Any(r => r.Date.Date == n.Date.Date && r.ShiftLabel == ShiftLabel.Night);
+            _output.WriteLine($"  {n.Date:yyyy-MM-dd} (IsRequired={isReq}): [{details}]");
+        }
+
+        var u26Nights = solution.GetUserAllAssignments(26).Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall).OrderBy(a => a.Date).ToList();
+        _output.WriteLine($"=== KIMIA (26) NIGHTS ({u26Nights.Count}/9) ===");
+        foreach (var n in u26Nights)
+        {
+            _output.WriteLine($"  {n.Date:yyyy-MM-dd}");
+        }
+
+        _output.WriteLine("=== ALL 31 NIGHTS MANAGER MIX & ASSIGNMENTS ===");
+        for (var d = constraints.StartDate.Date; d <= constraints.EndDate.Date; d = d.AddDays(1))
+        {
+            var asgs = solution.Assignments.Values.Where(a => a.Date.Date == d.Date && a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall).ToList();
+            var l1Count = asgs.Count(a => constraints.UserConstraints.First(u => u.UserId == a.UserId).ShiftManagerLevel == 1);
+            var l2Count = asgs.Count(a => constraints.UserConstraints.First(u => u.UserId == a.UserId).ShiftManagerLevel == 2);
+            var details = string.Join(", ", asgs.Select(o => $"{o.UserId}(L={constraints.UserConstraints.First(u => u.UserId == o.UserId).ShiftManagerLevel})"));
+            _output.WriteLine($"  {d:yyyy-MM-dd}: L1={l1Count}, L2={l2Count}, Total={asgs.Count} | [{details}]");
+        }
+
+        Assert.True(scheduler.AreExactNightQuotasSatisfied(solution, out var quotaErrors), string.Join("; ", quotaErrors));
+    }
+
+    [Fact]
+    public async Task Test_LiaraDb_DirectScheduling()
+    {
+        var connStr = "Data Source=chogolisa.liara.cloud,34729;Initial Catalog=ShiftYarDb2;User Id=sa;Password=DwOr8efLcjXBVQ10jGYx5dhy;MultipleActiveResultSets=true;TrustServerCertificate=true";
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string>
+        {
+            ["ConnectionStrings:DefaultConnection"] = connStr
+        }).Build();
+        services.AddSingleton<IConfiguration>(config);
+        services.AddLogging(builder => builder.AddConsole());
+        services.AddInfrastructure(config);
+        services.AddApplication();
+        services.AddHttpContextAccessor();
+        services.AddSingleton<ISchedulingJobStore, SchedulingJobStore>();
+        var sp = services.BuildServiceProvider();
+        var service = (ShiftYar.Application.Features.ShiftModel.Services.ShiftSchedulingService)sp.GetRequiredService<IShiftSchedulingService>();
+
+        var req = new ShiftSchedulingRequestDto
+        {
+            DepartmentId = 2,
+            StartDate = "1405/06/01",
+            EndDate = "1405/06/31",
+            Algorithm = SchedulingAlgorithm.SimulatedAnnealing
+        };
+
+        _output.WriteLine("Calling LoadConstraintsAsync...");
+        var constraints = await service.LoadConstraintsAsync(req);
+        _output.WriteLine($"Loaded {constraints.UserConstraints.Count} users, {constraints.ShiftRequirements.Count} shift requirements.");
+
+        var json = System.Text.Json.JsonSerializer.Serialize(constraints, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        await System.IO.File.WriteAllTextAsync(@"C:\Users\Paria\.gemini\antigravity\brain\2e803de5-ca99-49b4-a5e7-a2d4d5605940\scratch\dept2_loaded_constraints.json", json);
+        _output.WriteLine("Saved constraints to scratch\\dept2_loaded_constraints.json");
+
+        ExactNightQuotaGuard.LogAction = msg => _output.WriteLine("[ExactNightQuotaGuard] " + msg);
+
+        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            MaxIterations = 4000,
+            MaxIterationsWithoutImprovement = 600
+        });
+
+        var sw = Stopwatch.StartNew();
+        var solution = scheduler.Optimize();
+        _output.WriteLine($"Optimize completed in {sw.ElapsedMilliseconds}ms");
+
+        void PrintNightCounts(string stage)
+        {
+            _output.WriteLine($"=== NIGHT COUNTS: {stage} ===");
+            var tot = solution.Assignments.Values.Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+            _output.WriteLine($"Total nights = {tot} / 124");
+            foreach (var u in constraints.UserConstraints.OrderBy(u => u.UserId))
+            {
+                var cnt = solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+                if (u.HasExactNightQuota || cnt > 0)
+                {
+                    _output.WriteLine($"  User {u.UserId} ({u.UserName}, L={u.ShiftManagerLevel}, SubType={u.ShiftSubType}): {cnt} / {u.ExactNightShiftCount?.ToString() ?? "NO_QUOTA"}");
+                }
+            }
+        }
+
+        PrintNightCounts("After Optimize");
+
+        _output.WriteLine("Running ForceSatisfyAllDeficits...");
+        ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+        PrintNightCounts("After ForceSatisfyAllDeficits 1");
+
+        _output.WriteLine("Running GlobalRebalanceNightQuotas...");
+        ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+        PrintNightCounts("After GlobalRebalanceNightQuotas 1");
+
+        _output.WriteLine("Running Enforce...");
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+        PrintNightCounts("After Enforce 1");
+
+        _output.WriteLine("Running PerformFinalManagerMixRepairSweep...");
+        scheduler.PerformFinalManagerMixRepairSweep(solution);
+        PrintNightCounts("After ManagerMixSweep");
+
+        if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
+        {
+            _output.WriteLine("Re-running repairs...");
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+            ExactNightQuotaGuard.Enforce(solution, constraints);
+            PrintNightCounts("After Second Repair");
+        }
+
+        _output.WriteLine("Running StripExcessCoverage...");
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+        PrintNightCounts("After StripExcessCoverage");
+
+        var kimia = constraints.UserConstraints.FirstOrDefault(u => u.UserId == 26);
+        if (kimia != null)
+        {
+            var kimiaNights = solution.GetUserAllAssignments(26).Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall).OrderBy(a => a.Date).ToList();
+            _output.WriteLine($"Kimia nights count = {kimiaNights.Count} / {kimia.ExactNightShiftCount}:");
+            foreach (var kn in kimiaNights)
+            {
+                _output.WriteLine($"  {kn.Date:yyyy-MM-dd}");
+            }
+            _output.WriteLine("Kimia unavailable slots:");
+            foreach (var un in kimia.UnavailableShiftSlots)
+            {
+                _output.WriteLine($"  {un.Date:yyyy-MM-dd} {un.ShiftLabel}");
+            }
+            _output.WriteLine("Kimia unavailable dates:");
+            foreach (var ud in kimia.UnavailableDates)
+            {
+                _output.WriteLine($"  {ud:yyyy-MM-dd}");
+            }
+        }
+
+        var ok = scheduler.AreExactNightQuotasSatisfied(solution, out var quotaErrors);
+        Assert.True(ok, "AreExactNightQuotasSatisfied failed: " + string.Join("; ", quotaErrors));
     }
 
     [Fact]
@@ -47,8 +235,9 @@ public class DiagnoseDept2NightQuotasTests
 
         ShiftSolution solution = null;
         SimulatedAnnealingScheduler scheduler = null;
-        for (int run = 1; run <= 3; run++)
+        for (int run = 1; run <= 1; run++)
         {
+            Console.Error.WriteLine($"=== RUN {run} START ===");
             _output.WriteLine($"=== RUN {run} ===");
             scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
             {
@@ -58,19 +247,27 @@ public class DiagnoseDept2NightQuotasTests
 
             var sw = Stopwatch.StartNew();
             solution = scheduler.Optimize();
+            Console.Error.WriteLine($"Optimize run {run} completed in {sw.ElapsedMilliseconds}ms");
             _output.WriteLine($"Optimize run {run} completed in {sw.ElapsedMilliseconds}ms");
 
+            Console.Error.WriteLine("Starting ForceSatisfyAllDeficits...");
             ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+            Console.Error.WriteLine("Starting GlobalRebalanceNightQuotas...");
             ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+            Console.Error.WriteLine("Starting Enforce...");
             ExactNightQuotaGuard.Enforce(solution, constraints);
+            Console.Error.WriteLine("Starting PerformFinalManagerMixRepairSweep...");
             scheduler.PerformFinalManagerMixRepairSweep(solution);
             if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
             {
+                Console.Error.WriteLine("Re-running repairs...");
                 ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
                 ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
                 ExactNightQuotaGuard.Enforce(solution, constraints);
             }
+            Console.Error.WriteLine("Starting StripExcessCoverage...");
             ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            Console.Error.WriteLine("Done post-processing!");
 
             var totNights = solution.Assignments.Values.Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
             _output.WriteLine($"Run {run}: Total assigned nights in solution = {totNights} / 124");
