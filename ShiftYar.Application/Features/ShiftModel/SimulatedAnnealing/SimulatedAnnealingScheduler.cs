@@ -67,6 +67,14 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: true);
             ShiftManagerMixGuard.EnsureOrThrow(bestSolution, _constraints);
 
+            if (!AreExactNightQuotasSatisfied(bestSolution, out _))
+            {
+                ExactNightQuotaGuard.ForceSatisfyAllDeficits(bestSolution, _constraints);
+                ExactNightQuotaGuard.GlobalRebalanceNightQuotas(bestSolution, _constraints);
+                ExactNightQuotaGuard.Enforce(bestSolution, _constraints);
+                ShiftManagerMixGuard.EnsureOrThrow(bestSolution, _constraints);
+            }
+
             ExactNightQuotaGuard.OptimizeSpread(bestSolution, _constraints);
             stopwatch.Stop();
             _statistics.ExecutionTime = stopwatch.Elapsed;
@@ -91,8 +99,22 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             RunAnnealingLoop(ref currentSolution, ref bestSolution, cancellationToken);
 
             ApplyMandatoryConstraints(bestSolution);
-            PerformFinalManagerMixRepairSweep(bestSolution);
+            PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: false);
+            ExactNightQuotaGuard.Enforce(bestSolution, _constraints);
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(bestSolution, _constraints);
+            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(bestSolution, _constraints);
+            ExactNightQuotaGuard.Enforce(bestSolution, _constraints);
+
+            PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: true);
             ShiftManagerMixGuard.EnsureOrThrow(bestSolution, _constraints);
+
+            if (!AreExactNightQuotasSatisfied(bestSolution, out _))
+            {
+                ExactNightQuotaGuard.ForceSatisfyAllDeficits(bestSolution, _constraints);
+                ExactNightQuotaGuard.GlobalRebalanceNightQuotas(bestSolution, _constraints);
+                ExactNightQuotaGuard.Enforce(bestSolution, _constraints);
+                ShiftManagerMixGuard.EnsureOrThrow(bestSolution, _constraints);
+            }
 
             ExactNightQuotaGuard.OptimizeSpread(bestSolution, _constraints);
             stopwatch.Stop();
@@ -1948,6 +1970,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         {
             ExactNightQuotaGuard.Enforce(solution, _constraints);
             ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, _constraints);
+            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, _constraints);
+            ExactNightQuotaGuard.Enforce(solution, _constraints);
         }
 
         /// <summary>
@@ -2177,6 +2201,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         }
                     }
                 }
+            }
+
+            // اگر در حین ترمیم مسئول شیفت، کاربری از شیفت شب حذف شده و کسری پیدا کرده است، بلافاصله جبران شود
+            if (!AllExactNightQuotasMet(solution))
+            {
+                RestoreDeficitNightQuotas(solution);
             }
 
             // ۴) گام چهارم (عدم امکان فیزیکی مطلق): در صورت عدم تخصیص، تولید Audit Trail ساختاریافته و پرتاب استثنای تمیز

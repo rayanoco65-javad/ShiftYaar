@@ -44,23 +44,35 @@ public class DiagnoseDept2NightQuotasTests
         var totalQuota = constraints.UserConstraints.Sum(u => u.ExactNightShiftCount ?? 0);
         _output.WriteLine($"Total exact night quota requested: {totalQuota}");
 
-        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
-        {
-            MaxIterations = 4000,
-            MaxIterationsWithoutImprovement = 600
-        });
-
-        var sw = Stopwatch.StartNew();
         ShiftSolution solution = null;
-        try
+        SimulatedAnnealingScheduler scheduler = null;
+        for (int run = 1; run <= 3; run++)
         {
+            _output.WriteLine($"=== RUN {run} ===");
+            scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+            {
+                MaxIterations = 4000,
+                MaxIterationsWithoutImprovement = 600
+            });
+
+            var sw = Stopwatch.StartNew();
             solution = scheduler.Optimize();
-            _output.WriteLine($"Optimize completed in {sw.ElapsedMilliseconds}ms");
-        }
-        catch (Exception ex)
-        {
-            _output.WriteLine("EXCEPTION CAUGHT: " + ex.Message);
-            throw;
+            _output.WriteLine($"Optimize run {run} completed in {sw.ElapsedMilliseconds}ms");
+
+            var totNights = solution.Assignments.Values.Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+            _output.WriteLine($"Run {run}: Total assigned nights in solution = {totNights} / 124");
+            foreach (var u in constraints.UserConstraints.Where(u => u.HasExactNightQuota).OrderBy(u => u.UserId))
+            {
+                var cnt = solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+                _output.WriteLine($"  User {u.UserId} ({u.UserName}): {cnt} / {u.ExactNightShiftCount}");
+            }
+
+            var ok = scheduler.AreExactNightQuotasSatisfied(solution, out var unmetErrors);
+            if (!ok)
+            {
+                _output.WriteLine($"FAILED ON RUN {run}: {string.Join(" | ", unmetErrors)}");
+            }
+            Assert.True(ok, $"Run {run} failed: " + string.Join("\n", unmetErrors));
         }
 
         var unmet = new List<string>();

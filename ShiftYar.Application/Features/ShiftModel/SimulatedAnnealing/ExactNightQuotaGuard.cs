@@ -49,7 +49,10 @@ public static class ExactNightQuotaGuard
                 EnforceForUser(solution, constraints, user, nightShift);
                 if (HasNightQuotaDeficit(solution, user))
                 {
-                    TrySatisfyDeficitViaOpenSlotBridge(solution, constraints, user, nightShift);
+                    if (!TrySatisfyDeficitViaOpenSlotBridge(solution, constraints, user, nightShift))
+                    {
+                        TryClaimViaSurplusRotation(solution, constraints, user, nightShift);
+                    }
                 }
             }
         }
@@ -92,7 +95,10 @@ public static class ExactNightQuotaGuard
                 EnforceForUser(solution, constraints, user, nightShift);
                 if (HasNightQuotaDeficit(solution, user))
                 {
-                    TrySatisfyDeficitViaOpenSlotBridge(solution, constraints, user, nightShift);
+                    if (!TrySatisfyDeficitViaOpenSlotBridge(solution, constraints, user, nightShift))
+                    {
+                        TryClaimViaSurplusRotation(solution, constraints, user, nightShift);
+                    }
                 }
             }
 
@@ -331,6 +337,7 @@ public static class ExactNightQuotaGuard
                 var candidateUsers = constraints.UserConstraints
                     .Where(u => u.IsActive && ShiftEligibilityResolver.MayEverTakeLabel(u, ShiftLabel.Night))
                     .OrderByDescending(u => HasNightQuotaDeficit(solution, u) ? 100 : 0)
+                    .ThenByDescending(u => ShiftManagerRules.IsLevel1(u) ? 2 : ShiftManagerRules.IsManager(u) ? 1 : 0)
                     .ThenBy(u => CountNights(solution, u.UserId))
                     .ToList();
 
@@ -361,7 +368,8 @@ public static class ExactNightQuotaGuard
                     var restOk = !AdjacentShiftRestRules.HasForbiddenAdjacentPair(solution.GetUserAllAssignments(user.UserId), constraints.HardRules);
                     var runOk = !constraints.HardRules.EnforceMaxConsecutiveShifts
                         || MaxConsecutiveWorkdayRules.GetMaxConsecutiveWorkRun(solution, user.UserId) <= user.MaxConsecutiveShifts;
-                    var mixOk = IsSlotManagerMixSatisfied(solution, constraints, nightShift, vacantDate);
+                    var mixBefore = IsSlotManagerMixSatisfied(backup, constraints, nightShift, vacantDate);
+                    var mixOk = IsSlotManagerMixSatisfied(solution, constraints, nightShift, vacantDate) || !mixBefore;
 
                     if (restOk && runOk && mixOk)
                     {
@@ -507,6 +515,86 @@ public static class ExactNightQuotaGuard
                     }
 
                     RestoreSolutionFrom(solution, backup2);
+                }
+            }
+
+            // اگر با چرخش ۱ یا ۲ مرحله‌ای میسر نشد، چرخش ۳ مرحله‌ای را بررسی کن:
+            // donor (date) -> int1 (date2) -> int2 (date3) -> receiver
+            foreach (var int1 in constraints.UserConstraints.Where(u => u.IsActive && u.UserId != donor.UserId && u.UserId != receiver.UserId))
+            {
+                var int1MinGap = ResolveNightSpacingGap(constraints, int1);
+                if (ViolatesNightSpacing(solution, constraints, int1, date, int1MinGap)) continue;
+                if (!IsPersonallyFeasibleNightDate(solution, constraints, int1, nightShift, date, holidayOnly: false)
+                    || !CanAcceptNightAfterClearing(solution, constraints, int1, nightShift, date)) continue;
+
+                var int1Nights = GetNights(solution, int1.UserId).Select(a => a.Date.Date).ToList();
+                foreach (var date2 in int1Nights)
+                {
+                    if (date2 == date) continue;
+                    if (solution.TryGetAssignment(int1.UserId, nightShift.ShiftId, date2, out var int1Asg) && IsProtected(constraints, int1.UserId, int1Asg)) continue;
+
+                    foreach (var int2 in constraints.UserConstraints.Where(u => u.IsActive && u.UserId != donor.UserId && u.UserId != receiver.UserId && u.UserId != int1.UserId))
+                    {
+                        var int2MinGap = ResolveNightSpacingGap(constraints, int2);
+                        if (ViolatesNightSpacing(solution, constraints, int2, date2, int2MinGap)) continue;
+                        if (!IsPersonallyFeasibleNightDate(solution, constraints, int2, nightShift, date2, holidayOnly: false)
+                            || !CanAcceptNightAfterClearing(solution, constraints, int2, nightShift, date2)) continue;
+
+                        var int2Nights = GetNights(solution, int2.UserId).Select(a => a.Date.Date).ToList();
+                        foreach (var date3 in int2Nights)
+                        {
+                            if (date3 == date || date3 == date2) continue;
+                            if (solution.TryGetAssignment(int2.UserId, nightShift.ShiftId, date3, out var int2Asg) && IsProtected(constraints, int2.UserId, int2Asg)) continue;
+
+                            if (ViolatesNightSpacing(solution, constraints, receiver, date3, receiverMinGap)) continue;
+                            if (!IsPersonallyFeasibleNightDate(solution, constraints, receiver, nightShift, date3, holidayOnly: false)
+                                || !CanAcceptNightAfterClearing(solution, constraints, receiver, nightShift, date3)) continue;
+
+                            var backup3 = solution.Clone();
+                            solution.UnlockSkeletonAssignment(donor.UserId, night.ShiftId, night.Date);
+                            solution.RemoveAssignment(donor.UserId, night.ShiftId, night.Date, force: true);
+                            AddNightSafely(solution, constraints, int1, nightShift, date);
+
+                            solution.UnlockSkeletonAssignment(int1.UserId, night.ShiftId, date2);
+                            solution.RemoveAssignment(int1.UserId, night.ShiftId, date2, force: true);
+                            AddNightSafely(solution, constraints, int2, nightShift, date2);
+
+                            solution.UnlockSkeletonAssignment(int2.UserId, night.ShiftId, date3);
+                            solution.RemoveAssignment(int2.UserId, night.ShiftId, date3, force: true);
+                            AddNightSafely(solution, constraints, receiver, nightShift, date3);
+
+                            var countOk = CountNights(solution, receiver.UserId) > receiverBefore
+                                && CountNights(solution, int2.UserId) >= (int2.ExactNightShiftCount ?? 0)
+                                && CountNights(solution, int1.UserId) >= (int1.ExactNightShiftCount ?? 0)
+                                && CountNights(solution, donor.UserId) >= (donor.ExactNightShiftCount ?? 0);
+
+                            var mix1 = IsSlotManagerMixSatisfied(solution, constraints, nightShift, date);
+                            var mix2 = IsSlotManagerMixSatisfied(solution, constraints, nightShift, date2);
+                            var mix3 = IsSlotManagerMixSatisfied(solution, constraints, nightShift, date3);
+
+                            var spInt1 = !ViolatesNightSpacing(solution, constraints, int1, date, int1MinGap);
+                            var spInt2 = !ViolatesNightSpacing(solution, constraints, int2, date2, int2MinGap);
+                            var spRec = !ViolatesNightSpacing(solution, constraints, receiver, date3, receiverMinGap);
+
+                            var restInt1 = !AdjacentShiftRestRules.HasForbiddenAdjacentPair(solution.GetUserAllAssignments(int1.UserId), constraints.HardRules);
+                            var restInt2 = !AdjacentShiftRestRules.HasForbiddenAdjacentPair(solution.GetUserAllAssignments(int2.UserId), constraints.HardRules);
+                            var restRec = !AdjacentShiftRestRules.HasForbiddenAdjacentPair(solution.GetUserAllAssignments(receiver.UserId), constraints.HardRules);
+
+                            var runInt1 = !constraints.HardRules.EnforceMaxConsecutiveShifts
+                                || MaxConsecutiveWorkdayRules.GetMaxConsecutiveWorkRun(solution, int1.UserId) <= int1.MaxConsecutiveShifts;
+                            var runInt2 = !constraints.HardRules.EnforceMaxConsecutiveShifts
+                                || MaxConsecutiveWorkdayRules.GetMaxConsecutiveWorkRun(solution, int2.UserId) <= int2.MaxConsecutiveShifts;
+                            var runRec = !constraints.HardRules.EnforceMaxConsecutiveShifts
+                                || MaxConsecutiveWorkdayRules.GetMaxConsecutiveWorkRun(solution, receiver.UserId) <= receiver.MaxConsecutiveShifts;
+
+                            if (countOk && mix1 && mix2 && mix3 && spInt1 && spInt2 && spRec && restInt1 && restInt2 && restRec && runInt1 && runInt2 && runRec)
+                            {
+                                return true;
+                            }
+
+                            RestoreSolutionFrom(solution, backup3);
+                        }
+                    }
                 }
             }
         }
@@ -2340,28 +2428,33 @@ public static class ExactNightQuotaGuard
                         continue;
                     }
 
-                    var occupant = solution.GetShiftAssignments(nightShift.ShiftId, target)
-                        .FirstOrDefault(a => !a.IsOnCall && a.UserId != user.UserId);
-                    if (occupant == null)
+                    var occupants = solution.GetShiftAssignments(nightShift.ShiftId, target)
+                        .Where(a => !a.IsOnCall && a.UserId != user.UserId)
+                        .ToList();
+                    if (occupants.Count == 0)
                     {
                         continue;
                     }
 
-                    var other = constraints.UserConstraints.FirstOrDefault(u => u.UserId == occupant.UserId);
-                    if (other == null || !CanDonateNight(solution, constraints, other, occupant))
+                    foreach (var occupant in occupants)
                     {
-                        continue;
-                    }
+                        var other = constraints.UserConstraints.FirstOrDefault(u => u.UserId == occupant.UserId);
+                        if (other == null || !CanDonateNight(solution, constraints, other, occupant))
+                        {
+                            continue;
+                        }
 
-                    if (!CanSwapNight(solution, constraints, user, other, night.Date.Date, target, nightShift, minGap))
-                    {
-                        continue;
-                    }
+                        if (!CanSwapNight(solution, constraints, user, other, night.Date.Date, target, nightShift, minGap))
+                        {
+                            continue;
+                        }
 
-                    bestPenalty = projectedPenalty;
-                    bestFrom = night;
-                    bestTo = target;
-                    swapUserId = other.UserId;
+                        bestPenalty = projectedPenalty;
+                        bestFrom = night;
+                        bestTo = target;
+                        swapUserId = other.UserId;
+                        break;
+                    }
                 }
             }
 
@@ -2421,6 +2514,12 @@ public static class ExactNightQuotaGuard
             return false;
         }
 
+        if (other.UnavailableShiftSlots.Any(s => s.Date.Date == userFrom && s.ShiftLabel == ShiftLabel.Night) ||
+            user.UnavailableShiftSlots.Any(s => s.Date.Date == userTo && s.ShiftLabel == ShiftLabel.Night))
+        {
+            return false;
+        }
+
         if (AdjacentShiftRestRules.WouldConflict(
                 solution.GetUserAllAssignments(user.UserId).Where(a => !(a.ShiftLabel == ShiftLabel.Night && a.Date.Date == userFrom)),
                 userTo, ShiftLabel.Night, constraints))
@@ -2439,6 +2538,15 @@ public static class ExactNightQuotaGuard
             .Where(a => a.Date.Date != userFrom)
             .Select(a => a.Date.Date);
         if (userOtherNights.Any(d => Math.Abs((d - userTo).Days) <= minGap))
+        {
+            return false;
+        }
+
+        var otherMinGap = ResolveNightSpacingGap(constraints, other);
+        var otherOtherNights = GetNights(solution, other.UserId)
+            .Where(a => a.Date.Date != userTo)
+            .Select(a => a.Date.Date);
+        if (otherOtherNights.Any(d => Math.Abs((d - userFrom).Days) <= otherMinGap))
         {
             return false;
         }
