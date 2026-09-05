@@ -182,7 +182,7 @@ public static class ProductivityHourFillGuard
                 foreach (var d in donors)
                 {
                     foreach (var assignment in solution.GetUserAllAssignments(d.UserId)
-                                 .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, solution, a))
+                                 .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, solution, a, receiver))
                                  .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, d, a))
                                  .Where(a => ShiftEligibilityResolver.MayEverTakeLabel(receiver, a.ShiftLabel))
                                  .OrderBy(a => DonationPriorityForReceiver(receiver, a))
@@ -199,6 +199,7 @@ public static class ProductivityHourFillGuard
                             continue;
                         }
 
+                        var wasSkeleton = solution.IsLockedSkeleton(d.UserId, assignment.ShiftId, assignment.Date) || assignment.IsSkeleton;
                         solution.RemoveAssignment(d.UserId, assignment.ShiftId, assignment.Date);
                         solution.AddAssignment(
                             receiver.UserId,
@@ -206,6 +207,15 @@ public static class ProductivityHourFillGuard
                             assignment.Date,
                             assignment.ShiftLabel,
                             assignment.IsOnCall);
+                        if (wasSkeleton)
+                        {
+                            var newAsg = solution.GetUserAssignments(receiver.UserId, assignment.Date)
+                                .FirstOrDefault(a => a.ShiftId == assignment.ShiftId);
+                            if (newAsg != null)
+                            {
+                                newAsg.IsSkeleton = true;
+                            }
+                        }
                         moved = true;
                         break;
                     }
@@ -509,7 +519,7 @@ public static class ProductivityHourFillGuard
                 foreach (var donor in donors.Where(d => d.UserId != receiver.UserId))
                 {
                     foreach (var assignment in solution.GetUserAllAssignments(donor.UserId)
-                                 .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, solution, a))
+                                 .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, solution, a, receiver))
                                  .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, donor, a))
                                  .Where(a => ShiftEligibilityResolver.MayEverTakeLabel(receiver, a.ShiftLabel))
                                  .OrderBy(a => DonationPriorityForReceiver(receiver, a))
@@ -535,6 +545,7 @@ public static class ProductivityHourFillGuard
                             continue;
                         }
 
+                        var wasSkeleton = solution.IsLockedSkeleton(donor.UserId, assignment.ShiftId, assignment.Date) || assignment.IsSkeleton;
                         solution.RemoveAssignment(donor.UserId, assignment.ShiftId, assignment.Date);
                         solution.AddAssignment(
                             receiver.UserId,
@@ -542,6 +553,15 @@ public static class ProductivityHourFillGuard
                             assignment.Date,
                             assignment.ShiftLabel,
                             assignment.IsOnCall);
+                        if (wasSkeleton)
+                        {
+                            var newAsg = solution.GetUserAssignments(receiver.UserId, assignment.Date)
+                                .FirstOrDefault(a => a.ShiftId == assignment.ShiftId);
+                            if (newAsg != null)
+                            {
+                                newAsg.IsSkeleton = true;
+                            }
+                        }
                         moved = true;
                         break;
                     }
@@ -1317,7 +1337,8 @@ public static class ProductivityHourFillGuard
     private static bool IsProtectedAssignment(
         ShiftConstraints constraints,
         ShiftSolution solution,
-        SaShiftAssignment assignment)
+        SaShiftAssignment assignment,
+        UserConstraint? receiver = null)
     {
         var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == assignment.UserId);
         if (user == null)
@@ -1325,9 +1346,38 @@ public static class ProductivityHourFillGuard
             return false;
         }
 
-        return user.RequiredShiftSlots.Any(s =>
-            s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel)
-            || solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
+        if (user.RequiredShiftSlots.Any(s =>
+            s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel))
+        {
+            return true;
+        }
+
+        var isSkeleton = solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
             || assignment.IsSkeleton;
+        if (!isSkeleton)
+        {
+            return false;
+        }
+
+        if (receiver == null)
+        {
+            return true;
+        }
+
+        var shiftReq = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftId == assignment.ShiftId);
+        if (shiftReq != null && ShiftManagerRules.RequiresAnyManager(shiftReq))
+        {
+            var isDonorLevel1 = ShiftManagerRules.IsLevel1(user);
+            if (isDonorLevel1 && !ShiftManagerRules.IsLevel1(receiver))
+            {
+                return true;
+            }
+            if (!ShiftManagerRules.IsManager(receiver))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

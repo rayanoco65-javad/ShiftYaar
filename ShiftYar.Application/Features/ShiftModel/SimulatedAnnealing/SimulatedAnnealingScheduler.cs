@@ -3281,7 +3281,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .OrderBy(u =>
                 {
                     if (needLevel1) return 0;
-                    if (shiftReq.ShiftLabel == ShiftLabel.Night)
+                    if (shiftReq.ShiftLabel == ShiftLabel.Night || shiftReq.ShiftLabel == ShiftLabel.Evening)
                     {
                         return ShiftManagerRules.IsLevel1(u) ? 1 : 0;
                     }
@@ -3289,28 +3289,23 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 })
                 .ThenBy(u =>
                 {
-                    if (shiftReq.ShiftLabel == ShiftLabel.Night && u.ExactNightShiftCount.HasValue)
+                    if (u.ProductivityRequiredHours.HasValue && u.ProductivityRequiredHours.Value > 0)
                     {
-                        var otherReq = u.RequiredShiftSlots.Count(r => r.ShiftLabel == ShiftLabel.Night && r.Date.Date != date.Date);
-                        var nonReq = solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall && a.Date.Date != date.Date && !u.RequiredShiftSlots.Any(r => r.ShiftLabel == ShiftLabel.Night && r.Date.Date == a.Date.Date));
-                        var remainingCap = u.ExactNightShiftCount.Value - (otherReq + nonReq);
-                        return remainingCap > 0 ? 0 : 1;
-                    }
-                    if (shiftReq.ShiftLabel == ShiftLabel.Evening && u.ExactNightShiftCount.HasValue)
-                    {
-                        var nights = CountUserLabelAssignments(solution, u.UserId, ShiftLabel.Night);
-                        var deficit = u.ExactNightShiftCount.Value - nights;
-                        return deficit > 0 ? 1 : 0;
+                        var minHours = solution.GetUserAllAssignments(u.UserId).Count * 7.0;
+                        if (minHours >= (double)u.ProductivityRequiredHours.Value)
+                        {
+                            return 1;
+                        }
                     }
                     return 0;
                 })
+                .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
                 .ThenBy(u => CountUserLabelAssignments(solution, u.UserId, shiftReq.ShiftLabel))
                 .ThenBy(u => HasRecentSameLabel(solution, u.UserId, date, shiftReq.ShiftLabel) ? 1 : 0)
                 .ThenBy(u => AdjacentShiftRestRules.WouldConflict(
                     solution.GetUserAllAssignments(u.UserId), date, shiftReq.ShiftLabel, _constraints)
                     ? 1
                     : 0)
-                .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
                 .ThenBy(u => u.UserId);
 
         private static int CountUserLabelAssignments(ShiftSolution solution, int userId, ShiftLabel label) =>

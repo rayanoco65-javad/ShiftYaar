@@ -194,7 +194,8 @@ public static class MorningEveningBalanceGuard
             .ToList();
 
     private static bool CanBalanceMorningEvening(UserConstraint user) =>
-        ShiftEligibilityResolver.SupportsMorningEveningCombo(user);
+        ShiftEligibilityResolver.MayEverTakeLabel(user, ShiftLabel.Morning)
+        && ShiftEligibilityResolver.MayEverTakeLabel(user, ShiftLabel.Evening);
 
     private static IEnumerable<(UserConstraint MHeavy, UserConstraint EHeavy)> BuildImbalancedPairs(
         ShiftSolution solution,
@@ -305,8 +306,21 @@ public static class MorningEveningBalanceGuard
             return false;
         }
 
+        if (!WouldPreserveManagerMix(solution, constraints, eveningAssignment.ShiftId, eveningAssignment.Date, eHeavyUser.UserId, mHeavyUser.UserId))
+        {
+            return false;
+        }
+
+        if (!WouldPreserveManagerMix(solution, constraints, morningAssignment.ShiftId, morningAssignment.Date, mHeavyUser.UserId, eHeavyUser.UserId))
+        {
+            return false;
+        }
+
         var beforeViolation = GetMorningEveningViolation(solution, mHeavyUser, limits)
                               + GetMorningEveningViolation(solution, eHeavyUser, limits);
+
+        var mWasSkeleton = solution.IsLockedSkeleton(mHeavyUser.UserId, morningAssignment.ShiftId, morningAssignment.Date) || morningAssignment.IsSkeleton;
+        var eWasSkeleton = solution.IsLockedSkeleton(eHeavyUser.UserId, eveningAssignment.ShiftId, eveningAssignment.Date) || eveningAssignment.IsSkeleton;
 
         solution.RemoveAssignment(mHeavyUser.UserId, morningAssignment.ShiftId, morningAssignment.Date);
         solution.RemoveAssignment(eHeavyUser.UserId, eveningAssignment.ShiftId, eveningAssignment.Date);
@@ -322,6 +336,17 @@ public static class MorningEveningBalanceGuard
             eveningAssignment.Date,
             ShiftLabel.Evening,
             isOnCall: false);
+
+        if (mWasSkeleton)
+        {
+            var asg = solution.GetUserAssignments(eHeavyUser.UserId, morningAssignment.Date).FirstOrDefault(a => a.ShiftId == morningAssignment.ShiftId);
+            if (asg != null) asg.IsSkeleton = true;
+        }
+        if (eWasSkeleton)
+        {
+            var asg = solution.GetUserAssignments(mHeavyUser.UserId, eveningAssignment.Date).FirstOrDefault(a => a.ShiftId == eveningAssignment.ShiftId);
+            if (asg != null) asg.IsSkeleton = true;
+        }
 
         return AcceptOrRevertMorningEveningSwap(
             solution,
@@ -392,8 +417,21 @@ public static class MorningEveningBalanceGuard
             return false;
         }
 
+        if (!WouldPreserveManagerMix(solution, constraints, eveningAssignment.ShiftId, eveningAssignment.Date, eHeavyUser.UserId, mHeavyUser.UserId))
+        {
+            return false;
+        }
+
+        if (!WouldPreserveManagerMix(solution, constraints, morningAssignment.ShiftId, morningAssignment.Date, mHeavyUser.UserId, eHeavyUser.UserId))
+        {
+            return false;
+        }
+
         var beforeViolation = GetMorningEveningViolation(solution, mHeavyUser, limits)
                               + GetMorningEveningViolation(solution, eHeavyUser, limits);
+
+        var mWasSkeleton = solution.IsLockedSkeleton(mHeavyUser.UserId, morningAssignment.ShiftId, morningAssignment.Date) || morningAssignment.IsSkeleton;
+        var eWasSkeleton = solution.IsLockedSkeleton(eHeavyUser.UserId, eveningAssignment.ShiftId, eveningAssignment.Date) || eveningAssignment.IsSkeleton;
 
         solution.RemoveAssignment(mHeavyUser.UserId, morningAssignment.ShiftId, morningAssignment.Date);
         solution.RemoveAssignment(eHeavyUser.UserId, eveningAssignment.ShiftId, eveningAssignment.Date);
@@ -409,6 +447,17 @@ public static class MorningEveningBalanceGuard
             eveningAssignment.Date,
             ShiftLabel.Evening,
             isOnCall: false);
+
+        if (mWasSkeleton)
+        {
+            var asg = solution.GetUserAssignments(eHeavyUser.UserId, morningAssignment.Date).FirstOrDefault(a => a.ShiftId == morningAssignment.ShiftId);
+            if (asg != null) asg.IsSkeleton = true;
+        }
+        if (eWasSkeleton)
+        {
+            var asg = solution.GetUserAssignments(mHeavyUser.UserId, eveningAssignment.Date).FirstOrDefault(a => a.ShiftId == eveningAssignment.ShiftId);
+            if (asg != null) asg.IsSkeleton = true;
+        }
 
         return AcceptOrRevertMorningEveningSwap(
             solution,
@@ -567,10 +616,39 @@ public static class MorningEveningBalanceGuard
         return true;
     }
 
+    private static bool WouldPreserveManagerMix(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        int shiftId,
+        DateTime date,
+        int donorUserId,
+        int receiverUserId)
+    {
+        var shiftReq = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftId == shiftId);
+        if (shiftReq == null || !ShiftManagerRules.RequiresAnyManager(shiftReq))
+        {
+            return true;
+        }
+
+        var (requiredTotal, minLevel1) = ShiftManagerRules.GetRequirement(shiftReq);
+        var assignees = solution.GetShiftAssignments(shiftId, date)
+            .Where(a => !a.IsOnCall && a.UserId != donorUserId)
+            .Select(a => constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId))
+            .Where(u => u != null)
+            .Select(u => u!)
+            .ToList();
+
+        var receiver = constraints.UserConstraints.FirstOrDefault(u => u.UserId == receiverUserId);
+        if (receiver != null)
+        {
+            assignees.Add(receiver);
+        }
+
+        return ShiftManagerRules.IsSatisfied(assignees, requiredTotal, minLevel1);
+    }
+
     private static bool IsProtected(ShiftConstraints constraints, ShiftSolution solution, UserConstraint user, SaShiftAssignment assignment) =>
-        solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
-        || assignment.IsSkeleton
-        || user.RequiredShiftSlots.Any(s =>
+        user.RequiredShiftSlots.Any(s =>
             s.Date.Date == assignment.Date.Date &&
             s.ShiftLabel == assignment.ShiftLabel &&
             (!s.ShiftId.HasValue || s.ShiftId.Value == assignment.ShiftId));

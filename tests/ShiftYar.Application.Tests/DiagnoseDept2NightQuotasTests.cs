@@ -30,6 +30,69 @@ public class DiagnoseDept2NightQuotasTests
 
 
     [Fact]
+    public void Test_AnalyzeShiftDistribution()
+    {
+        var path = @"C:\Users\Paria\.gemini\antigravity\brain\2e803de5-ca99-49b4-a5e7-a2d4d5605940\scratch\dept2_loaded_constraints.json";
+        var json = System.IO.File.ReadAllText(path);
+        var constraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(json)!;
+
+        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            MaxIterations = 4000,
+            MaxIterationsWithoutImprovement = 600
+        });
+
+        var solution = scheduler.Optimize();
+
+        ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+        ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+        scheduler.PerformFinalManagerMixRepairSweep(solution);
+        if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
+        {
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+            ExactNightQuotaGuard.Enforce(solution, constraints);
+        }
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+
+        _output.WriteLine("========================================================================================================================");
+        _output.WriteLine(string.Format("{0,-3} | {1,-20} | {2,-6} | {3,-4} {4,-4} {5,-4} | {6,-4} {7,-4} {8,-4} = {9,-4} | {10,-11} | {11,-6} {12,-6} {13,-6} | {14}",
+            "ID", "Name", "Exp", "ReqM", "ReqE", "ReqN", "AssM", "AssE", "AssN", "Tot", "Holidays", "Worked", "ReqHrs", "Diff", "ExtraShiftsBeyondReqs"));
+        _output.WriteLine("========================================================================================================================");
+
+        foreach (var u in constraints.UserConstraints.OrderBy(u => u.UserId))
+        {
+            var asgs = solution.GetUserAllAssignments(u.UserId).Where(a => !a.IsOnCall).ToList();
+            var assM = asgs.Count(a => a.ShiftLabel == ShiftLabel.Morning);
+            var assE = asgs.Count(a => a.ShiftLabel == ShiftLabel.Evening);
+            var assN = asgs.Count(a => a.ShiftLabel == ShiftLabel.Night);
+            var tot = asgs.Count;
+
+            var reqM = u.RequiredShiftSlots.Count(r => r.ShiftLabel == ShiftLabel.Morning);
+            var reqE = u.RequiredShiftSlots.Count(r => r.ShiftLabel == ShiftLabel.Evening);
+            var reqN = u.RequiredShiftSlots.Count(r => r.ShiftLabel == ShiftLabel.Night);
+            var totReq = u.RequiredShiftSlots.Count;
+
+            // Extra discretionary shifts (assigned shifts on dates/labels that were NOT in RequiredShiftSlots)
+            var extraShifts = asgs.Count(a => !u.RequiredShiftSlots.Any(r => r.ShiftLabel == a.ShiftLabel && r.Date.Date == a.Date.Date));
+
+            // Calculate worked hours using scheduler reflection or formula
+            var calcMethod = typeof(SimulatedAnnealingScheduler).GetMethod("CalculateUserWorkedHours", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var workedHours = (double)calcMethod!.Invoke(scheduler, new object[] { asgs })!;
+            var reqHours = (double)(u.ProductivityRequiredHours ?? 0m);
+            var diff = workedHours - reqHours;
+
+            var holM = asgs.Count(a => constraints.HolidayDates.Any(h => h.Date == a.Date.Date) && a.ShiftLabel == ShiftLabel.Morning);
+            var holE = asgs.Count(a => constraints.HolidayDates.Any(h => h.Date == a.Date.Date) && a.ShiftLabel == ShiftLabel.Evening);
+
+            _output.WriteLine(string.Format("{0,-3} | {1,-20} | Exp={2,-2} | {3,-4} {4,-4} {5,-4} | {6,-4} {7,-4} {8,-4} = {9,-4} | HolM={10} HolE={11} | {12,6:F1} {13,6:F1} {14,6:F1} | Extra={15}",
+                u.UserId, u.UserName, u.ExperienceYears, reqM, reqE, reqN, assM, assE, assN, tot, holM, holE, workedHours, reqHours, diff, extraShifts));
+        }
+        _output.WriteLine("========================================================================================================================");
+    }
+
+    [Fact]
     public void Test_FromSavedConstraintsFile()
     {
         var path = @"C:\Users\Paria\.gemini\antigravity\brain\2e803de5-ca99-49b4-a5e7-a2d4d5605940\scratch\dept2_loaded_constraints.json";

@@ -36,9 +36,10 @@ public static class HolidayMorningEveningFairnessGuard
                 continue;
             }
 
+            var lookup = ProductivityWorkedHoursCalculator.BuildShiftInfoLookup(constraints.ShiftRequirements);
             foreach (var label in new[] { ShiftLabel.Morning, ShiftLabel.Evening })
             {
-                RedistributeLabel(solution, constraints, peers, holidayDates, label);
+                RedistributeLabel(solution, constraints, lookup, peers, holidayDates, label);
             }
         }
     }
@@ -46,6 +47,7 @@ public static class HolidayMorningEveningFairnessGuard
     private static void RedistributeLabel(
         ShiftSolution solution,
         ShiftConstraints constraints,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
         List<UserConstraint> peers,
         List<DateTime> holidayDates,
         ShiftLabel label)
@@ -58,69 +60,110 @@ public static class HolidayMorningEveningFairnessGuard
             return;
         }
 
-        for (var pass = 0; pass < 48; pass++)
+        var totalHolidayShifts = eligible.Sum(u => CountHolidayLabel(solution, constraints, u.UserId, label));
+        if (totalHolidayShifts == 0)
         {
-            var ranked = eligible
-                .Select(u => (
-                    User: u,
-                    Count: CountHolidayLabel(solution, constraints, u.UserId, label)))
-                .OrderByDescending(x => x.Count)
-                .ThenBy(x => x.User.UserId)
+            return;
+        }
+
+        var fairShares = BuildHolidayFairShares(eligible, totalHolidayShifts, constraints.StartDate);
+
+        for (var pass = 0; pass < 64; pass++)
+        {
+            var userStats = eligible
+                .Select(u =>
+                {
+                    var count = CountHolidayLabel(solution, constraints, u.UserId, label);
+                    var worked = CalculateWorked(solution, u.UserId, lookup, constraints);
+                    var deficit = GetDeficit(u, worked);
+                    var surplus = GetSurplus(u, worked);
+                    var fair = fairShares.TryGetValue(u.UserId, out var f) ? f : 0;
+                    var years = ResolveSeniorityYears(u, constraints.StartDate);
+                    return (User: u, Count: count, Fair: fair, Years: years, Worked: worked, Deficit: deficit, Surplus: surplus);
+                })
                 .ToList();
 
-            var donorEntry = ranked.First();
-            if (donorEntry.Count == 0)
+            var donorCandidates = userStats
+                .Where(x => x.Count > 0)
+                .Where(x => x.Count > x.Fair + 0.35 || x.Surplus > 2.0 || x.Count >= 1)
+                .OrderByDescending(x => x.Surplus > 5.0 ? 1 : 0)
+                .ThenByDescending(x => x.Count - x.Fair)
+                .ThenBy(x => x.Years)
+                .ThenByDescending(x => x.Surplus)
+                .ToList();
+
+            if (donorCandidates.Count == 0)
             {
                 break;
             }
 
-            var donorHolidayAssignments = solution.GetUserAllAssignments(donorEntry.User.UserId)
-                .Where(a => !a.IsOnCall && a.ShiftLabel == label && constraints.IsHoliday(a.Date))
-                .Where(a => !IsRequestProtected(donorEntry.User, a))
-                .OrderByDescending(a => a.Date)
-                .ToList();
-
             var moved = false;
-            foreach (var receiverEntry in ranked.OrderBy(x => x.Count).ThenBy(x => x.User.UserId))
+            foreach (var donorEntry in donorCandidates)
             {
-                if (receiverEntry.User.UserId == donorEntry.User.UserId)
+                var donorHolidayAssignments = solution.GetUserAllAssignments(donorEntry.User.UserId)
+                    .Where(a => !a.IsOnCall && a.ShiftLabel == label && constraints.IsHoliday(a.Date))
+                    .Where(a => !IsRequestProtected(donorEntry.User, a))
+                    .OrderByDescending(a => a.Date)
+                    .ToList();
+
+                if (donorHolidayAssignments.Count == 0)
                 {
                     continue;
                 }
 
-                if (donorEntry.Count - receiverEntry.Count < 2)
+                var receiverCandidates = userStats
+                    .Where(x => x.User.UserId != donorEntry.User.UserId)
+                    .Where(x => x.Deficit > 1.0 || x.Fair - x.Count > 0.35 || (x.Years > donorEntry.Years && x.Count <= donorEntry.Count - 1))
+                    .OrderByDescending(x => x.Deficit > 2.0 ? 1 : 0)
+                    .ThenByDescending(x => x.Deficit)
+                    .ThenByDescending(x => x.Fair - x.Count)
+                    .ThenByDescending(x => x.Years)
+                    .ToList();
+
+                foreach (var receiverEntry in receiverCandidates)
                 {
-                    break;
-                }
-
-                foreach (var assignment in donorHolidayAssignments)
-                {
-                    if (solution.HasAssignment(receiverEntry.User.UserId, assignment.ShiftId, assignment.Date))
+                    foreach (var assignment in donorHolidayAssignments)
                     {
-                        continue;
+                        if (solution.HasAssignment(receiverEntry.User.UserId, assignment.ShiftId, assignment.Date))
+                        {
+                            continue;
+                        }
+
+                        if (!CanTakeHolidayAssignment(
+                                solution, constraints, donorEntry.User, receiverEntry.User, assignment))
+                        {
+                            continue;
+                        }
+
+                        var isSkeleton = solution.IsLockedSkeleton(donorEntry.User.UserId, assignment.ShiftId, assignment.Date)
+                                         || assignment.IsSkeleton;
+
+                        solution.RemoveAssignment(donorEntry.User.UserId, assignment.ShiftId, assignment.Date);
+                        solution.AddAssignment(
+                            receiverEntry.User.UserId,
+                            assignment.ShiftId,
+                            assignment.Date,
+                            assignment.ShiftLabel,
+                            assignment.IsOnCall);
+
+                        if (isSkeleton)
+                        {
+                            var newAsg = solution.GetUserAssignments(receiverEntry.User.UserId, assignment.Date)
+                                .FirstOrDefault(a => a.ShiftId == assignment.ShiftId);
+                            if (newAsg != null)
+                            {
+                                newAsg.IsSkeleton = true;
+                            }
+                        }
+
+                        moved = true;
+                        break;
                     }
 
-                    if (!CanTakeHolidayMe(
-                            solution, constraints, receiverEntry.User, assignment.Date, assignment.ShiftLabel, assignment.ShiftId))
+                    if (moved)
                     {
-                        continue;
+                        break;
                     }
-
-                    if (solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
-                        || assignment.IsSkeleton)
-                    {
-                        continue;
-                    }
-
-                    solution.RemoveAssignment(donorEntry.User.UserId, assignment.ShiftId, assignment.Date);
-                    solution.AddAssignment(
-                        receiverEntry.User.UserId,
-                        assignment.ShiftId,
-                        assignment.Date,
-                        assignment.ShiftLabel,
-                        assignment.IsOnCall);
-                    moved = true;
-                    break;
                 }
 
                 if (moved)
@@ -134,6 +177,114 @@ public static class HolidayMorningEveningFairnessGuard
                 break;
             }
         }
+    }
+
+    private static Dictionary<int, double> BuildHolidayFairShares(
+        List<UserConstraint> eligible,
+        int totalShifts,
+        DateTime referenceDate,
+        double slope = 1.0)
+    {
+        var weights = eligible.ToDictionary(
+            u => u.UserId,
+            u =>
+            {
+                var years = Math.Clamp(ResolveSeniorityYears(u, referenceDate), 0, 40);
+                return Math.Pow(Math.Max(1, years + 1), Math.Max(0.1, slope));
+            });
+
+        var totalWeight = weights.Values.Sum();
+        if (totalWeight <= 0)
+        {
+            var equal = totalShifts / (double)eligible.Count;
+            return eligible.ToDictionary(u => u.UserId, _ => equal);
+        }
+
+        return eligible.ToDictionary(
+            u => u.UserId,
+            u => totalShifts * weights[u.UserId] / totalWeight);
+    }
+
+    private static int ResolveSeniorityYears(UserConstraint user, DateTime referenceDate)
+    {
+        if (user.ExperienceYears > 0)
+        {
+            return user.ExperienceYears;
+        }
+
+        if (user.DateOfEmployment.HasValue)
+        {
+            var normalized = ShiftYar.Domain.Entities.ProductivityModel.StaffEmploymentInfo.NormalizeEmploymentDate(user.DateOfEmployment.Value);
+            var totalMonths = (referenceDate.Year - normalized.Year) * 12 + (referenceDate.Month - normalized.Month);
+            return totalMonths > 0 ? (int)(totalMonths / 12) : 0;
+        }
+
+        return 0;
+    }
+
+    private static double CalculateWorked(
+        ShiftSolution solution,
+        int userId,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        ShiftConstraints constraints) =>
+        ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
+            solution.GetUserAllAssignments(userId),
+            lookup,
+            constraints.IsHoliday,
+            ProductivityWorkedHoursCalculator.BuildProductivityPlanLookup(constraints.UserConstraints));
+
+    private static double GetDeficit(UserConstraint user, double worked)
+    {
+        if (!user.ProductivityRequiredHours.HasValue)
+        {
+            return 0;
+        }
+
+        return Math.Max(0, (double)user.ProductivityRequiredHours.Value - worked);
+    }
+
+    private static double GetSurplus(UserConstraint user, double worked)
+    {
+        if (!user.ProductivityRequiredHours.HasValue)
+        {
+            return 0;
+        }
+
+        return Math.Max(0, worked - (double)user.ProductivityRequiredHours.Value);
+    }
+
+    private static bool CanTakeHolidayAssignment(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint donor,
+        UserConstraint receiver,
+        SaShiftAssignment assignment)
+    {
+        if (!CanTakeHolidayMe(solution, constraints, receiver, assignment.Date, assignment.ShiftLabel, assignment.ShiftId))
+        {
+            return false;
+        }
+
+        var isSkeleton = solution.IsLockedSkeleton(donor.UserId, assignment.ShiftId, assignment.Date) || assignment.IsSkeleton;
+        if (isSkeleton)
+        {
+            var shiftReq = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftId == assignment.ShiftId);
+            if (shiftReq != null && ShiftManagerRules.RequiresAnyManager(shiftReq))
+            {
+                var isDonorLevel1 = ShiftManagerRules.IsLevel1(donor);
+                if (isDonorLevel1 && !ShiftManagerRules.IsLevel1(receiver))
+                {
+                    return false;
+                }
+
+                if (!ShiftManagerRules.IsManager(receiver))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     public static int CountHolidayLabel(
