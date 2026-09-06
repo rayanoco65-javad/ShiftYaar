@@ -977,5 +977,55 @@ public class DiagnoseDept2NightQuotasTests
         Assert.True(isSatisfied, string.Join("; ", violationMsg));
         Assert.Equal(11, asgsSep21.Count);
     }
+
+    [Fact]
+    public void Test_CheckOverCapacityViolations()
+    {
+        var path = @"C:\Users\Paria\.gemini\antigravity\brain\2e803de5-ca99-49b4-a5e7-a2d4d5605940\scratch\dept2_loaded_constraints.json";
+        var json = System.IO.File.ReadAllText(path);
+        var constraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(json)!;
+
+        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            MaxIterations = 4000,
+            MaxIterationsWithoutImprovement = 600
+        });
+
+        var solution = scheduler.Optimize();
+
+        ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+        ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+        scheduler.PerformFinalManagerMixRepairSweep(solution);
+        if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
+        {
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+            ExactNightQuotaGuard.Enforce(solution, constraints);
+        }
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+
+        var over = ShiftCoverageGuard.GetOverCapacityViolations(solution, constraints);
+        _output.WriteLine("=== OVER CAPACITY VIOLATIONS ===");
+        foreach (var v in over)
+        {
+            _output.WriteLine(v);
+        }
+
+        var dates = new[] { new DateTime(2026, 8, 28), new DateTime(2026, 9, 11), new DateTime(2026, 9, 18) };
+        foreach (var d in dates)
+        {
+            _output.WriteLine($"\n=== Assignments on {d:yyyy-MM-dd} (IsHoliday={constraints.IsHoliday(d)}) ===");
+            var asgs = solution.Assignments.Values.Where(a => a.Date.Date == d.Date).OrderBy(a => a.ShiftLabel).ThenBy(a => a.UserId).ToList();
+            foreach (var a in asgs)
+            {
+                var u = constraints.UserConstraints.First(x => x.UserId == a.UserId);
+                var isReq = u.RequiredShiftSlots.Any(r => r.Date.Date == d.Date && r.ShiftLabel == a.ShiftLabel);
+                var isSkel = solution.IsLockedSkeleton(a.UserId, a.ShiftId, a.Date) || a.IsSkeleton;
+                _output.WriteLine($"  {a.ShiftLabel}: User {a.UserId} ({u.UserName}, L={u.ShiftManagerLevel}, Spec={u.SpecialtyId}) | IsReq={isReq}, IsSkel={isSkel}");
+            }
+        }
+    }
 }
+
 

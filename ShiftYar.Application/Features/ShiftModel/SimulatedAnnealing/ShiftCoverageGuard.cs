@@ -173,10 +173,30 @@ public static class ShiftCoverageGuard
             }
 
             var excess = assignments.Count - maxAllowed;
-            var removable = RankForRemoval(solution, constraints, assignments)
+            var unprot = RankForRemoval(solution, constraints, shiftReq, date, assignments)
                 .Where(a => !IsProtectedAssignment(constraints, solution, a))
+                .ToList();
+
+            if (unprot.Count == 0)
+            {
+                break;
+            }
+
+            // اولویت حذف با انتساب‌هایی است که ترکیب مسئول شیفت را نقض نکنند
+            var removable = unprot
+                .Where(a => !WouldBreakManagerMix(solution, constraints, shiftReq, date, a))
                 .Take(excess)
                 .ToList();
+
+            if (removable.Count < excess)
+            {
+                var remainingNeeded = excess - removable.Count;
+                var additional = unprot
+                    .Where(a => !removable.Contains(a))
+                    .Take(remainingNeeded)
+                    .ToList();
+                removable.AddRange(additional);
+            }
 
             if (removable.Count == 0)
             {
@@ -185,9 +205,33 @@ public static class ShiftCoverageGuard
 
             foreach (var assignment in removable)
             {
-                solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                solution.UnlockSkeletonAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date, force: true);
             }
         }
+    }
+
+    private static bool WouldBreakManagerMix(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        ShiftRequirement shiftReq,
+        DateTime date,
+        SaShiftAssignment assignment)
+    {
+        if (assignment.IsOnCall || !ShiftManagerRules.RequiresAnyManager(shiftReq))
+        {
+            return false;
+        }
+
+        var remainingAssignees = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+            .Where(a => !a.IsOnCall && a.UserId != assignment.UserId)
+            .Select(a => constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId))
+            .Where(u => u != null)
+            .Cast<UserConstraint>()
+            .ToList();
+
+        var (requiredTotal, minLevel1) = ShiftManagerRules.GetRequirement(shiftReq);
+        return !ShiftManagerRules.IsSatisfied(remainingAssignees, requiredTotal, minLevel1);
     }
 
     private static List<SaShiftAssignment> GetSpecialtyAssignments(
@@ -205,6 +249,8 @@ public static class ShiftCoverageGuard
     private static IEnumerable<SaShiftAssignment> RankForRemoval(
         ShiftSolution solution,
         ShiftConstraints constraints,
+        ShiftRequirement shiftReq,
+        DateTime date,
         IReadOnlyList<SaShiftAssignment> assignments)
     {
         return assignments
@@ -237,9 +283,12 @@ public static class ShiftCoverageGuard
                     }
                 }
 
-                return (Assignment: a, NightSurplus: nightSurplus, DayShiftSurplus: dayShiftSurplus, LabelCount: labelCount, Protected: IsProtectedAssignment(constraints, solution, a));
+                var breaksMix = WouldBreakManagerMix(solution, constraints, shiftReq, date, a);
+
+                return (Assignment: a, BreaksMix: breaksMix, NightSurplus: nightSurplus, DayShiftSurplus: dayShiftSurplus, LabelCount: labelCount, Protected: IsProtectedAssignment(constraints, solution, a));
             })
-            .OrderByDescending(x => x.DayShiftSurplus)
+            .OrderBy(x => x.BreaksMix ? 1 : 0)
+            .ThenByDescending(x => x.DayShiftSurplus)
             .ThenByDescending(x => x.NightSurplus)
             .ThenByDescending(x => x.LabelCount)
             .ThenBy(x => x.Protected ? 1 : 0)
@@ -252,11 +301,6 @@ public static class ShiftCoverageGuard
         ShiftSolution solution,
         SaShiftAssignment assignment)
     {
-        if (solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
-            || assignment.IsSkeleton)
-        {
-            return true;
-        }
 
         var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == assignment.UserId);
         if (user == null)

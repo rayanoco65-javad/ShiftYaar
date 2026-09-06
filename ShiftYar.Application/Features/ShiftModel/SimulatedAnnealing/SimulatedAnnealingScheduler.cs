@@ -1534,6 +1534,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
             MaxConsecutiveWorkdayGuard.Enforce(solution, _constraints, RepairManagerMix);
+            ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             solution.Score = CalculateSolutionScore(solution);
             solution.Violations.AddRange(ShiftManagerMixGuard.GetViolations(solution, _constraints));
             solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
