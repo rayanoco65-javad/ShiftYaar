@@ -1,8 +1,0 @@
-﻿Msg 207, Level 16, State 1, Server 39121735229e, Line 3
-Invalid column name 'RequiredTotalCount'.
-Msg 207, Level 16, State 1, Server 39121735229e, Line 4
-Invalid column name 'OnCallTotalCount'.
-Msg 207, Level 16, State 1, Server 39121735229e, Line 5
-Invalid column name 'HolidayRequiredTotalCount'.
-Msg 207, Level 16, State 1, Server 39121735229e, Line 6
-Invalid column name 'HolidayOnCallTotalCount'.

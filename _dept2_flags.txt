@@ -1,5 +1,0 @@
-﻿DepartmentId|MaxShiftsPerDay|AllowEveningAfterNightShift|AllowNightShiftAfterNightShift
-------------|---------------|---------------------------|------------------------------
-2|1|1|1
-
-(1 rows affected)
