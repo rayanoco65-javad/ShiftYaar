@@ -15,12 +15,16 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 /// </summary>
 public static class OvertimeBalanceGuard
 {
+    public static Action<string>? LogAction { get; set; }
+
     public static void Enforce(ShiftSolution solution, ShiftConstraints constraints)
     {
         var users = constraints.UserConstraints
             .Where(u => u.IsActive && u.ShiftType != ShiftTypes.FixedShift)
             .Where(u => u.IncludedInProductivityPlan && u.ProductivityRequiredHours.HasValue && u.ProductivityRequiredHours > 0)
             .ToList();
+
+        LogAction?.Invoke($"OvertimeBalanceGuard.Enforce called with {users.Count} eligible users.");
 
         if (users.Count < 2)
         {
@@ -179,37 +183,38 @@ public static class OvertimeBalanceGuard
             var highestDonor = donors.First();
             var lowestReceiver = receivers.First();
 
+            LogAction?.Invoke($"Pass {pass}: HighestDonor={highestDonor.User.UserName} (OT={highestDonor.Overtime}), LowestReceiver={lowestReceiver.User.UserName} (OT={lowestReceiver.Overtime})");
+
             // اگر اختلاف اضافه‌کاری دهنده و گیرنده کمتر از یک شیفت (حدود ۷ ساعت) باشد، وضعیت متعادل است
             if (highestDonor.Overtime - lowestReceiver.Overtime < 7.0 && highestDonor.Worked <= highestDonor.MaxAllowed + 0.25)
             {
+                LogAction?.Invoke("Break: Difference < 7.0 and worked <= max allowed");
                 break;
             }
 
-            foreach (var donorInfo in donors)
+            foreach (var receiverInfo in receivers)
             {
-                // فقط در صورتی انتقال می‌دهیم که دهنده اضافه کاری قابل توجهی نسبت به گیرنده داشته باشد
-                var donor = donorInfo.User;
+                var receiver = receiverInfo.User;
 
-                var donorAssignments = solution.GetUserAllAssignments(donor.UserId)
-                    .Where(a => !a.IsOnCall && !IsProtected(constraints, donor, a))
-                    .Where(a => a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening)
-                    .OrderBy(a => a.ShiftLabel == ShiftLabel.Morning ? 0 : 1)
-                    .ThenByDescending(a => a.Date)
-                    .ToList();
-
-                foreach (var asg in donorAssignments)
+                foreach (var donorInfo in donors.Where(d => d.User.UserId != receiver.UserId && d.User.SpecialtyId == receiver.SpecialtyId))
                 {
+                    var donor = donorInfo.User;
 
-                    var shiftEffectiveHours = ProductivityWorkedHoursCalculator.ResolveCreditedHours(
-                        lookup[asg.ShiftId], constraints.IsHoliday(asg.Date), donor.IncludedInProductivityPlan);
+                    var donorAssignments = solution.GetUserAllAssignments(donor.UserId)
+                        .Where(a => !a.IsOnCall && !IsProtected(constraints, donor, a))
+                        .Where(a => a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening)
+                        .OrderBy(a => a.ShiftLabel == ShiftLabel.Morning ? 0 : 1)
+                        .ThenByDescending(a => a.Date)
+                        .ToList();
 
-                    // پیدا کردن گیرنده مناسب
-                    foreach (var receiverInfo in receivers.Where(r => r.User.UserId != donor.UserId && r.User.SpecialtyId == donor.SpecialtyId))
+                    foreach (var asg in donorAssignments)
                     {
-                        var receiver = receiverInfo.User;
+                        var shiftEffectiveHours = ProductivityWorkedHoursCalculator.ResolveCreditedHours(
+                            lookup[asg.ShiftId], constraints.IsHoliday(asg.Date), donor.IncludedInProductivityPlan);
 
-                        // شرط کاهش شکاف اضافه کاری
-                        if (donorInfo.Overtime - receiverInfo.Overtime <= shiftEffectiveHours)
+                        // شرط کاهش شکاف و جلوگیری از معکوس شدن یا نوسان پینگ‌پونگی:
+                        // دهنده پس از کسر این شیفت باید اضافه‌کاری بیشتر یا مساوی گیرنده داشته باشد
+                        if (donorInfo.Overtime - shiftEffectiveHours < receiverInfo.Overtime + shiftEffectiveHours - 0.5)
                         {
                             continue;
                         }
@@ -229,6 +234,8 @@ public static class OvertimeBalanceGuard
                         {
                             continue;
                         }
+
+                        LogAction?.Invoke($"Transferred {asg.ShiftLabel} on {asg.Date:yyyy-MM-dd} from {donor.UserName} (OT={donorInfo.Overtime:F1}) to {receiver.UserName} (OT={receiverInfo.Overtime:F1}), shiftEff={shiftEffectiveHours:F1}");
 
                         // انجام انتقال هوشمند شیفت
                         solution.UnlockSkeletonAssignment(donor.UserId, asg.ShiftId, asg.Date);

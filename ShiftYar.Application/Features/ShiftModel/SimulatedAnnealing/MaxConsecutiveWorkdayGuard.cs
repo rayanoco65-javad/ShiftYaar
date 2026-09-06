@@ -141,6 +141,31 @@ public static class MaxConsecutiveWorkdayGuard
             }
         }
 
+        if (ShiftManagerRules.IsManager(user))
+        {
+            foreach (var a in assignments)
+            {
+                var shiftReq = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftId == a.ShiftId);
+                if (shiftReq != null && ShiftManagerRules.RequiresAnyManager(shiftReq))
+                {
+                    var (reqTotal, reqL1) = ShiftManagerRules.GetRequirement(shiftReq);
+                    var remaining = solution.GetShiftAssignments(a.ShiftId, date)
+                        .Where(x => !x.IsOnCall && x.UserId != user.UserId)
+                        .Select(x => constraints.UserConstraints.FirstOrDefault(u => u.UserId == x.UserId))
+                        .Where(u => u != null)
+                        .ToList();
+
+                    var remL1 = remaining.Count(ShiftManagerRules.IsLevel1);
+                    var remTotal = remaining.Count(ShiftManagerRules.IsManager);
+
+                    if (remL1 < reqL1 || remTotal < reqTotal)
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+
         return true;
     }
 

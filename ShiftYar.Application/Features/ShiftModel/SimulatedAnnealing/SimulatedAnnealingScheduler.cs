@@ -1569,10 +1569,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             MorningEveningBalanceGuard.Enforce(solution, _constraints);
             OvertimeBalanceGuard.Enforce(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(solution, _constraints, RepairManagerMix);
             ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(solution, _constraints, RepairManagerMix);
             ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             solution.Score = CalculateSolutionScore(solution);
@@ -2394,6 +2396,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
                         .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
                         .Where(u => !HasDailyConflict(solution, u.UserId, date, shiftReq.ShiftLabel))
+                        .Where(u => !AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(u.UserId), date, shiftReq.ShiftLabel, _constraints))
+                        .Where(u => relaxSoftRest || !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(solution, _constraints, u, date))
                         .OrderByDescending(u => u.ExactNightShiftCount.HasValue && shiftReq.ShiftLabel == ShiftLabel.Night
                             ? (u.ExactNightShiftCount.Value - solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall))
                             : 0)

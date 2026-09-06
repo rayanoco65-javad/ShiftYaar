@@ -928,11 +928,13 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             MorningEveningBalanceGuard.Enforce(solution, constraints);
             OvertimeBalanceGuard.Enforce(solution, constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
             ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
             ExactNightQuotaGuard.Enforce(solution, constraints);
             scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
             ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
             scheduler.RefreshSolutionViolations(solution);
@@ -3028,11 +3030,13 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             MorningEveningBalanceGuard.Enforce(solution, constraints);
             OvertimeBalanceGuard.Enforce(solution, constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
             ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
             ExactNightQuotaGuard.Enforce(solution, constraints);
             scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
             ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
             scheduler.RefreshSolutionViolations(solution);
