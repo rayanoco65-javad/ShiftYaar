@@ -1211,6 +1211,7 @@ public class DiagnoseDept2NightQuotasTests
         });
 
         var solution = scheduler.Optimize();
+
         ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
         ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
         ExactNightQuotaGuard.Enforce(solution, constraints);
@@ -1219,8 +1220,14 @@ public class DiagnoseDept2NightQuotasTests
         ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
         ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
         MorningEveningBalanceGuard.Enforce(solution, constraints);
+        OvertimeBalanceGuard.Enforce(solution, constraints);
+        AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+        ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
         ExactNightQuotaGuard.Enforce(solution, constraints);
         scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
+        AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+        ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
         ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
 
         _output.WriteLine("\n=== ALL USERS SHIFT COUNTS AFTER OPTIMIZE & ENFORCE ===");

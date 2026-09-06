@@ -74,8 +74,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             ExactNightQuotaGuard.OptimizeSpread(bestSolution, _constraints);
+            OvertimeBalanceGuard.Enforce(bestSolution, _constraints);
             ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
             PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: false);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSolution, _constraints);
+            ShiftCoverageGuard.FillRemainingAfterForceApply(bestSolution, _constraints);
             ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
             RefreshSolutionViolations(bestSolution);
             stopwatch.Stop();
@@ -119,8 +122,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             ExactNightQuotaGuard.OptimizeSpread(bestSolution, _constraints);
+            OvertimeBalanceGuard.Enforce(bestSolution, _constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSolution, _constraints);
+            ShiftCoverageGuard.FillRemainingAfterForceApply(bestSolution, _constraints);
             ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
             PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: false);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSolution, _constraints);
+            ShiftCoverageGuard.FillRemainingAfterForceApply(bestSolution, _constraints);
             ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
             RefreshSolutionViolations(bestSolution);
             stopwatch.Stop();
@@ -650,6 +658,19 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     }
 
                     continue;
+                }
+
+                // اعمال جریمه سنگین برای کاربری که تمایل به اضافه کاری ندارد
+                if (!user.OvertimeConsent && excess > 0)
+                {
+                    penalty += excess * excess * 500 + excess * 5000;
+                }
+
+                // اعمال جریمه سنگین برای عبور از سقف مجاز ماهانه اضافه کار (مثلا ۸۰ ساعت)
+                if (excess > user.MaxMonthlyOvertimeHours)
+                {
+                    var overCap = excess - user.MaxMonthlyOvertimeHours;
+                    penalty += overCap * overCap * 1000 + overCap * 10000;
                 }
 
                 if (excess <= tolerance)
@@ -1546,8 +1567,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             MorningEveningBalanceGuard.Enforce(solution, _constraints);
+            OvertimeBalanceGuard.Enforce(solution, _constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             solution.Score = CalculateSolutionScore(solution);
             RefreshSolutionViolations(solution);
@@ -2211,8 +2237,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                             TryForcePullLevel1Manager(solution, shiftReq, date, relaxSoftRest: false);
                         }
 
-                        // ۳) گام سوم (تسهیل هوشمند قیود نرم): در صورت کمبود شدید منابع، تسهیل فاصله شب برای کم‌کارترین مسئول سطح-۱
-                        if (!IsSlotManagerMixSatisfied(solution, shiftReq, date))
+                        // ۳) گام سوم (تسهیل هوشمند قیود نرم): در صورت کمبود شدید منابع، تسهیل فاصله شب برای کم‌کارترین مسئول سطح-۱ (فقط برای شیفت شب)
+                        if (!IsSlotManagerMixSatisfied(solution, shiftReq, date) && shiftReq.ShiftLabel == ShiftLabel.Night)
                         {
                             if (TryForcePullLevel1Manager(solution, shiftReq, date, relaxSoftRest: true))
                             {
@@ -2342,18 +2368,16 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     continue;
                 }
 
-                if (!relaxSoftRest)
+                if (AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(candidate.UserId), date, shiftReq.ShiftLabel, _constraints))
                 {
-                    if (AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(candidate.UserId), date, shiftReq.ShiftLabel, _constraints))
-                    {
-                        RestoreSolutionFromQuotaBackup(solution, backup);
-                        continue;
-                    }
-                    if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(solution, _constraints, candidate, date))
-                    {
-                        RestoreSolutionFromQuotaBackup(solution, backup);
-                        continue;
-                    }
+                    RestoreSolutionFromQuotaBackup(solution, backup);
+                    continue;
+                }
+
+                if (!relaxSoftRest && MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(solution, _constraints, candidate, date))
+                {
+                    RestoreSolutionFromQuotaBackup(solution, backup);
+                    continue;
                 }
 
                 MakeRoomInShift(solution, shiftReq, date, candidate);
@@ -3310,15 +3334,40 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 })
                 .ThenBy(u =>
                 {
+                    // اولویت بسیار پایین برای پرسنلی که OvertimeConsent ندارند و موظفی‌شان پر شده است
+                    if (!u.OvertimeConsent && u.ProductivityRequiredHours.HasValue && u.ProductivityRequiredHours.Value > 0)
+                    {
+                        var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                        if (worked >= (double)u.ProductivityRequiredHours.Value)
+                        {
+                            return 3;
+                        }
+                    }
+
+                    // اولویت پایین برای پرسنلی که از سقف مجاز ماهانه (مثلاً ۸۰ ساعت) گذشته‌اند
                     if (u.ProductivityRequiredHours.HasValue && u.ProductivityRequiredHours.Value > 0)
                     {
-                        var minHours = solution.GetUserAllAssignments(u.UserId).Count * 7.0;
-                        if (minHours >= (double)u.ProductivityRequiredHours.Value)
+                        var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                        var ot = worked - (double)u.ProductivityRequiredHours.Value;
+                        if (ot >= (double)u.MaxMonthlyOvertimeHours)
+                        {
+                            return 2;
+                        }
+                        if (ot > 0)
                         {
                             return 1;
                         }
                     }
                     return 0;
+                })
+                .ThenBy(u =>
+                {
+                    if (u.ProductivityRequiredHours.HasValue && u.ProductivityRequiredHours.Value > 0)
+                    {
+                        var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                        return worked - (double)u.ProductivityRequiredHours.Value;
+                    }
+                    return (double)solution.GetUserAllAssignments(u.UserId).Count * 7.0;
                 })
                 .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
                 .ThenBy(u => CountUserLabelAssignments(solution, u.UserId, shiftReq.ShiftLabel))
@@ -3392,7 +3441,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     }
                 }
             }
-            else if (label == ShiftLabel.Evening && !_constraints.HardRules.AllowEveningAfterNightShift && !relaxSoftRest)
+            else if (label == ShiftLabel.Evening && !_constraints.HardRules.AllowEveningAfterNightShift)
             {
                 if (!TryClearUserAssignmentsOnDate(solution, user, date.Date.AddDays(-1), ShiftLabel.Night))
                 {
@@ -4534,34 +4583,90 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             var crossTier = ProjectPersonnelProductivityPriority.CrossTierToleranceHours;
-            var receiver = productivityUsers
+            UserConstraint? receiver = productivityUsers
                 .Where(u => GetProductivityHourDeficit(u, solution) > crossTier)
                 .OrderBy(u => ProjectPersonnelProductivityPriority.FillTier(u))
                 .ThenByDescending(u => GetProductivityHourDeficit(u, solution))
                 .FirstOrDefault();
+
+            UserConstraint? donor = null;
+
             if (receiver == null)
             {
-                return;
-            }
+                // همه به حداقل موظفی رسیده‌اند — توازن اضافه کاری و اعمال OvertimeConsent
+                var donorOt = productivityUsers
+                    .Select(u =>
+                    {
+                        var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                        var req = (double)u.ProductivityRequiredHours!.Value;
+                        var ot = worked - req;
+                        return new
+                        {
+                            User = u,
+                            Worked = worked,
+                            Required = req,
+                            Overtime = ot,
+                            Consent = u.OvertimeConsent,
+                            ExceedsMax = ot > (double)u.MaxMonthlyOvertimeHours
+                        };
+                    })
+                    .Where(x => (!x.Consent && x.Overtime > 2.0) || x.ExceedsMax || x.Overtime > 7.0)
+                    .OrderByDescending(x => !x.Consent && x.Overtime > 0 ? 2 : (x.ExceedsMax ? 1 : 0))
+                    .ThenByDescending(x => x.Overtime)
+                    .FirstOrDefault();
 
-            var surplusTolerance = ProjectPersonnelProductivityPriority.IsProjectPersonnel(receiver)
-                ? 2.0
-                : crossTier;
-            var donor = productivityUsers
-                .Where(u => u.UserId != receiver.UserId)
-                .Where(u => GetProductivityHourSurplus(u, solution, surplusTolerance) > crossTier)
-                .OrderByDescending(u => GetProductivityHourSurplus(u, solution, surplusTolerance))
-                .ThenByDescending(u => ProjectPersonnelProductivityPriority.FillTier(u))
-                .FirstOrDefault();
-            if (donor == null)
+                if (donorOt == null)
+                {
+                    return;
+                }
+
+                var receiverOt = productivityUsers
+                    .Where(u => u.UserId != donorOt.User.UserId && u.OvertimeConsent)
+                    .Select(u =>
+                    {
+                        var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                        var req = (double)u.ProductivityRequiredHours!.Value;
+                        var ot = worked - req;
+                        return new
+                        {
+                            User = u,
+                            Overtime = ot,
+                            CanAccept = ot + 7.0 <= (double)u.MaxMonthlyOvertimeHours
+                        };
+                    })
+                    .Where(x => x.CanAccept && (donorOt.Overtime - x.Overtime) > 7.0)
+                    .OrderBy(x => x.Overtime)
+                    .FirstOrDefault();
+
+                if (receiverOt == null)
+                {
+                    return;
+                }
+
+                receiver = receiverOt.User;
+                donor = donorOt.User;
+            }
+            else
             {
-                return;
+                var surplusTolerance = ProjectPersonnelProductivityPriority.IsProjectPersonnel(receiver)
+                    ? 2.0
+                    : crossTier;
+                donor = productivityUsers
+                    .Where(u => u.UserId != receiver.UserId)
+                    .Where(u => GetProductivityHourSurplus(u, solution, surplusTolerance) > crossTier)
+                    .OrderByDescending(u => GetProductivityHourSurplus(u, solution, surplusTolerance))
+                    .ThenByDescending(u => ProjectPersonnelProductivityPriority.FillTier(u))
+                    .FirstOrDefault();
+                if (donor == null)
+                {
+                    return;
+                }
             }
 
             var donorAssignments = solution.GetUserAllAssignments(donor.UserId)
                 .Where(a => !a.IsOnCall && !IsProtectedAssignment(solution, a))
-                .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, _constraints, donor, a))
-                .OrderBy(a => a.ShiftLabel == ShiftLabel.Morning ? 0 : a.ShiftLabel == ShiftLabel.Evening ? 1 : 2)
+                .Where(a => a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening)
+                .OrderBy(a => a.ShiftLabel == ShiftLabel.Morning ? 0 : 1)
                 .ThenByDescending(a => GetShiftEffectiveHours(a))
                 .ToList();
             foreach (var assignment in donorAssignments)
@@ -4572,6 +4677,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 }
 
                 if (!IsUserAvailableForShift(receiver, assignment.Date, assignment.ShiftLabel, solution))
+                {
+                    continue;
+                }
+
+                if (!OvertimeBalanceGuard.WouldPreserveManagerMix(
+                        solution, _constraints, assignment.ShiftId, assignment.Date, donor.UserId, receiver.UserId))
                 {
                     continue;
                 }

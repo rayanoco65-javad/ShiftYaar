@@ -283,15 +283,30 @@ public static class ShiftCoverageGuard
                     }
                 }
 
+                var otSurplus = 0.0;
+                var nonConsentOt = false;
+                if (user != null && user.IncludedInProductivityPlan && user.ProductivityRequiredHours.HasValue)
+                {
+                    var worked = OvertimeBalanceGuard.CalculateHours(solution, user, constraints);
+                    var ot = worked - (double)user.ProductivityRequiredHours.Value;
+                    if (!user.OvertimeConsent && ot > 0)
+                    {
+                        nonConsentOt = true;
+                    }
+                    otSurplus = Math.Max(0.0, ot);
+                }
+
                 var breaksMix = WouldBreakManagerMix(solution, constraints, shiftReq, date, a);
 
-                return (Assignment: a, BreaksMix: breaksMix, NightSurplus: nightSurplus, DayShiftSurplus: dayShiftSurplus, LabelCount: labelCount, Protected: IsProtectedAssignment(constraints, solution, a));
+                return (Assignment: a, BreaksMix: breaksMix, NonConsentOt: nonConsentOt, OtSurplus: otSurplus, NightSurplus: nightSurplus, DayShiftSurplus: dayShiftSurplus, LabelCount: labelCount, Protected: IsProtectedAssignment(constraints, solution, a));
             })
             .OrderBy(x => x.BreaksMix ? 1 : 0)
+            .ThenBy(x => x.Protected ? 1 : 0)
+            .ThenByDescending(x => x.NonConsentOt ? 1 : 0)
+            .ThenByDescending(x => x.OtSurplus)
             .ThenByDescending(x => x.DayShiftSurplus)
             .ThenByDescending(x => x.NightSurplus)
             .ThenByDescending(x => x.LabelCount)
-            .ThenBy(x => x.Protected ? 1 : 0)
             .ThenByDescending(x => x.Assignment.Date)
             .Select(x => x.Assignment);
     }
@@ -521,12 +536,26 @@ public static class ShiftCoverageGuard
             // تعادل peer برای صبح/عصر — فقط به‌عنوان اولویت نرم داخل پوشش اجباری
             score += totalLabel * 10;
 
-            // اولویت کسری موظفی: کسی که هنوز به هدف نرسیده زودتر شیفت پوشش بگیرد
+            // اولویت کسری موظفی و اضافه کاری: کسی که هنوز به موظفی نرسیده زودتر شیفت پوشش بگیرد
+            // پرسنلی که OvertimeConsent ندارند و موظفی‌شان پر شده یا پرسنلی که از سقف ۸۰ ساعت گذشته‌اند، اولویت بسیار پایینی دارند
             if (user.IncludedInProductivityPlan && user.ProductivityRequiredHours is > 0)
             {
-                var totalShifts = solution.GetUserAllAssignments(user.UserId).Count(a => !a.IsOnCall);
-                var approxTargetShifts = Math.Max(1, (int)Math.Ceiling((double)user.ProductivityRequiredHours.Value / 8.0));
-                score += (totalShifts - approxTargetShifts) * 35;
+                var worked = OvertimeBalanceGuard.CalculateHours(solution, user, constraints);
+                var req = (double)user.ProductivityRequiredHours.Value;
+                var ot = worked - req;
+
+                if (!user.OvertimeConsent && ot >= 0)
+                {
+                    score += 25_000 + (int)(ot * 100);
+                }
+                else if (ot >= user.MaxMonthlyOvertimeHours)
+                {
+                    score += 50_000 + (int)((ot - user.MaxMonthlyOvertimeHours) * 200);
+                }
+                else
+                {
+                    score += (int)(ot * 30);
+                }
             }
 
             if (constraints.IsHoliday(date))

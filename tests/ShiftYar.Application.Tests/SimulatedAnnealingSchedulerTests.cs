@@ -1189,4 +1189,98 @@ public class SimulatedAnnealingSchedulerTests
 
         Assert.Empty(duplicates);
     }
+
+    [Fact]
+    public void Test_OvertimeConsent_MinimizesOvertimeForNonConsentingUser()
+    {
+        var start = new DateTime(2026, 9, 1);
+        var end = new DateTime(2026, 9, 25);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = end,
+            HolidayDates = new HashSet<DateTime>(),
+            ShiftRequirements = new List<ShiftRequirement>
+            {
+                new()
+                {
+                    ShiftId = 1,
+                    ShiftLabel = ShiftLabel.Morning,
+                    SpecialtyRequirements = new List<SpecialtyRequirement>
+                    {
+                        new() { SpecialtyId = 1, RequiredTotalCount = 1 }
+                    }
+                },
+                new()
+                {
+                    ShiftId = 2,
+                    ShiftLabel = ShiftLabel.Evening,
+                    SpecialtyRequirements = new List<SpecialtyRequirement>
+                    {
+                        new() { SpecialtyId = 1, RequiredTotalCount = 1 }
+                    }
+                }
+            },
+            UserConstraints = new List<UserConstraint>
+            {
+                new()
+                {
+                    UserId = 1,
+                    UserName = "NonConsentingUser",
+                    SpecialtyId = 1,
+                    IsActive = true,
+                    ShiftType = ShiftTypes.RotatingShift,
+                    IncludedInProductivityPlan = true,
+                    ProductivityRequiredHours = 62, // 7 shifts * 8h + 6*1h handover = 62h
+                    OvertimeConsent = false,
+                    MaxMonthlyOvertimeHours = 80,
+                    AllowedShiftLabels = new List<ShiftLabel> { ShiftLabel.Morning, ShiftLabel.Evening }
+                },
+                new()
+                {
+                    UserId = 2,
+                    UserName = "ConsentingUser",
+                    SpecialtyId = 1,
+                    IsActive = true,
+                    ShiftType = ShiftTypes.RotatingShift,
+                    IncludedInProductivityPlan = true,
+                    ProductivityRequiredHours = 62,
+                    OvertimeConsent = true,
+                    MaxMonthlyOvertimeHours = 80,
+                    AllowedShiftLabels = new List<ShiftLabel> { ShiftLabel.Morning, ShiftLabel.Evening }
+                }
+            },
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxConsecutiveShifts = false,
+                AllowEveningAfterNightShift = true,
+                AllowNightShiftAfterNightShift = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 }
+        };
+
+        var solution = new ShiftSolution();
+        // User 1 has 8 shifts on even days (0, 2, 4, 6, 8, 10, 12, 14) -> 71h (9h overtime, OvertimeConsent = false)
+        for (var i = 0; i < 8; i++)
+        {
+            solution.AddAssignment(1, 1, start.AddDays(i * 2), ShiftLabel.Morning, isOnCall: false);
+        }
+
+        // User 2 has 6 shifts on odd days (1, 3, 5, 7, 9, 11) -> 53h (9h deficit, OvertimeConsent = true)
+        for (var i = 0; i < 6; i++)
+        {
+            solution.AddAssignment(2, 2, start.AddDays(i * 2 + 1), ShiftLabel.Evening, isOnCall: false);
+        }
+
+        OvertimeBalanceGuard.Enforce(solution, constraints);
+
+        var u1Hours = OvertimeBalanceGuard.CalculateHours(solution, constraints.UserConstraints[0], constraints);
+        var u2Hours = OvertimeBalanceGuard.CalculateHours(solution, constraints.UserConstraints[1], constraints);
+
+        // User 1 must be brought down to exactly required hours (62h)
+        Assert.Equal(62.0, u1Hours);
+        // User 2 received the transferred shift and reached required hours (62h)
+        Assert.Equal(62.0, u2Hours);
+    }
 }
