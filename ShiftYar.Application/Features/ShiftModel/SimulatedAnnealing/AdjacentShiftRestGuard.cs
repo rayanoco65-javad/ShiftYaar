@@ -32,25 +32,25 @@ public static class AdjacentShiftRestGuard
                 // انتساب غیرمحافظت‌شدهٔ قبلی را حذف کن؛ هر دو محافظت‌شده → نگه دار.
                 if (IsWaivedByApprovedLaterSlot(user, earlier, later))
                 {
-                    if (IsRequestProtected(user, earlier)
-                        || SkeletonAssignmentGuard.IsLocked(solution, earlier))
+                    if (IsRequestProtected(user, earlier))
                     {
                         break;
                     }
 
-                    solution.RemoveAssignment(earlier.UserId, earlier.ShiftId, earlier.Date);
+                    solution.UnlockSkeletonAssignment(earlier.UserId, earlier.ShiftId, earlier.Date);
+                    solution.RemoveAssignment(earlier.UserId, earlier.ShiftId, earlier.Date, force: true);
                     continue;
                 }
 
                 var remove = ChooseRemovable(user, earlier, later, solution, constraints);
-                if (remove == null
-                    || SkeletonAssignmentGuard.IsLocked(solution, remove))
+                if (remove == null)
                 {
                     // هر دو ON تأییدشده‌اند — این جفت گزارش نمی‌شود؛ حلقه را قطع کن
                     break;
                 }
 
-                solution.RemoveAssignment(remove.UserId, remove.ShiftId, remove.Date);
+                solution.UnlockSkeletonAssignment(remove.UserId, remove.ShiftId, remove.Date);
+                solution.RemoveAssignment(remove.UserId, remove.ShiftId, remove.Date, force: true);
             }
         }
     }
@@ -188,6 +188,18 @@ public static class AdjacentShiftRestGuard
                 && !laterMixSkeleton)
             {
                 return later;
+            }
+
+            if (earlier.Date.Date == later.Date.Date && earlier.ShiftLabel == ShiftLabel.Evening && later.ShiftLabel == ShiftLabel.Night)
+            {
+                if (!IsRequestProtected(user, earlier))
+                {
+                    return earlier;
+                }
+                if (!IsRequestProtected(user, later))
+                {
+                    return later;
+                }
             }
 
             return null;

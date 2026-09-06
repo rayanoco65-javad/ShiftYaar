@@ -2273,14 +2273,15 @@ public static class ExactNightQuotaGuard
     {
         foreach (var assignment in solution.GetUserAssignments(user.UserId, date).ToList())
         {
-            if (IsSticky(constraints, solution, user.UserId, assignment))
+            if (IsProtected(constraints, user.UserId, assignment))
             {
                 continue;
             }
 
             if (constraints.HardRules.IsForbiddenOnDayAfterNight(assignment.ShiftLabel))
             {
-                solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                solution.UnlockSkeletonAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date, force: true);
             }
         }
     }
@@ -2337,12 +2338,13 @@ public static class ExactNightQuotaGuard
         var toRemove = solution.GetUserAssignments(user.UserId, date)
             .Where(a => !a.IsOnCall)
             .Where(a => a.ShiftLabel == label)
-            .Where(a => !IsSticky(constraints, solution, user.UserId, a))
+            .Where(a => !IsProtected(constraints, user.UserId, a))
             .ToList();
 
         foreach (var a in toRemove)
         {
-            solution.RemoveAssignment(a.UserId, a.ShiftId, a.Date);
+            solution.UnlockSkeletonAssignment(a.UserId, a.ShiftId, a.Date);
+            solution.RemoveAssignment(a.UserId, a.ShiftId, a.Date, force: true);
         }
     }
 
@@ -2354,12 +2356,13 @@ public static class ExactNightQuotaGuard
     {
         var toRemove = solution.GetUserAssignments(user.UserId, date)
             .Where(a => !a.IsOnCall)
-            .Where(a => !IsSticky(constraints, solution, user.UserId, a))
+            .Where(a => !IsProtected(constraints, user.UserId, a))
             .ToList();
 
         foreach (var a in toRemove)
         {
-            solution.RemoveAssignment(a.UserId, a.ShiftId, a.Date);
+            solution.UnlockSkeletonAssignment(a.UserId, a.ShiftId, a.Date);
+            solution.RemoveAssignment(a.UserId, a.ShiftId, a.Date, force: true);
         }
     }
 
@@ -2385,7 +2388,7 @@ public static class ExactNightQuotaGuard
                     return true;
                 }
 
-                if (IsSticky(constraints, solution, user.UserId, a))
+                if (IsProtected(constraints, user.UserId, a))
                 {
                     return true;
                 }
@@ -2425,7 +2428,7 @@ public static class ExactNightQuotaGuard
         var protectedEvening = solution.GetUserAssignments(user.UserId, date)
             .Where(a => !a.IsOnCall)
             .Where(a => a.ShiftLabel == ShiftLabel.Evening)
-            .Any(a => IsSticky(constraints, solution, user.UserId, a));
+            .Any(a => IsProtected(constraints, user.UserId, a));
         if (protectedEvening)
         {
             return false;
@@ -2434,7 +2437,7 @@ public static class ExactNightQuotaGuard
         var nextDay = date.Date.AddDays(1);
         var protectedBlockingNextDay = solution.GetUserAssignments(user.UserId, nextDay)
             .Where(a => !a.IsOnCall)
-            .Where(a => IsSticky(constraints, solution, user.UserId, a))
+            .Where(a => IsProtected(constraints, user.UserId, a))
             .Any(a => constraints.HardRules.IsForbiddenOnDayAfterNight(a.ShiftLabel));
         if (protectedBlockingNextDay)
         {

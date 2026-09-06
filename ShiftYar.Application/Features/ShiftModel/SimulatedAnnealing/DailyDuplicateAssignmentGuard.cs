@@ -39,12 +39,13 @@ public static class DailyDuplicateAssignmentGuard
 
             foreach (var extra in items.Where(a => !keepers.Contains(a)))
             {
-                if (solution.IsLockedSkeleton(extra.UserId, extra.ShiftId, extra.Date) || extra.IsSkeleton)
+                if (IsProtected(solution, user, extra))
                 {
                     continue;
                 }
 
-                solution.RemoveAssignment(extra.UserId, extra.ShiftId, extra.Date);
+                solution.UnlockSkeletonAssignment(extra.UserId, extra.ShiftId, extra.Date);
+                solution.RemoveAssignment(extra.UserId, extra.ShiftId, extra.Date, force: true);
             }
         }
     }
@@ -61,7 +62,7 @@ public static class DailyDuplicateAssignmentGuard
             .Where(g => !DailyAssignmentRules.IsValidDaySet(g.Select(a => a.ShiftLabel), maxPerDay, forbidDup))
             .Select(g =>
             {
-                var labels = string.Join("+", g.Select(a => a.ShiftLabel).OrderBy(l => l));
+                var labels = string.Join("+", g.Select(a => a.ShiftLabel));
                 return $"User {g.Key.UserId} has invalid same-day shifts on {g.Key.Date:yyyy-MM-dd}: {labels}.";
             })
             .ToList();
@@ -74,10 +75,11 @@ public static class DailyDuplicateAssignmentGuard
         int maxPerDay,
         bool forbidDup)
     {
-        // اولویت: اسلات اجباری، سپس شب (سهمیه)، سپس صبح+عصر
+        // اولویت: اسلات اجباری، سپس شب (سهمیه)، سپس اسکلت، سپس صبح+عصر
         var ordered = items
-            .OrderByDescending(a => IsProtected(solution, user, a) || a.IsSkeleton)
+            .OrderByDescending(a => IsProtected(solution, user, a))
             .ThenByDescending(a => a.ShiftLabel == ShiftLabel.Night && user?.HasExactNightQuota == true)
+            .ThenByDescending(a => solution.IsLockedSkeleton(a.UserId, a.ShiftId, a.Date) || a.IsSkeleton)
             .ThenBy(a => AdjacentShiftRestRules.LabelOrder(a.ShiftLabel))
             .ThenBy(a => a.ShiftId)
             .ToList();
