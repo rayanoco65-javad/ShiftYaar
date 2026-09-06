@@ -943,6 +943,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             EnsureExactNightQuotasOrThrow(scheduler, solution);
             EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
             EnsureHardDailyRulesOrThrow(solution, constraints);
+            EnsureMaxConsecutiveWorkdaysOrThrow(solution, constraints);
             ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
 
@@ -1375,6 +1376,26 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
             throw new InvalidOperationException(
                 "قیود سخت روزانه رعایت نشدند:\n" + string.Join("\n", daily.Concat(adjacency)));
+        }
+
+        /// <summary>
+        /// سقف روزهای کاری متوالی نباید در خروجی نهایی نقض شود و در صورت نقض باید عملیات متوقف شود.
+        /// </summary>
+        private static void EnsureMaxConsecutiveWorkdaysOrThrow(ShiftSolution solution, ShiftConstraints constraints)
+        {
+            if (!constraints.HardRules.EnforceMaxConsecutiveShifts)
+            {
+                return;
+            }
+
+            var violations = MaxConsecutiveWorkdayRules.GetViolations(solution, constraints);
+            if (violations.Count == 0)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                "سقف روزهای کاری متوالی پرسنل رعایت نشد:\n" + string.Join("\n", violations));
         }
 
         private static void EnsureConflictingApprovedRequestsOrThrow(ShiftConstraints constraints)
@@ -2932,11 +2953,27 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             }
 
             ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            MorningEveningBalanceGuard.Enforce(solution, constraints);
+            OvertimeBalanceGuard.Enforce(solution, constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
+            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            ExactNightQuotaGuard.Enforce(solution, constraints);
+            scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
+            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            scheduler.RefreshSolutionViolations(solution);
 
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
             EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
             EnsureHardDailyRulesOrThrow(solution, constraints);
+            EnsureMaxConsecutiveWorkdaysOrThrow(solution, constraints);
             ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
         }
@@ -3049,6 +3086,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
             _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureHardDailyRules...", request.DepartmentId);
             EnsureHardDailyRulesOrThrow(solution, constraints);
+            EnsureMaxConsecutiveWorkdaysOrThrow(solution, constraints);
             _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: ShiftManagerMixGuard.EnsureOrThrow...", request.DepartmentId);
             ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
             _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureSpecialtyCapacityNotExceeded...", request.DepartmentId);

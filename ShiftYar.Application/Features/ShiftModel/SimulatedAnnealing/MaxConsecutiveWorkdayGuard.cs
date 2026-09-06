@@ -54,7 +54,8 @@ public static class MaxConsecutiveWorkdayGuard
                 return;
             }
 
-            if (!RemoveClearableAssignmentsOnDate(solution, constraints, user, restDate.Value, repairSkeletonMix))
+            var removed = RemoveClearableAssignmentsOnDate(solution, constraints, user, restDate.Value, repairSkeletonMix);
+            if (!removed)
             {
                 return;
             }
@@ -124,8 +125,7 @@ public static class MaxConsecutiveWorkdayGuard
             return false;
         }
 
-        if (assignments.Any(a => IsOnProtected(user, a)
-                                 || solution.IsLockedSkeleton(a.UserId, a.ShiftId, a.Date)))
+        if (assignments.Any(a => IsOnProtected(user, a)))
         {
             return false;
         }
@@ -193,8 +193,8 @@ public static class MaxConsecutiveWorkdayGuard
 
             if (solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date))
             {
+                solution.UnlockSkeletonAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
                 removedSkeletonSlot = true;
-                continue;
             }
 
             if (assignment.ShiftLabel == ShiftLabel.Night && user.ExactNightShiftCount.HasValue)
@@ -207,12 +207,7 @@ public static class MaxConsecutiveWorkdayGuard
                 }
             }
 
-            solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
-        }
-
-        if (removedSkeletonSlot)
-        {
-            repairSkeletonMix?.Invoke(solution);
+            solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date, force: true);
         }
 
         return !solution.GetUserAssignments(user.UserId, date).Any(a => !a.IsOnCall && !IsOnProtected(user, a));

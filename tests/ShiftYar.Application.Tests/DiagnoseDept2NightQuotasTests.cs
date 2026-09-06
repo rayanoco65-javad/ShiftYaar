@@ -1387,6 +1387,10 @@ public class DiagnoseDept2NightQuotasTests
         {
             var u13asgs = solution.GetUserAllAssignments(13).Where(a => !a.IsOnCall).OrderBy(a => a.Date).Select(a => $"{a.Date:MM-dd}:{a.ShiftLabel}");
             _output.WriteLine($"[TRACE {step}] U13: {string.Join(", ", u13asgs)}");
+            var u27asgs = solution.GetUserAllAssignments(27).Where(a => !a.IsOnCall).OrderBy(a => a.Date).Select(a => $"{a.Date:MM-dd}:{a.ShiftLabel}");
+            _output.WriteLine($"[TRACE {step}] U27: {string.Join(", ", u27asgs)}");
+            var c0908 = solution.Assignments.Values.Count(a => a.Date.Date == new DateTime(2026, 9, 8) && !a.IsOnCall);
+            _output.WriteLine($"[TRACE {step}] 09-08 count = {c0908}");
         }
 
         TraceUser13("After Optimize");
@@ -1410,6 +1414,7 @@ public class DiagnoseDept2NightQuotasTests
         TraceUser13("After OvertimeBalanceGuard");
 
         AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+        MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
         ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
         ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
         TraceUser13("After FillCoverage 2");
@@ -1419,6 +1424,7 @@ public class DiagnoseDept2NightQuotasTests
         TraceUser13("After ManagerMixRepairSweep 2");
 
         AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+        MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
         ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
         ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
         TraceUser13("After Final FillCoverage");
@@ -1495,6 +1501,7 @@ public class DiagnoseDept2NightQuotasTests
         Assert.Empty(overCapViolations);
         Assert.Empty(managerMixViolations);
         Assert.Empty(restViolations);
+        Assert.Empty(consecViolations);
         Assert.Empty(nightDeficits);
         Assert.Equal(0, underCoveredDays);
     }

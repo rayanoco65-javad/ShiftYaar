@@ -451,6 +451,126 @@ public static class ShiftCoverageGuard
             solution.AddAssignment(user.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall: false);
             missing--;
         }
+
+        if (missing > 0)
+        {
+            TryFillByRelievingAdjacentWorkDay(solution, constraints, shiftReq, date, specialtyReq, ref missing);
+        }
+    }
+
+    private static void TryFillByRelievingAdjacentWorkDay(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        ShiftRequirement shiftReq,
+        DateTime date,
+        SpecialtyRequirement specialtyReq,
+        ref int missing)
+    {
+        if (missing <= 0) return;
+
+        var potentialUsers = constraints.UserConstraints
+            .Where(u => u.IsActive && u.SpecialtyId == specialtyReq.SpecialtyId)
+            .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, shiftReq.ShiftLabel))
+            .Where(u => IsEligibleForCoverageFill(solution, constraints, u, shiftReq.ShiftLabel, date))
+            .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
+            .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
+            .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
+            .Where(u =>
+            {
+                var existing = solution.GetUserAssignments(u.UserId, date).Select(a => a.ShiftLabel);
+                var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
+                    ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
+                    : 2;
+                if (!DailyAssignmentRules.CanAddShift(existing, shiftReq.ShiftLabel, maxPerDay, constraints.HardRules.ForbidDuplicateDailyAssignments))
+                    return false;
+                if (AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(u.UserId), date, shiftReq.ShiftLabel, constraints))
+                    return false;
+                return true;
+            })
+            .ToList();
+
+        foreach (var u in potentialUsers)
+        {
+            if (missing <= 0) break;
+
+            var adjacentDates = new[] { date.AddDays(-1), date.AddDays(1), date.AddDays(-2), date.AddDays(2) };
+            foreach (var adjDate in adjacentDates)
+            {
+                var uAsgs = solution.GetUserAssignments(u.UserId, adjDate).Where(a => !a.IsOnCall).ToList();
+                foreach (var asg in uAsgs)
+                {
+                    if (ApprovedRequestGuard.IsApprovedRequiredSlot(u, asg.Date, asg.ShiftLabel, asg.ShiftId)
+                        || u.RequiredPresenceDates.Any(d => d.Date == asg.Date.Date))
+                    {
+                        continue;
+                    }
+
+                    var targetShiftReq = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftId == asg.ShiftId);
+                    if (targetShiftReq == null) continue;
+
+                    var donors = constraints.UserConstraints
+                        .Where(v => v.UserId != u.UserId && v.IsActive && v.SpecialtyId == specialtyReq.SpecialtyId)
+                        .Where(v => ShiftEligibilityResolver.MayEverTakeLabel(v, asg.ShiftLabel))
+                        .Where(v => IsEligibleForCoverageFill(solution, constraints, v, asg.ShiftLabel, asg.Date))
+                        .Where(v => !v.UnavailableDates.Any(d => d.Date == asg.Date.Date))
+                        .Where(v => !v.UnavailableShiftSlots.Any(s => s.Date.Date == asg.Date.Date && s.ShiftLabel == asg.ShiftLabel))
+                        .Where(v => !solution.HasAssignment(v.UserId, asg.ShiftId, asg.Date))
+                        .Where(v => CanAcceptShift(solution, constraints, v, asg.Date, asg.ShiftLabel))
+                        .ToList();
+
+                    foreach (var v in donors)
+                    {
+                        if (ShiftManagerRules.RequiresAnyManager(targetShiftReq))
+                        {
+                            var (reqTotal, reqL1) = ShiftManagerRules.GetRequirement(targetShiftReq);
+                            var currentAssignees = solution.GetShiftAssignments(asg.ShiftId, asg.Date)
+                                .Where(a => !a.IsOnCall && a.UserId != u.UserId)
+                                .Select(a => constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId))
+                                .Where(x => x != null)
+                                .ToList();
+                            currentAssignees.Add(v);
+                            if (currentAssignees.Count(ShiftManagerRules.IsLevel1) < reqL1
+                                || currentAssignees.Count(ShiftManagerRules.IsManager) < reqTotal)
+                            {
+                                continue;
+                            }
+                        }
+
+                        var backup = solution.Clone();
+                        var isSkel = solution.IsLockedSkeleton(u.UserId, asg.ShiftId, asg.Date);
+                        if (isSkel)
+                        {
+                            solution.UnlockSkeletonAssignment(u.UserId, asg.ShiftId, asg.Date);
+                        }
+                        solution.RemoveAssignment(u.UserId, asg.ShiftId, asg.Date, force: true);
+                        solution.AddAssignment(v.UserId, asg.ShiftId, asg.Date, asg.ShiftLabel, isOnCall: false, isSkeleton: isSkel);
+                        if (isSkel)
+                        {
+                            SkeletonAssignmentGuard.LockSlotManagerAssignments(solution, constraints, targetShiftReq, asg.Date);
+                        }
+
+                        if (CanAcceptShift(solution, constraints, u, date, shiftReq.ShiftLabel))
+                        {
+                            solution.AddAssignment(u.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall: false);
+                            missing--;
+                            return;
+                        }
+
+                        solution.Assignments.Clear();
+                        foreach (var a in backup.Assignments.Values)
+                        {
+                            solution.AddAssignment(a.UserId, a.ShiftId, a.Date, a.ShiftLabel, a.IsOnCall, a.IsSkeleton);
+                        }
+                        solution.LockedSkeletonAssignments.Clear();
+                        foreach (var l in backup.LockedSkeletonAssignments)
+                        {
+                            solution.LockedSkeletonAssignments.Add(l);
+                        }
+                        solution.SyncSkeletonFlagsFromLockSet();
+                    }
+                }
+            }
+        }
     }
 
     private static int CoveragePriority(
