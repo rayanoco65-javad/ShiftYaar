@@ -74,6 +74,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             ExactNightQuotaGuard.OptimizeSpread(bestSolution, _constraints);
+            ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
+            PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: false);
+            ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
+            RefreshSolutionViolations(bestSolution);
             stopwatch.Stop();
             _statistics.ExecutionTime = stopwatch.Elapsed;
 
@@ -115,6 +119,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             ExactNightQuotaGuard.OptimizeSpread(bestSolution, _constraints);
+            ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
+            PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: false);
+            ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
+            RefreshSolutionViolations(bestSolution);
             stopwatch.Stop();
             _statistics.ExecutionTime = stopwatch.Elapsed;
 
@@ -1539,7 +1547,15 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             MorningEveningBalanceGuard.Enforce(solution, _constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
+            PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
+            ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             solution.Score = CalculateSolutionScore(solution);
+            RefreshSolutionViolations(solution);
+        }
+
+        public void RefreshSolutionViolations(ShiftSolution solution)
+        {
+            solution.Violations.Clear();
             solution.Violations.AddRange(ShiftManagerMixGuard.GetViolations(solution, _constraints));
             solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
             solution.Violations.AddRange(ApprovedRequestGuard.GetUnmetViolations(solution, _constraints));

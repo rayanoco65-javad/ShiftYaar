@@ -929,6 +929,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             ExactNightQuotaGuard.Enforce(solution, constraints);
             scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
             ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            scheduler.RefreshSolutionViolations(solution);
 
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
@@ -2600,6 +2601,17 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         /// </summary>
         private async Task<ShiftSchedulingResultDto> ConvertSolutionToResultAsync(ShiftSolution solution, ShiftConstraints constraints) // نگاشت راه‌حل SA به DTO خروجی
         {
+            var freshViolations = new List<string>();
+            freshViolations.AddRange(ShiftManagerMixGuard.GetViolations(solution, constraints));
+            freshViolations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, constraints));
+            freshViolations.AddRange(ApprovedRequestGuard.GetUnmetViolations(solution, constraints));
+            freshViolations.AddRange(ShiftEligibilityGuard.GetViolations(solution, constraints));
+            freshViolations.AddRange(AdjacentShiftRestGuard.GetViolations(solution, constraints));
+            freshViolations.AddRange(DailyDuplicateAssignmentGuard.GetViolations(solution, constraints));
+            freshViolations.AddRange(MaxConsecutiveWorkdayRules.GetViolations(solution, constraints));
+
+            solution.Violations = freshViolations;
+
             var result = new ShiftSchedulingResultDto
             {
                 FinalScore = solution.Score,
@@ -3003,8 +3015,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 ExactNightQuotaGuard.Enforce(solution, constraints);
             }
 
-            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: StripExcessCoverage...", request.DepartmentId);
+            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: StripExcessCoverage & Post-Processing...", request.DepartmentId);
             ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            MorningEveningBalanceGuard.Enforce(solution, constraints);
+            ExactNightQuotaGuard.Enforce(solution, constraints);
+            scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            scheduler.RefreshSolutionViolations(solution);
 
             _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureApprovedRequests...", request.DepartmentId);
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
