@@ -67,6 +67,8 @@ public static class MorningEveningBalanceGuard
                 break;
             }
         }
+
+        EnsureMinimumDayShiftPresence(solution, constraints, users, lookup);
     }
 
     public static int CountMorning(ShiftSolution solution, int userId) =>
@@ -506,6 +508,22 @@ public static class MorningEveningBalanceGuard
         return false;
     }
 
+    public static bool CanUserTakeShiftAfterRemovalPublic(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        UserConstraint user,
+        SaShiftAssignment assignment,
+        int ignoreShiftId) => CanUserTakeShiftAfterRemoval(solution, constraints, lookup, user, assignment, ignoreShiftId);
+
+    public static bool WouldPreserveManagerMixPublic(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        int shiftId,
+        DateTime date,
+        int donorUserId,
+        int receiverUserId) => WouldPreserveManagerMix(solution, constraints, shiftId, date, donorUserId, receiverUserId);
+
     private static bool CanUserTakeShiftAfterRemoval(
         ShiftSolution solution,
         ShiftConstraints constraints,
@@ -607,7 +625,12 @@ public static class MorningEveningBalanceGuard
                 lookup,
                 constraints.IsHoliday,
                 uid => uid == user.UserId && user.IncludedInProductivityPlan);
-            if (ProjectPersonnelProductivityPriority.WouldExceedSchedulingCap(user, worked))
+            var currentWorked = ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
+                solution.GetUserAllAssignments(user.UserId).Where(a => !a.IsOnCall),
+                lookup,
+                constraints.IsHoliday,
+                uid => uid == user.UserId && user.IncludedInProductivityPlan);
+            if (worked > currentWorked + 0.25 && ProjectPersonnelProductivityPriority.WouldExceedSchedulingCap(user, worked))
             {
                 return false;
             }
@@ -652,4 +675,178 @@ public static class MorningEveningBalanceGuard
             s.Date.Date == assignment.Date.Date &&
             s.ShiftLabel == assignment.ShiftLabel &&
             (!s.ShiftId.HasValue || s.ShiftId.Value == assignment.ShiftId));
+
+    private static void EnsureMinimumDayShiftPresence(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        List<UserConstraint> users,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup)
+    {
+        var mShift = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftLabel == ShiftLabel.Morning);
+        var eShift = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftLabel == ShiftLabel.Evening);
+        if (mShift == null || eShift == null)
+        {
+            return;
+        }
+
+        // 1. Swap for users with low Morning (< 2) and high Evening (>= 4)
+        for (var pass = 0; pass < 12; pass++)
+        {
+            var progressed = false;
+            foreach (var target in users.Where(u =>
+                ShiftEligibilityResolver.MayEverTakeLabel(u, ShiftLabel.Morning) &&
+                !u.HasExactMorningQuota &&
+                CountMorning(solution, u.UserId) < 2 &&
+                CountEvening(solution, u.UserId) >= 4))
+            {
+                var targetEvenings = solution.GetUserAllAssignments(target.UserId)
+                    .Where(a => a.ShiftLabel == ShiftLabel.Evening && !a.IsOnCall)
+                    .Where(a => !IsProtected(constraints, solution, target, a))
+                    .OrderBy(a => a.Date)
+                    .ToList();
+
+                foreach (var eAsg in targetEvenings)
+                {
+                    var donors = solution.GetShiftAssignments(mShift.ShiftId, eAsg.Date)
+                        .Where(a => !a.IsOnCall)
+                        .Select(a => constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId))
+                        .Where(x => x != null && x.ShiftType != ShiftTypes.FixedShift)
+                        .Cast<UserConstraint>()
+                        .Where(d => ShiftEligibilityResolver.MayEverTakeLabel(d, ShiftLabel.Evening) && !d.HasExactEveningQuota)
+                        .Where(d => CountMorning(solution, d.UserId) >= 2)
+                        .ToList();
+
+                    foreach (var donor in donors)
+                    {
+                        var mAsg = solution.GetShiftAssignments(mShift.ShiftId, eAsg.Date).FirstOrDefault(a => a.UserId == donor.UserId && !a.IsOnCall);
+                        if (mAsg == null || IsProtected(constraints, solution, donor, mAsg))
+                        {
+                            continue;
+                        }
+
+                        if (!CanUserTakeShiftAfterRemoval(solution, constraints, lookup, target, mAsg, eAsg.ShiftId))
+                        {
+                            continue;
+                        }
+
+                        if (!CanUserTakeShiftAfterRemoval(solution, constraints, lookup, donor, eAsg, mAsg.ShiftId))
+                        {
+                            continue;
+                        }
+
+                        if (!WouldPreserveManagerMix(solution, constraints, eShift.ShiftId, eAsg.Date, target.UserId, donor.UserId))
+                        {
+                            continue;
+                        }
+
+                        if (!WouldPreserveManagerMix(solution, constraints, mShift.ShiftId, mAsg.Date, donor.UserId, target.UserId))
+                        {
+                            continue;
+                        }
+
+                        solution.UnlockSkeletonAssignment(target.UserId, eAsg.ShiftId, eAsg.Date);
+                        solution.RemoveAssignment(target.UserId, eAsg.ShiftId, eAsg.Date, force: true);
+                        solution.UnlockSkeletonAssignment(donor.UserId, mAsg.ShiftId, mAsg.Date);
+                        solution.RemoveAssignment(donor.UserId, mAsg.ShiftId, mAsg.Date, force: true);
+
+                        solution.AddAssignment(target.UserId, mAsg.ShiftId, mAsg.Date, ShiftLabel.Morning, isOnCall: false);
+                        solution.AddAssignment(donor.UserId, eAsg.ShiftId, eAsg.Date, ShiftLabel.Evening, isOnCall: false);
+
+                        progressed = true;
+                        break;
+                    }
+
+                    if (CountMorning(solution, target.UserId) >= 2)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            if (!progressed)
+            {
+                break;
+            }
+        }
+
+        // 2. Symmetric swap for users with low Evening (< 2) and high Morning (>= 4)
+        for (var pass = 0; pass < 12; pass++)
+        {
+            var progressed = false;
+            foreach (var target in users.Where(u =>
+                ShiftEligibilityResolver.MayEverTakeLabel(u, ShiftLabel.Evening) &&
+                !u.HasExactEveningQuota &&
+                CountEvening(solution, u.UserId) < 2 &&
+                CountMorning(solution, u.UserId) >= 4))
+            {
+                var targetMornings = solution.GetUserAllAssignments(target.UserId)
+                    .Where(a => a.ShiftLabel == ShiftLabel.Morning && !a.IsOnCall)
+                    .Where(a => !IsProtected(constraints, solution, target, a))
+                    .OrderBy(a => a.Date)
+                    .ToList();
+
+                foreach (var mAsg in targetMornings)
+                {
+                    var donors = solution.GetShiftAssignments(eShift.ShiftId, mAsg.Date)
+                        .Where(a => !a.IsOnCall)
+                        .Select(a => constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId))
+                        .Where(x => x != null && x.ShiftType != ShiftTypes.FixedShift)
+                        .Cast<UserConstraint>()
+                        .Where(d => ShiftEligibilityResolver.MayEverTakeLabel(d, ShiftLabel.Morning) && !d.HasExactMorningQuota)
+                        .Where(d => CountEvening(solution, d.UserId) >= 2)
+                        .ToList();
+
+                    foreach (var donor in donors)
+                    {
+                        var eAsg = solution.GetShiftAssignments(eShift.ShiftId, mAsg.Date).FirstOrDefault(a => a.UserId == donor.UserId && !a.IsOnCall);
+                        if (eAsg == null || IsProtected(constraints, solution, donor, eAsg))
+                        {
+                            continue;
+                        }
+
+                        if (!CanUserTakeShiftAfterRemoval(solution, constraints, lookup, target, eAsg, mAsg.ShiftId))
+                        {
+                            continue;
+                        }
+
+                        if (!CanUserTakeShiftAfterRemoval(solution, constraints, lookup, donor, mAsg, eAsg.ShiftId))
+                        {
+                            continue;
+                        }
+
+                        if (!WouldPreserveManagerMix(solution, constraints, mShift.ShiftId, mAsg.Date, target.UserId, donor.UserId))
+                        {
+                            continue;
+                        }
+
+                        if (!WouldPreserveManagerMix(solution, constraints, eShift.ShiftId, eAsg.Date, donor.UserId, target.UserId))
+                        {
+                            continue;
+                        }
+
+                        solution.UnlockSkeletonAssignment(target.UserId, mAsg.ShiftId, mAsg.Date);
+                        solution.RemoveAssignment(target.UserId, mAsg.ShiftId, mAsg.Date, force: true);
+                        solution.UnlockSkeletonAssignment(donor.UserId, eAsg.ShiftId, eAsg.Date);
+                        solution.RemoveAssignment(donor.UserId, eAsg.ShiftId, eAsg.Date, force: true);
+
+                        solution.AddAssignment(target.UserId, eAsg.ShiftId, eAsg.Date, ShiftLabel.Evening, isOnCall: false);
+                        solution.AddAssignment(donor.UserId, mAsg.ShiftId, mAsg.Date, ShiftLabel.Morning, isOnCall: false);
+
+                        progressed = true;
+                        break;
+                    }
+
+                    if (CountEvening(solution, target.UserId) >= 2)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            if (!progressed)
+            {
+                break;
+            }
+        }
+    }
 }

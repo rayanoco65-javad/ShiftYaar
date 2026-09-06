@@ -1026,6 +1026,261 @@ public class DiagnoseDept2NightQuotasTests
             }
         }
     }
+
+    [Fact]
+    public void Test_InspectShahrivar3AndMornings()
+    {
+        var path = @"C:\Users\Paria\.gemini\antigravity\brain\2e803de5-ca99-49b4-a5e7-a2d4d5605940\scratch\dept2_loaded_constraints.json";
+        var json = System.IO.File.ReadAllText(path);
+        var constraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(json)!;
+
+        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            MaxIterations = 4000,
+            MaxIterationsWithoutImprovement = 600
+        });
+
+        var solution = scheduler.Optimize();
+
+        ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+        ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+        scheduler.PerformFinalManagerMixRepairSweep(solution);
+        if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
+        {
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+            ExactNightQuotaGuard.Enforce(solution, constraints);
+        }
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+
+        _output.WriteLine("=== DAILY ASSIGNMENT COUNTS ===");
+        var pDate = new System.Globalization.PersianCalendar();
+        for (var d = constraints.StartDate.Date; d <= constraints.EndDate.Date; d = d.AddDays(1))
+        {
+            var dayAsgs = solution.Assignments.Values.Where(a => a.Date.Date == d.Date && !a.IsOnCall).ToList();
+            var m = dayAsgs.Count(a => a.ShiftLabel == ShiftLabel.Morning);
+            var e = dayAsgs.Count(a => a.ShiftLabel == ShiftLabel.Evening);
+            var n = dayAsgs.Count(a => a.ShiftLabel == ShiftLabel.Night);
+            var isHol = constraints.IsHoliday(d);
+            var shDate = $"{d:yyyy-MM-dd}";
+            var pDay = $"{pDate.GetYear(d)}/{pDate.GetMonth(d):D2}/{pDate.GetDayOfMonth(d):D2}";
+            _output.WriteLine($"{pDay} ({shDate}, Hol={isHol}): Total={dayAsgs.Count} (M={m}, E={e}, N={n})");
+            if (pDay.EndsWith("03"))
+            {
+                foreach (var a in dayAsgs.OrderBy(a => a.ShiftLabel))
+                {
+                    var u = constraints.UserConstraints.First(x => x.UserId == a.UserId);
+                    _output.WriteLine($"   {a.ShiftLabel}: User {a.UserId} ({u.UserName}, L={u.ShiftManagerLevel})");
+                }
+            }
+        }
+
+        _output.WriteLine("\n=== MORNING SHIFTS PER USER ===");
+        foreach (var u in constraints.UserConstraints.OrderBy(u => u.UserId))
+        {
+            var asgs = solution.GetUserAllAssignments(u.UserId).Where(a => !a.IsOnCall).ToList();
+            var m = asgs.Count(a => a.ShiftLabel == ShiftLabel.Morning);
+            var e = asgs.Count(a => a.ShiftLabel == ShiftLabel.Evening);
+            var n = asgs.Count(a => a.ShiftLabel == ShiftLabel.Night);
+            _output.WriteLine($"User {u.UserId} ({u.UserName}, L={u.ShiftManagerLevel}): M={m}, E={e}, N={n}, Tot={asgs.Count}");
+        }
+    }
+
+    [Fact]
+    public void Test_InspectMissingMornings()
+    {
+        var path = @"C:\Users\Paria\.gemini\antigravity\brain\2e803de5-ca99-49b4-a5e7-a2d4d5605940\scratch\dept2_loaded_constraints.json";
+        var json = System.IO.File.ReadAllText(path);
+        var constraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(json)!;
+
+        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            MaxIterations = 4000,
+            MaxIterationsWithoutImprovement = 600
+        });
+
+        var solution = scheduler.Optimize();
+
+        var d0904 = new DateTime(2026, 9, 4);
+        var mShift = constraints.ShiftRequirements.First(s => s.ShiftLabel == ShiftLabel.Morning);
+        void LogStages(string stage)
+        {
+            var m0904 = solution.GetShiftAssignments(mShift.ShiftId, d0904).Where(a => !a.IsOnCall).Select(a => $"{a.UserId}({constraints.UserConstraints.First(u => u.UserId == a.UserId).UserName})").ToList();
+            _output.WriteLine($"[{stage}] 2026-09-04 Morning count = {m0904.Count}: {string.Join(", ", m0904)}");
+        }
+
+        LogStages("After Optimize");
+
+        ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+        LogStages("After ForceSatisfyAllDeficits 1");
+
+        ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+        LogStages("After GlobalRebalanceNightQuotas 1");
+
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+        LogStages("After Enforce 1");
+
+        scheduler.PerformFinalManagerMixRepairSweep(solution);
+        LogStages("After ManagerMixSweep");
+
+        if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
+        {
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+            ExactNightQuotaGuard.Enforce(solution, constraints);
+            LogStages("After Second Repair");
+        }
+
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+        LogStages("After StripExcessCoverage");
+
+        ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
+        LogStages("After FillRemainingAfterForceApply");
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+        LogStages("After Final StripExcessCoverage");
+
+        MorningEveningBalanceGuard.Enforce(solution, constraints);
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+        scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+
+        _output.WriteLine("\n=== ALL USERS SHIFT COUNTS ===");
+        foreach (var u in constraints.UserConstraints.OrderBy(u => u.UserId))
+        {
+            var asgs = solution.GetUserAllAssignments(u.UserId).Where(a => !a.IsOnCall).ToList();
+            var m = asgs.Count(a => a.ShiftLabel == ShiftLabel.Morning);
+            var e = asgs.Count(a => a.ShiftLabel == ShiftLabel.Evening);
+            var n = asgs.Count(a => a.ShiftLabel == ShiftLabel.Night);
+            var holM = asgs.Count(a => a.ShiftLabel == ShiftLabel.Morning && constraints.IsHoliday(a.Date));
+            var holE = asgs.Count(a => a.ShiftLabel == ShiftLabel.Evening && constraints.IsHoliday(a.Date));
+            _output.WriteLine($"User {u.UserId} ({u.UserName}, L={u.ShiftManagerLevel}, Exp={u.ExperienceYears}): M={m}, E={e}, N={n}, Tot={asgs.Count} (HolM={holM}, HolE={holE})");
+        }
+
+        var dates = new[] { new DateTime(2026, 9, 4), new DateTime(2026, 9, 7) };
+        foreach (var d in dates)
+        {
+            _output.WriteLine($"\n=== Date {d:yyyy-MM-dd} (Hol={constraints.IsHoliday(d)}) ===");
+            var asgs = solution.Assignments.Values.Where(a => a.Date.Date == d.Date && !a.IsOnCall).OrderBy(a => a.ShiftLabel).ThenBy(a => a.UserId).ToList();
+            _output.WriteLine($"Total: {asgs.Count} (M={asgs.Count(a => a.ShiftLabel == ShiftLabel.Morning)}, E={asgs.Count(a => a.ShiftLabel == ShiftLabel.Evening)}, N={asgs.Count(a => a.ShiftLabel == ShiftLabel.Night)})");
+            foreach (var a in asgs)
+            {
+                var u = constraints.UserConstraints.First(x => x.UserId == a.UserId);
+                _output.WriteLine($"  {a.ShiftLabel}: User {a.UserId} ({u.UserName}, L={u.ShiftManagerLevel})");
+            }
+
+            _output.WriteLine("\n  Checking ALL users for Morning on this date:");
+            var mSpec = mShift.SpecialtyRequirements.First();
+            foreach (var u in constraints.UserConstraints.OrderBy(u => u.UserId))
+            {
+                var reasons = "";
+                if (u.UnavailableDates.Any(x => x.Date == d.Date)) reasons += "UnavailDate; ";
+                if (u.UnavailableShiftSlots.Any(x => x.Date.Date == d.Date && x.ShiftLabel == ShiftLabel.Morning)) reasons += "UnavailSlot; ";
+                if (solution.HasAssignment(u.UserId, mShift.ShiftId, d.Date)) reasons += "AlreadyHasMorning; ";
+                var userDayAsgs = solution.GetUserAssignments(u.UserId, d.Date).Where(a => !a.IsOnCall).ToList();
+                if (userDayAsgs.Any()) reasons += $"HasOtherShiftToday({string.Join(",", userDayAsgs.Select(a => a.ShiftLabel))}); ";
+                var prevDayNight = solution.GetUserAssignments(u.UserId, d.Date.AddDays(-1)).Any(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+                if (prevDayNight) reasons += "PrevDayNight; ";
+
+                var mayEver = ShiftEligibilityResolver.MayEverTakeLabel(u, ShiftLabel.Morning);
+                if (!mayEver) reasons += "MayEver=False; ";
+                var eligible = DayShiftQuotaEligibility.CanAssignInCoverageFill(solution, constraints, u, ShiftLabel.Morning, d)
+                    && ComboShiftQuotaEligibility.CanAssignInCoverageFill(solution, constraints, u, ShiftLabel.Morning, d);
+                if (!eligible) reasons += "EligibleForCoverageFill=False; ";
+                var wouldExceedMaxCons = MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(solution, constraints, u, d);
+                if (wouldExceedMaxCons) reasons += "WouldExceedMaxConsecutive; ";
+                var wouldConflict = AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(u.UserId), d, ShiftLabel.Morning, constraints);
+                if (wouldConflict) reasons += "AdjacentConflict; ";
+
+                _output.WriteLine($"    User {u.UserId} ({u.UserName}): {(string.IsNullOrEmpty(reasons) ? "CAN TAKE MORNING!" : reasons)}");
+            }
+        }
+    }
+
+    [Fact]
+    public void Test_InspectUser23Swaps()
+    {
+        var path = @"C:\Users\Paria\.gemini\antigravity\brain\2e803de5-ca99-49b4-a5e7-a2d4d5605940\scratch\dept2_loaded_constraints.json";
+        var json = System.IO.File.ReadAllText(path);
+        var constraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(json)!;
+
+        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            MaxIterations = 4000,
+            MaxIterationsWithoutImprovement = 600
+        });
+
+        var solution = scheduler.Optimize();
+        ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+        ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+        scheduler.PerformFinalManagerMixRepairSweep(solution);
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+        ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+        MorningEveningBalanceGuard.Enforce(solution, constraints);
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+        scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+
+        _output.WriteLine("\n=== ALL USERS SHIFT COUNTS AFTER OPTIMIZE & ENFORCE ===");
+        foreach (var u in constraints.UserConstraints.OrderBy(u => u.UserId))
+        {
+            var asgs = solution.GetUserAllAssignments(u.UserId).Where(a => !a.IsOnCall).ToList();
+            var m = asgs.Count(a => a.ShiftLabel == ShiftLabel.Morning);
+            var e = asgs.Count(a => a.ShiftLabel == ShiftLabel.Evening);
+            var n = asgs.Count(a => a.ShiftLabel == ShiftLabel.Night);
+            _output.WriteLine($"User {u.UserId} ({u.UserName}, L={u.ShiftManagerLevel}): M={m}, E={e}, N={n}, Tot={asgs.Count}");
+        }
+
+        _output.WriteLine("\n=== RUNNING ALL SYSTEM VALIDATIONS ===");
+        var overCapViolations = ShiftCoverageGuard.GetOverCapacityViolations(solution, constraints);
+        _output.WriteLine($"OverCapacity violations: {overCapViolations.Count}");
+        foreach (var v in overCapViolations) _output.WriteLine($"  {v}");
+
+        var managerMixViolations = ShiftManagerMixGuard.GetViolations(solution, constraints);
+        _output.WriteLine($"ManagerMix violations: {managerMixViolations.Count}");
+        foreach (var v in managerMixViolations) _output.WriteLine($"  {v}");
+
+        var restViolations = AdjacentShiftRestGuard.GetViolations(solution, constraints);
+        _output.WriteLine($"AdjacentShiftRest violations: {restViolations.Count}");
+        foreach (var v in restViolations) _output.WriteLine($"  {v}");
+
+        var consecViolations = MaxConsecutiveWorkdayRules.GetViolations(solution, constraints);
+        _output.WriteLine($"MaxConsecutive violations: {consecViolations.Count}");
+        foreach (var v in consecViolations) _output.WriteLine($"  {v}");
+
+        var unmetViolations = ApprovedRequestGuard.GetUnmetViolations(solution, constraints);
+        _output.WriteLine($"Unmet approved request violations: {unmetViolations.Count}");
+        foreach (var v in unmetViolations) _output.WriteLine($"  {v}");
+
+        scheduler.AreExactNightQuotasSatisfied(solution, out var nightDeficits);
+        _output.WriteLine($"Night quota deficits: {nightDeficits.Count}");
+        foreach (var d in nightDeficits) _output.WriteLine($"  {d}");
+
+        // Day by day coverage
+        var totalDays = (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1;
+        var underCoveredDays = 0;
+        for (var i = 0; i < totalDays; i++)
+        {
+            var curDate = constraints.StartDate.Date.AddDays(i);
+            var isHol = constraints.IsHoliday(curDate);
+            var expectedTotal = isHol ? 10 : 11;
+            var dayAsgs = solution.Assignments.Values.Where(a => a.Date.Date == curDate.Date && !a.IsOnCall).ToList();
+            if (dayAsgs.Count != expectedTotal)
+            {
+                underCoveredDays++;
+                _output.WriteLine($"WARNING: Date {curDate:yyyy-MM-dd} (Hol={isHol}) has {dayAsgs.Count} shifts (expected {expectedTotal})");
+            }
+        }
+        _output.WriteLine($"Undercovered days count: {underCoveredDays}");
+
+        Assert.Empty(overCapViolations);
+        Assert.Empty(managerMixViolations);
+        Assert.Empty(restViolations);
+        Assert.Empty(nightDeficits);
+        Assert.Equal(0, underCoveredDays);
+    }
 }
 
 

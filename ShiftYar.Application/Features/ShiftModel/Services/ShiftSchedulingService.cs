@@ -923,6 +923,12 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             }
 
             ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            MorningEveningBalanceGuard.Enforce(solution, constraints);
+            ExactNightQuotaGuard.Enforce(solution, constraints);
+            scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
 
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
             EnsureExactNightQuotasOrThrow(scheduler, solution);
