@@ -416,17 +416,11 @@ public static class ExactNightQuotaGuard
         foreach (var (donor, night) in EnumerateSurplusNights(solution, constraints, excludeUserId: receiver.UserId))
         {
             var date = night.Date.Date;
-            if (ViolatesNightSpacing(solution, constraints, receiver, date, receiverMinGap))
-            {
-                continue;
-            }
 
-            if (!HasSpecialtyCapacityIgnoring(solution, constraints, nightShift, date, receiver.SpecialtyId, donor.UserId))
-            {
-                continue;
-            }
-
-            if (IsPersonallyFeasibleNightDate(solution, constraints, receiver, nightShift, date, holidayOnly: false)
+            // ۱) تلاش برای انتقال مستقیم شب مازاد به گیرنده (در صورت امکان‌پذیر بودن مستقیم)
+            if (!ViolatesNightSpacing(solution, constraints, receiver, date, receiverMinGap)
+                && HasSpecialtyCapacityIgnoring(solution, constraints, nightShift, date, receiver.SpecialtyId, donor.UserId)
+                && IsPersonallyFeasibleNightDate(solution, constraints, receiver, nightShift, date, holidayOnly: false)
                 && CanAcceptNightAfterClearing(solution, constraints, receiver, nightShift, date))
             {
                 var backup = solution.Clone();
@@ -459,7 +453,7 @@ public static class ExactNightQuotaGuard
                 RestoreSolutionFrom(solution, backup);
             }
 
-            // اگر گیرنده مستقیماً نتوانست شب مازاد را بگیرد،
+            // ۲) اگر گیرنده مستقیماً نتوانست شب مازاد را بگیرد،
             // از چرخش ۲ مرحله‌ای استفاده کن: واسط intermediate شب date را از donor می‌گیرد، و شب دیگر خودش (date2) را به receiver می‌دهد.
             foreach (var intermediate in constraints.UserConstraints.Where(u => u.IsActive && u.UserId != donor.UserId && u.UserId != receiver.UserId))
             {

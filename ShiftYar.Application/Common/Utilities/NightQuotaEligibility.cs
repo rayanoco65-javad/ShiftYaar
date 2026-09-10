@@ -41,6 +41,29 @@ public static class NightQuotaEligibility
             }
         }
 
+        if (!exact.HasValue)
+        {
+            var totalExactQuotas = constraints.UserConstraints
+                .Where(u => u.HasExactNightQuota)
+                .Sum(u => u.ExactNightShiftCount ?? 0);
+            if (totalExactQuotas > 0)
+            {
+                var totalNightDemand = constraints.ShiftRequirements
+                    .Where(s => s.ShiftLabel == ShiftLabel.Night)
+                    .Sum(s => s.SpecialtyRequirements.Sum(sr =>
+                    {
+                        var days = (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1;
+                        var holCount = constraints.HolidayDates.Count(h => h.Date >= constraints.StartDate.Date && h.Date <= constraints.EndDate.Date);
+                        var regCount = days - holCount;
+                        return sr.ForDay(false).RequiredTotalCount * regCount + sr.ForDay(true).RequiredTotalCount * holCount;
+                    }));
+                if (totalExactQuotas >= totalNightDemand)
+                {
+                    return false;
+                }
+            }
+        }
+
         if (isHolidayWeekendNight)
         {
             return DayShiftQuotaEligibility.AllowsHolidaySurplus(fallback, holidayFallback);

@@ -2332,7 +2332,21 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => !solution.GetUserAssignments(u.UserId, date.Date).Any(a =>
                     ApprovedRequestGuard.IsApprovedRequiredSlot(u, a.Date, a.ShiftLabel, a.ShiftId) ||
                     ShiftManagerRules.IsCriticalForManagerMix(_constraints, solution, a)))
-                .OrderByDescending(u =>
+                .OrderBy(u =>
+                {
+                    if (shiftReq.ShiftLabel == ShiftLabel.Night)
+                    {
+                        if (u.HasExactNightQuota)
+                        {
+                            var currentNights = solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+                            var remaining = (u.ExactNightShiftCount ?? 0) - currentNights;
+                            return remaining > 0 ? 0 : 1;
+                        }
+                        return 2;
+                    }
+                    return 0;
+                })
+                .ThenByDescending(u =>
                 {
                     if (u.ExactNightShiftCount.HasValue && shiftReq.ShiftLabel == ShiftLabel.Night)
                     {
@@ -3329,8 +3343,18 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
                 .OrderBy(u =>
                 {
+                    if (shiftReq.ShiftLabel == ShiftLabel.Night)
+                    {
+                        if (u.HasExactNightQuota)
+                        {
+                            var currentNights = solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+                            var remaining = (u.ExactNightShiftCount ?? 0) - currentNights;
+                            return remaining > 0 ? 0 : 1;
+                        }
+                        return 2;
+                    }
                     if (needLevel1) return 0;
-                    if (shiftReq.ShiftLabel == ShiftLabel.Night || shiftReq.ShiftLabel == ShiftLabel.Evening)
+                    if (shiftReq.ShiftLabel == ShiftLabel.Evening)
                     {
                         return ShiftManagerRules.IsLevel1(u) ? 1 : 0;
                     }

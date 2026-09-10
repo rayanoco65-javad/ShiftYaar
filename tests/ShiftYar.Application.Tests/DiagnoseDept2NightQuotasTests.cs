@@ -285,6 +285,87 @@ public class DiagnoseDept2NightQuotasTests
     }
 
     [Fact]
+    public void Test_DiagnoseUser25Deficit()
+    {
+        var path = @"C:\Users\Paria\.gemini\antigravity\brain\2e803de5-ca99-49b4-a5e7-a2d4d5605940\scratch\dept2_loaded_constraints.json";
+        var json = System.IO.File.ReadAllText(path);
+        var constraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(json)!;
+
+
+        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            MaxIterations = 4000,
+            MaxIterationsWithoutImprovement = 600
+        });
+
+        var solution = scheduler.Optimize();
+
+        var nightShift = constraints.ShiftRequirements.First(s => s.ShiftLabel == ShiftLabel.Night);
+        var u13 = constraints.UserConstraints.First(u => u.UserId == 13);
+        var u25 = constraints.UserConstraints.First(u => u.UserId == 25);
+
+        _output.WriteLine("=== USER 13 NIGHTS ===");
+        var u13Nights = solution.GetUserAllAssignments(13).Where(a => a.ShiftLabel == ShiftLabel.Night).ToList();
+        foreach (var a in u13Nights)
+        {
+            _output.WriteLine($"U13 Night: {a.Date:yyyy-MM-dd}");
+            var assignees = solution.GetShiftAssignments(nightShift.ShiftId, a.Date).Where(x => !x.IsOnCall).ToList();
+            _output.WriteLine($"  Date {a.Date:yyyy-MM-dd} assignees: [{string.Join(", ", assignees.Select(x => x.UserId))}]");
+        }
+
+        _output.WriteLine("=== USER 25 NIGHTS ===");
+        var u25Nights = solution.GetUserAllAssignments(25).Where(a => a.ShiftLabel == ShiftLabel.Night).ToList();
+        foreach (var a in u25Nights)
+        {
+            _output.WriteLine($"U25 Night: {a.Date:yyyy-MM-dd}");
+        }
+
+        foreach (var uid in new[] { 14, 19, 21 })
+        {
+            var u = constraints.UserConstraints.First(x => x.UserId == uid);
+            var nights = solution.GetUserAllAssignments(uid).Where(a => a.ShiftLabel == ShiftLabel.Night).Select(a => a.Date.ToString("yyyy-MM-dd")).ToList();
+            var dayAsgs = solution.GetUserAssignments(uid, new DateTime(2026, 9, 7)).Select(a => a.ShiftLabel.ToString()).ToList();
+            _output.WriteLine($"User {uid} ({u.UserName}): Nights=[{string.Join(", ", nights)}], on 09-07 has shifts=[{string.Join(", ", dayAsgs)}]");
+        }
+
+        void LogStatus(string step)
+        {
+            var u16n = solution.GetUserAllAssignments(16).Where(a => a.ShiftLabel == ShiftLabel.Night).Select(a => a.Date.ToString("MM-dd")).ToList();
+            var u25n = solution.GetUserAllAssignments(25).Where(a => a.ShiftLabel == ShiftLabel.Night).Select(a => a.Date.ToString("MM-dd")).ToList();
+            var u13n = solution.GetUserAllAssignments(13).Where(a => a.ShiftLabel == ShiftLabel.Night).Select(a => a.Date.ToString("MM-dd")).ToList();
+            _output.WriteLine($"[{step}] U16 (Q=4): {u16n.Count} [{string.Join(", ", u16n)}] | U25 (Q=8): {u25n.Count} [{string.Join(", ", u25n)}] | U13 (Q=none): {u13n.Count} [{string.Join(", ", u13n)}]");
+        }
+
+        LogStatus("1. After Optimize");
+
+        ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+        LogStatus("2. After ForceSatisfyAllDeficits");
+        ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+        LogStatus("3. After GlobalRebalanceNightQuotas");
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+        LogStatus("4. After Enforce");
+        scheduler.PerformFinalManagerMixRepairSweep(solution);
+        LogStatus("5. After FinalManagerMixRepairSweep");
+
+        foreach (var u in constraints.UserConstraints)
+        {
+            var cnt = solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+            var q = u.ExactNightShiftCount;
+            if (q.HasValue && cnt != q.Value)
+            {
+                _output.WriteLine($"MISMATCH: User {u.UserId} ({u.UserName}): assigned={cnt}, quota={q.Value} (diff={cnt - q.Value})");
+            }
+            else if (!q.HasValue && cnt > 0)
+            {
+                _output.WriteLine($"SURPLUS NO-QUOTA: User {u.UserId} ({u.UserName}): assigned={cnt}, quota=NONE");
+            }
+        }
+
+        scheduler.AreExactNightQuotasSatisfied(solution, out var quotaErrors);
+        _output.WriteLine("Quota errors: " + string.Join("; ", quotaErrors));
+    }
+
+    [Fact]
     public async Task Test_FetchLatestJob()
     {
         var connStr = "Data Source=chogolisa.liara.cloud,34729;Initial Catalog=ShiftYarDb2;User Id=sa;Password=DwOr8efLcjXBVQ10jGYx5dhy;MultipleActiveResultSets=true;TrustServerCertificate=true";
@@ -698,7 +779,7 @@ public class DiagnoseDept2NightQuotasTests
 
         var users = new List<UserConstraint>();
 
-        void AddUser(int id, string name, int exactNight, bool canManage = false, int? level = null)
+        void AddUser(int id, string name, int? exactNight = null, bool canManage = false, int? level = null)
         {
             var u = new UserConstraint
             {
@@ -710,13 +791,16 @@ public class DiagnoseDept2NightQuotasTests
                 ShiftManagerLevel = (byte?)level,
                 ExactNightShiftCount = exactNight,
                 NightFallbackParticipation = false,
-                MinimumShiftsRequired = { [ShiftLabel.Night] = exactNight },
+                MinimumShiftsRequired = exactNight.HasValue ? new Dictionary<ShiftLabel, int> { [ShiftLabel.Night] = exactNight.Value } : new Dictionary<ShiftLabel, int>(),
                 MaxConsecutiveShifts = 3
             };
             users.Add(u);
         }
 
+        AddUser(12, "فرشته ساکی", null, true, 1);
+        AddUser(13, "زهرا درخشانی الوار", null, true, 1);
         AddUser(14, "بهاره بهاری پور", 4, true, 1);
+        AddUser(15, "صبا حاتمی فیضی", null, true, 1);
         AddUser(16, "فاطمه سلیمی", 4, true, 1);
         AddUser(17, "فاطمه رضایی", 4, true, 1);
         AddUser(18, "خدیجه متقی", 4, true, 1);
@@ -737,6 +821,11 @@ public class DiagnoseDept2NightQuotasTests
 
         var rawRequests = new (int UserId, string Date, int Type, int? Label, int Action)[]
         {
+            (12, "2026-08-28", 0, null, 1),
+            (12, "2026-08-30", 0, null, 1),
+            (12, "2026-09-04", 0, null, 1),
+            (12, "2026-09-11", 0, null, 1),
+            (12, "2026-09-18", 0, null, 1),
             (13, "2026-08-23", 0, null, 1),
             (13, "2026-08-24", 0, null, 1),
             (13, "2026-08-25", 0, null, 1),
