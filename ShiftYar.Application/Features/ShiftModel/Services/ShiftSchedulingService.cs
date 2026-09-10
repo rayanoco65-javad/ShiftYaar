@@ -1306,6 +1306,27 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             return Enum.IsDefined(typeof(ShiftLabel), label);
         }
 
+        private static void EnsureLabelPermitted(UserConstraint uc, ShiftLabel label)
+        {
+            if (!uc.AllowedShiftLabels.Contains(label))
+            {
+                uc.AllowedShiftLabels.Add(label);
+            }
+
+            var flag = label switch
+            {
+                ShiftLabel.Morning => UserShiftPermission.Morning,
+                ShiftLabel.Evening => UserShiftPermission.Evening,
+                ShiftLabel.Night => UserShiftPermission.Night,
+                _ => UserShiftPermission.None
+            };
+
+            if (flag != UserShiftPermission.None && !uc.AllowedShiftPermissions.HasFlag(flag))
+            {
+                uc.AllowedShiftPermissions |= flag;
+            }
+        }
+
         private static List<string> GetApprovedRequestFailures(ShiftSchedulingResultDto result, ShiftConstraints constraints)
         {
             if (!ApprovedRequestGuard.HasAnyApprovedRequestConstraints(constraints))
@@ -2248,42 +2269,96 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     {
                         if (req.RequestType == Domain.Enums.ShiftRequestModel.RequestType.FullDay)
                         {
-                            // حضور کل‌روز در مدل کسب‌وکار مجاز نیست (سقف ۱۲ ساعت / فقط صبح+عصر).
+                            // برای پرسنل فیکس، حضور کل‌روز معادل حضور در شیفت فیکس همان کاربر است
+                            if (uc.ShiftType == ShiftTypes.FixedShift)
+                            {
+                                var fixedLabel = uc.ShiftSubType == ShiftSubTypes.FixedEvening
+                                    ? ShiftLabel.Evening
+                                    : ShiftLabel.Morning;
+
+                                var (resolvedLabel, resolvedShiftId) = ResolveRequestShiftMapping(
+                                    (int)fixedLabel, departmentShifts);
+
+                                var slot = new ShiftSlotConstraint
+                                {
+                                    Date = date,
+                                    ShiftLabel = resolvedLabel,
+                                    ShiftId = resolvedShiftId
+                                };
+                                if (!uc.RequiredShiftSlots.Any(s =>
+                                        s.Date.Date == slot.Date.Date &&
+                                        s.ShiftLabel == slot.ShiftLabel &&
+                                        s.ShiftId == slot.ShiftId))
+                                {
+                                    uc.RequiredShiftSlots.Add(slot);
+                                    uc.UnavailableShiftSlots.RemoveAll(s =>
+                                        s.Date.Date == slot.Date.Date && s.ShiftLabel == slot.ShiftLabel);
+                                    uc.UnavailableDates.RemoveAll(d => d.Date == slot.Date.Date);
+                                    EnsureLabelPermitted(uc, slot.ShiftLabel);
+                                    appliedOnSlot++;
+                                    _logger.LogInformation(
+                                        "LoadConstraints: Fixed user ON-FullDay mapped to {Label} UserId={UserId} Date={Date:yyyy-MM-dd} RequestId={RequestId}",
+                                        slot.ShiftLabel, uc.UserId, date, req.Id);
+                                }
+                                continue;
+                            }
+
+                            // حضور کل‌روز در مدل کسب‌وکار برای کاربران چرخشی مجاز نیست (سقف ۱۲ ساعت / فقط صبح+عصر).
                             // داده‌های قدیمی اشتباه را نادیده می‌گیریم تا Optimize شکست نخورد.
                             skippedIncomplete++;
                             _logger.LogWarning(
-                                "LoadConstraints: Skipping invalid ON-FullDay request {RequestId} UserId={UserId} Date={Date:yyyy-MM-dd} — full-day presence is not allowed; use SpecificShift",
+                                "LoadConstraints: Skipping invalid ON-FullDay request {RequestId} UserId={UserId} Date={Date:yyyy-MM-dd} — full-day presence is not allowed for rotating staff; use SpecificShift",
                                 req.Id, uc.UserId, date);
                             continue;
                         }
                         else
                         {
+                            ShiftLabel resolvedLabel;
+                            int? resolvedShiftId;
+
                             if (!req.ShiftLabel.HasValue)
                             {
-                                skippedIncomplete++;
-                                _logger.LogWarning(
-                                    "LoadConstraints: Skipping SpecificShift ON request {RequestId} — ShiftLabel is null",
-                                    req.Id);
-                                continue;
+                                if (uc.ShiftType == ShiftTypes.FixedShift)
+                                {
+                                    var fixedLabel = uc.ShiftSubType == ShiftSubTypes.FixedEvening
+                                        ? ShiftLabel.Evening
+                                        : ShiftLabel.Morning;
+                                    var resolved = ResolveRequestShiftMapping(
+                                        (int)fixedLabel, departmentShifts);
+                                    resolvedLabel = resolved.Label;
+                                    resolvedShiftId = resolved.ShiftId;
+                                }
+                                else
+                                {
+                                    skippedIncomplete++;
+                                    _logger.LogWarning(
+                                        "LoadConstraints: Skipping SpecificShift ON request {RequestId} — ShiftLabel is null",
+                                        req.Id);
+                                    continue;
+                                }
                             }
-
-                            var (resolvedLabel, resolvedShiftId) = ResolveRequestShiftMapping(
-                                (int)req.ShiftLabel.Value, departmentShifts);
-
-                            if (!IsValidShiftLabel(resolvedLabel))
+                            else
                             {
-                                skippedIncomplete++;
-                                _logger.LogWarning(
-                                    "LoadConstraints: Skipping ON request {RequestId} — unresolved ShiftLabel raw={Raw}",
-                                    req.Id, (int)req.ShiftLabel.Value);
-                                continue;
-                            }
+                                var resolved = ResolveRequestShiftMapping(
+                                    (int)req.ShiftLabel.Value, departmentShifts);
+                                resolvedLabel = resolved.Label;
+                                resolvedShiftId = resolved.ShiftId;
 
-                            if ((int)req.ShiftLabel.Value != (int)resolvedLabel)
-                            {
-                                _logger.LogWarning(
-                                    "LoadConstraints: ON request {RequestId} ShiftLabel remapped raw={Raw} → {Label} (ShiftId={ShiftId})",
-                                    req.Id, (int)req.ShiftLabel.Value, resolvedLabel, resolvedShiftId);
+                                if (!IsValidShiftLabel(resolvedLabel))
+                                {
+                                    skippedIncomplete++;
+                                    _logger.LogWarning(
+                                        "LoadConstraints: Skipping ON request {RequestId} — unresolved ShiftLabel raw={Raw}",
+                                        req.Id, (int)req.ShiftLabel.Value);
+                                    continue;
+                                }
+
+                                if ((int)req.ShiftLabel.Value != (int)resolvedLabel)
+                                {
+                                    _logger.LogWarning(
+                                        "LoadConstraints: ON request {RequestId} ShiftLabel remapped raw={Raw} → {Label} (ShiftId={ShiftId})",
+                                        req.Id, (int)req.ShiftLabel.Value, resolvedLabel, resolvedShiftId);
+                                }
                             }
 
                             var slot = new ShiftSlotConstraint
@@ -2301,6 +2376,12 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                                 // ON صریح بر OFF مشتق همان روز/شیفت اولویت دارد
                                 uc.UnavailableShiftSlots.RemoveAll(s =>
                                     s.Date.Date == slot.Date.Date && s.ShiftLabel == slot.ShiftLabel);
+                                // و همچنین بر عدم‌حضور کل‌روز همان روز اولویت قطعی دارد
+                                uc.UnavailableDates.RemoveAll(d => d.Date == slot.Date.Date);
+
+                                // اولویت درخواست تأییدشده بر مجوزهای شیفت کاربر
+                                EnsureLabelPermitted(uc, slot.ShiftLabel);
+
                                 appliedOnSlot++;
                                 _logger.LogInformation(
                                     "LoadConstraints: ON-Slot UserId={UserId} Date={Date:yyyy-MM-dd} Label={Label} ShiftId={ShiftId} RequestId={RequestId}",
@@ -2410,8 +2491,24 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                                 uc.RequiredShiftSlots.Any(s => s.Date.Date == date.Date) ||
                                 uc.RequiredPresenceDates.Any(d => d.Date == date.Date);
 
-                            if (!hasApprovedPresence &&
-                                !uc.UnavailableDates.Any(d => d.Date == date.Date))
+                            if (hasApprovedPresence)
+                            {
+                                // اولویت قطعی حضور: پاک کردن هرگونه عدم‌حضور برای این روز تعطیل
+                                uc.UnavailableDates.RemoveAll(d => d.Date == date.Date);
+
+                                // اگر فقط RequiredPresenceDates بوده و اسلات مشخصی ثبت نشده، اسلات فیکس اضافه شود
+                                if (!uc.RequiredShiftSlots.Any(s => s.Date.Date == date.Date))
+                                {
+                                    uc.RequiredShiftSlots.Add(new ShiftSlotConstraint
+                                    {
+                                        Date = date,
+                                        ShiftLabel = fixedLabel
+                                    });
+                                    EnsureLabelPermitted(uc, fixedLabel);
+                                    appliedFixedSlots++;
+                                }
+                            }
+                            else if (!uc.UnavailableDates.Any(d => d.Date == date.Date))
                             {
                                 uc.UnavailableDates.Add(date);
                                 appliedFixedHolidayOffs++;

@@ -120,11 +120,18 @@ public static class ShiftCoverageGuard
                     var onCall = GetSpecialtyAssignments(
                         solution, constraints, shiftReq, date, specialtyReq.SpecialtyId, isOnCall: true);
 
-                    if (regular.Count > day.RequiredTotalCount)
+                    var approvedRegularCount = regular.Count(a =>
+                    {
+                        var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
+                        return u != null && ApprovedRequestGuard.IsApprovedRequiredSlot(u, a.Date, a.ShiftLabel, a.ShiftId);
+                    });
+                    var effectiveRequiredTotal = Math.Max(day.RequiredTotalCount, approvedRegularCount);
+
+                    if (regular.Count > effectiveRequiredTotal)
                     {
                         violations.Add(
                             $"Over capacity on {date:yyyy-MM-dd} shift {shiftReq.ShiftLabel} specialty {specialtyReq.SpecialtyId}: " +
-                            $"{regular.Count}/{day.RequiredTotalCount} regular.");
+                            $"{regular.Count}/{effectiveRequiredTotal} regular.");
                     }
 
                     if (onCall.Count > day.OnCallTotalCount)
@@ -148,8 +155,17 @@ public static class ShiftCoverageGuard
         SpecialtyRequirement specialtyReq)
     {
         var day = specialtyReq.ForDay(constraints.IsHoliday(date));
+        var regular = GetSpecialtyAssignments(
+            solution, constraints, shiftReq, date, specialtyReq.SpecialtyId, isOnCall: false);
+        var approvedRegularCount = regular.Count(a =>
+        {
+            var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
+            return u != null && ApprovedRequestGuard.IsApprovedRequiredSlot(u, a.Date, a.ShiftLabel, a.ShiftId);
+        });
+        var effectiveRequiredTotal = Math.Max(day.RequiredTotalCount, approvedRegularCount);
+
         StripExcessOfType(
-            solution, constraints, shiftReq, date, specialtyReq, day.RequiredTotalCount, isOnCall: false);
+            solution, constraints, shiftReq, date, specialtyReq, effectiveRequiredTotal, isOnCall: false);
         StripExcessOfType(
             solution, constraints, shiftReq, date, specialtyReq, day.OnCallTotalCount, isOnCall: true);
     }

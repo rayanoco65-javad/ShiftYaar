@@ -74,6 +74,12 @@ public static class ShiftEligibilityGuard
             return true;
         }
 
+        // درخواست تأییدشده بر مجوزهای اولیه اولویت دارد
+        if (ApprovedRequestGuard.IsApprovedRequiredSlot(user, assignment.Date, assignment.ShiftLabel, assignment.ShiftId))
+        {
+            return true;
+        }
+
         var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
             ? System.Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
             : 2;

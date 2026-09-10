@@ -84,10 +84,18 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 entity.SupervisorId = supervisorId;
                 entity.Status = RequestStatus.Pending;
 
-                var typeError = ValidateOnShiftRequestType(entity.RequestAction, entity.RequestType, entity.ShiftLabel);
+                var isFixed = userDepatment?.ShiftType == ShiftEnums.ShiftTypes.FixedShift;
+                var typeError = ValidateOnShiftRequestType(entity.RequestAction, entity.RequestType, entity.ShiftLabel, isFixed);
                 if (typeError != null)
                 {
                     return ApiResponse<ShiftRequestDtoGet>.Fail(typeError);
+                }
+
+                if (isFixed && !entity.ShiftLabel.HasValue && entity.RequestAction == RequestAction.RequestToBeOnShift)
+                {
+                    entity.ShiftLabel = userDepatment?.ShiftSubType == ShiftEnums.ShiftSubTypes.FixedEvening
+                        ? ShiftEnums.ShiftLabel.Evening
+                        : ShiftEnums.ShiftLabel.Morning;
                 }
 
                 // فقط مقادیر خارج از enum (مثل Shift.Id=3) را به‌عنوان ShiftId remap کن.
@@ -220,10 +228,18 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
 
                 _mapper.Map(dto, entity);
 
-                var typeError = ValidateOnShiftRequestType(entity.RequestAction, entity.RequestType, entity.ShiftLabel);
+                var isFixed = entity.User?.ShiftType == ShiftEnums.ShiftTypes.FixedShift;
+                var typeError = ValidateOnShiftRequestType(entity.RequestAction, entity.RequestType, entity.ShiftLabel, isFixed);
                 if (typeError != null)
                 {
                     return ApiResponse<ShiftRequestDtoGet>.Fail(typeError);
+                }
+
+                if (isFixed && !entity.ShiftLabel.HasValue && entity.RequestAction == RequestAction.RequestToBeOnShift)
+                {
+                    entity.ShiftLabel = entity.User?.ShiftSubType == ShiftEnums.ShiftSubTypes.FixedEvening
+                        ? ShiftEnums.ShiftLabel.Evening
+                        : ShiftEnums.ShiftLabel.Morning;
                 }
 
                 var nightQuotaError = await ValidateNightOnRequestAgainstMonthlyQuotaAsync(entity);
@@ -406,23 +422,28 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
         private static string? ValidateOnShiftRequestType(
             RequestAction? action,
             RequestType? type,
-            ShiftEnums.ShiftLabel? shiftLabel)
+            ShiftEnums.ShiftLabel? shiftLabel,
+            bool isFixedShiftUser = false)
         {
             if (action != RequestAction.RequestToBeOnShift)
             {
                 return null;
             }
 
-            // حضور کل‌روز مجاز نیست: فقط صبح+عصر یا صبح+شب در یک روز ترکیب می‌شوند؛
-            // عصر+شب و شب→صبح روز بعد بیش از ۱۲ ساعت متوالی‌اند.
+            // برای پرسنل فیکس، حضور کل‌روز معادل شیفت فیکس آنها است و مجاز است
             if (type == RequestType.FullDay)
             {
+                if (isFixedShiftUser)
+                {
+                    return null;
+                }
+
                 return
                     "درخواست حضور کل‌روز مجاز نیست. ترکیب‌های مجاز در یک روز: صبح+عصر یا صبح+شب؛ " +
                     "برای حضور باید نوع درخواست «شیفت مشخص» باشد و یکی از شیفت‌های صبح، عصر یا شب انتخاب شود.";
             }
 
-            if (type == RequestType.SpecificShift && !shiftLabel.HasValue)
+            if (type == RequestType.SpecificShift && !shiftLabel.HasValue && !isFixedShiftUser)
             {
                 return "برای درخواست حضور در شیفت مشخص، انتخاب شیفت (صبح/عصر/شب) الزامی است.";
             }
@@ -432,7 +453,8 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
 
         private async Task<string?> ValidateApprovalAsync(ShiftRequest entity)
         {
-            var typeError = ValidateOnShiftRequestType(entity.RequestAction, entity.RequestType, entity.ShiftLabel);
+            var isFixed = entity.User?.ShiftType == ShiftEnums.ShiftTypes.FixedShift;
+            var typeError = ValidateOnShiftRequestType(entity.RequestAction, entity.RequestType, entity.ShiftLabel, isFixed);
             if (typeError != null)
             {
                 return typeError;

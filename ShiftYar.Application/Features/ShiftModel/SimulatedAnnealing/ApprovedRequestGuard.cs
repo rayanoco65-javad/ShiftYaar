@@ -45,6 +45,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
+                    // اگر درخواست حضور تأییدشده برای این روز وجود دارد، اولویت قطعی با حضور است
+                    if (user.RequiredShiftSlots.Any(s => s.Date.Date == date.Date) ||
+                        user.RequiredPresenceDates.Any(d => d.Date == date.Date))
+                    {
+                        continue;
+                    }
+
                     if (solution.GetUserAssignments(user.UserId, date).Any())
                     {
                         violations.Add(

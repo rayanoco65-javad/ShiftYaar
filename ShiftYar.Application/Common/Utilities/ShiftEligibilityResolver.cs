@@ -155,6 +155,12 @@ public static class ShiftEligibilityResolver
 
     public static bool MayEverTakeLabel(UserConstraint user, ShiftLabel label)
     {
+        // درخواست شیفت تأییدشده صریح بر محدودیت‌های مجوز اولیه اولویت دارد
+        if (user.RequiredShiftSlots.Any(s => s.ShiftLabel == label))
+        {
+            return true;
+        }
+
         if (UsesPermissionModel(user))
         {
             if (HasSinglePermission(user.AllowedShiftPermissions, label))
@@ -188,6 +194,13 @@ public static class ShiftEligibilityResolver
         int maxShiftsPerDay,
         bool forbidDuplicateLabels = true)
     {
+        // درخواست شیفت تأییدشده صریح بر مجوزهای اولیه اولویت دارد
+        if (user.RequiredShiftSlots.Any(s => s.ShiftLabel == newLabel))
+        {
+            return DailyAssignmentRules.CanAddShift(
+                existingOnDay, newLabel, maxShiftsPerDay, forbidDuplicateLabels);
+        }
+
         if (!UsesPermissionModel(user))
         {
             if (!IsLabelAllowed(user.AllowedShiftLabels, newLabel))
