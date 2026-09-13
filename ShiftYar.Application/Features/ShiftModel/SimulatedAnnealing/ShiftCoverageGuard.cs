@@ -441,7 +441,7 @@ public static class ShiftCoverageGuard
 
         var candidates = constraints.UserConstraints
             .Where(u => u.IsActive && u.SpecialtyId == specialtyReq.SpecialtyId)
-            .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, shiftReq.ShiftLabel))
+            .Where(u => ShiftEligibilityResolver.MayTakeLabelOnDate(u, shiftReq.ShiftLabel, date))
             .Where(u => IsEligibleForCoverageFill(solution, constraints, u, shiftReq.ShiftLabel, date))
             .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
             .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
@@ -486,7 +486,7 @@ public static class ShiftCoverageGuard
 
         var potentialUsers = constraints.UserConstraints
             .Where(u => u.IsActive && u.SpecialtyId == specialtyReq.SpecialtyId)
-            .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, shiftReq.ShiftLabel))
+            .Where(u => ShiftEligibilityResolver.MayTakeLabelOnDate(u, shiftReq.ShiftLabel, date))
             .Where(u => IsEligibleForCoverageFill(solution, constraints, u, shiftReq.ShiftLabel, date))
             .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
             .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
@@ -526,7 +526,7 @@ public static class ShiftCoverageGuard
 
                     var donors = constraints.UserConstraints
                         .Where(v => v.UserId != u.UserId && v.IsActive && v.SpecialtyId == specialtyReq.SpecialtyId)
-                        .Where(v => ShiftEligibilityResolver.MayEverTakeLabel(v, asg.ShiftLabel))
+                        .Where(v => ShiftEligibilityResolver.MayTakeLabelOnDate(v, asg.ShiftLabel, asg.Date))
                         .Where(v => IsEligibleForCoverageFill(solution, constraints, v, asg.ShiftLabel, asg.Date))
                         .Where(v => !v.UnavailableDates.Any(d => d.Date == asg.Date.Date))
                         .Where(v => !v.UnavailableShiftSlots.Any(s => s.Date.Date == asg.Date.Date && s.ShiftLabel == asg.ShiftLabel))

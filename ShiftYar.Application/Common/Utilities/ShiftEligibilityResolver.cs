@@ -203,7 +203,8 @@ public static class ShiftEligibilityResolver
     public static bool MayTakeLabelOnDate(UserConstraint user, ShiftLabel label, DateTime date)
     {
         // درخواست تأییدشده دقیقاً برای همین تاریخ
-        if (user.RequiredShiftSlots.Any(s => s.ShiftLabel == label && s.Date.Date == date.Date))
+        if (user.RequiredShiftSlots.Any(s => s.ShiftLabel == label && s.Date.Date == date.Date)
+            || user.RequiredPresenceDates.Any(d => d.Date == date.Date))
         {
             return true;
         }

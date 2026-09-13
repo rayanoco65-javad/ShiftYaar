@@ -184,7 +184,7 @@ public static class ProductivityHourFillGuard
                     foreach (var assignment in solution.GetUserAllAssignments(d.UserId)
                                  .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, solution, a, receiver))
                                  .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, d, a))
-                                 .Where(a => ShiftEligibilityResolver.MayEverTakeLabel(receiver, a.ShiftLabel))
+                                 .Where(a => ShiftEligibilityResolver.MayTakeLabelOnDate(receiver, a.ShiftLabel, a.Date))
                                  .OrderBy(a => DonationPriorityForReceiver(receiver, a))
                                  .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints, d)))
                     {
@@ -521,8 +521,8 @@ public static class ProductivityHourFillGuard
                     foreach (var assignment in solution.GetUserAllAssignments(donor.UserId)
                                  .Where(a => !a.IsOnCall && !IsProtectedAssignment(constraints, solution, a, receiver))
                                  .Where(a => ExactNightQuotaGuard.CanDonateNight(solution, constraints, donor, a))
-                                 .Where(a => ShiftEligibilityResolver.MayEverTakeLabel(receiver, a.ShiftLabel))
-                                 .OrderBy(a => DonationPriorityForReceiver(receiver, a))
+                                 .Where(a => ShiftEligibilityResolver.MayTakeLabelOnDate(receiver, a.ShiftLabel, a.Date))
+                                 .OrderBy(a => DonationPriorityForReceiver(receiver, a, a.Date))
                                  .ThenByDescending(a => EstimateShiftHours(a, lookup, constraints, donor)))
                     {
                         if (!CanUserTakeShift(solution, constraints, lookup, receiver, assignment, ignoreShiftId: null))
@@ -596,9 +596,12 @@ public static class ProductivityHourFillGuard
     /// <summary>
     /// اولویت اهدا: لیبل‌هایی که گیرنده واقعاً می‌تواند بگیرد (مثلاً عصر برای دونوبتهٔ قفل‌شده روی صبح=۰).
     /// </summary>
-    private static int DonationPriorityForReceiver(UserConstraint receiver, SaShiftAssignment assignment)
+    private static int DonationPriorityForReceiver(UserConstraint receiver, SaShiftAssignment assignment, DateTime? date = null)
     {
-        if (!ShiftEligibilityResolver.MayEverTakeLabel(receiver, assignment.ShiftLabel))
+        bool allowed = date.HasValue
+            ? ShiftEligibilityResolver.MayTakeLabelOnDate(receiver, assignment.ShiftLabel, date.Value)
+            : ShiftEligibilityResolver.MayTakeLabelOnDate(receiver, assignment.ShiftLabel, assignment.Date);
+        if (!allowed)
         {
             return 100;
         }
@@ -916,7 +919,7 @@ public static class ProductivityHourFillGuard
             for (var pass = 0; pass < 24; pass++)
             {
                 var ranked = targetUsers
-                    .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, label))
+                    .Where(u => ShiftEligibilityResolver.HasInherentPermission(u, label))
                     .Select(u => (
                         User: u,
                         Count: solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == label && !a.IsOnCall),
@@ -997,7 +1000,7 @@ public static class ProductivityHourFillGuard
             for (var pass = 0; pass < 32; pass++)
             {
                 var snapshot = targetUsers
-                    .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, label))
+                    .Where(u => ShiftEligibilityResolver.HasInherentPermission(u, label))
                     .Select(u => (
                         User: u,
                         Count: solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == label && !a.IsOnCall),

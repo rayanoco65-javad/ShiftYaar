@@ -1308,23 +1308,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
         private static void EnsureLabelPermitted(UserConstraint uc, ShiftLabel label)
         {
-            if (!uc.AllowedShiftLabels.Contains(label))
-            {
-                uc.AllowedShiftLabels.Add(label);
-            }
-
-            var flag = label switch
-            {
-                ShiftLabel.Morning => UserShiftPermission.Morning,
-                ShiftLabel.Evening => UserShiftPermission.Evening,
-                ShiftLabel.Night => UserShiftPermission.Night,
-                _ => UserShiftPermission.None
-            };
-
-            if (flag != UserShiftPermission.None && !uc.AllowedShiftPermissions.HasFlag(flag))
-            {
-                uc.AllowedShiftPermissions |= flag;
-            }
+            // درخواست تأییدشده از طریق RequiredShiftSlots برای همان تاریخ مشخص مدیریت می‌شود.
+            // نباید AllowedShiftPermissions را به صورت عمومی برای تمام روزهای ماه تغییر دهیم.
         }
 
         private static List<string> GetApprovedRequestFailures(ShiftSchedulingResultDto result, ShiftConstraints constraints)

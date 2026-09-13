@@ -2325,7 +2325,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var eligibleCandidates = _constraints.UserConstraints
                 .Where(u => u.IsActive && (needL1 ? ShiftManagerRules.IsLevel1(u) : ShiftManagerRules.IsManager(u)))
                 .Where(u => specialtyId == 0 || u.SpecialtyId == specialtyId)
-                .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, shiftReq.ShiftLabel))
+                .Where(u => ShiftEligibilityResolver.MayTakeLabelOnDate(u, shiftReq.ShiftLabel, date))
                 .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
                 .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
                 .Where(u => !u.RequiredShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel != shiftReq.ShiftLabel))
@@ -2864,7 +2864,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var candidates = _constraints.UserConstraints
                 .Where(u => u.IsActive && ShiftManagerRules.IsLevel1(u))
                 .Where(u => specialtyId == 0 || u.SpecialtyId == specialtyId)
-                .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, shiftReq.ShiftLabel))
+                .Where(u => ShiftEligibilityResolver.MayTakeLabelOnDate(u, shiftReq.ShiftLabel, date))
                 .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
                 .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
                 .Where(u => !u.RequiredShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel != shiftReq.ShiftLabel))
@@ -3339,7 +3339,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => u.SpecialtyId == specialtyId)
                 .Where(u => !genderLocked || u.Gender == occupantGender)
                 .Where(u => !HasConflictingApprovedRequiredOnDate(u, date, shiftReq.ShiftLabel))
-                .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, shiftReq.ShiftLabel))
+                .Where(u => ShiftEligibilityResolver.MayTakeLabelOnDate(u, shiftReq.ShiftLabel, date))
                 .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
                 .OrderBy(u =>
                 {
@@ -3916,7 +3916,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     return false;
                 }
             }
-            else if (!ShiftEligibilityResolver.MayEverTakeLabel(user, shiftLabel))
+            else if (!ShiftEligibilityResolver.MayTakeLabelOnDate(user, shiftLabel, date))
             {
                 return false;
             }

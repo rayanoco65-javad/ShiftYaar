@@ -256,7 +256,7 @@ public static class ManagerMixFeasibilityChecker
         constraints.UserConstraints
             .Where(u => u.IsActive && ShiftManagerRules.IsLevel1(u))
             .Where(u => u.SpecialtyId == specialtyId)
-            .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, shiftReq.ShiftLabel))
+            .Where(u => ShiftEligibilityResolver.MayTakeLabelOnDate(u, shiftReq.ShiftLabel, date))
             .Where(u => !HasConflictingApprovedOnDate(constraints, u, date, shiftReq.ShiftLabel))
             .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
             .OrderBy(u => CountLabelAssignments(solution, u.UserId, shiftReq.ShiftLabel))
