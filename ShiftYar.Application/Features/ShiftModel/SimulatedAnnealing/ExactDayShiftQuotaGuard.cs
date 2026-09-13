@@ -290,7 +290,7 @@ public static class ExactDayShiftQuotaGuard
         ShiftLabel label,
         DateTime date)
     {
-        if (!ShiftEligibilityResolver.MayEverTakeLabel(user, label))
+        if (!ShiftEligibilityResolver.MayTakeLabelOnDate(user, label, date))
         {
             return false;
         }

@@ -1309,7 +1309,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 
                 if (_userConstraintsDict.TryGetValue(assignment.UserId, out var uc))
                 {
-                    if (!ShiftEligibilityResolver.MayEverTakeLabel(uc, assignment.ShiftLabel)) return false;
+                    if (!ShiftEligibilityResolver.MayTakeLabelOnDate(uc, assignment.ShiftLabel, assignment.Date)) return false;
                 }
             }
 

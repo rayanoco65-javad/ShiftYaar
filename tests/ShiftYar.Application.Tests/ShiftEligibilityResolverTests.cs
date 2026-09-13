@@ -66,4 +66,43 @@ public class ShiftEligibilityResolverTests
         Assert.True(ShiftEligibilityResolver.MayTakeLabelOnDate(user, ShiftLabel.Evening, unrequestedDate));
         Assert.True(ShiftEligibilityResolver.MayTakeLabelOnDate(user, ShiftLabel.Night, unrequestedDate));
     }
+
+    [Fact]
+    public void IsAssignmentAllowed_WithDate_RejectsUnrequestedShiftOutsidePermissions()
+    {
+        var user = new UserConstraint
+        {
+            UserId = 13,
+            ShiftType = ShiftTypes.RotatingShift,
+            ShiftSubType = ShiftSubTypes.TwoShifts,
+            TwoShiftRotationPattern = TwoShiftRotationPattern.EveningNight
+        };
+        ShiftEligibilityResolver.ApplyPermissionsToUserConstraint(user, UserShiftPermission.Evening);
+
+        var approvedDate = new DateTime(2026, 8, 29);
+        var shahrivar6 = new DateTime(2026, 8, 28); // 6 Shahrivar
+
+        user.RequiredShiftSlots.Add(new ShiftSlotConstraint
+        {
+            Date = approvedDate,
+            ShiftLabel = ShiftLabel.Morning
+        });
+
+        user.UnavailableShiftSlots.Add(new ShiftSlotConstraint
+        {
+            Date = shahrivar6,
+            ShiftLabel = ShiftLabel.Evening
+        });
+
+        // Morning allowed on requested date (2026-08-29)
+        Assert.True(ShiftEligibilityResolver.IsAssignmentAllowed(user, Array.Empty<ShiftLabel>(), ShiftLabel.Morning, 1, true, approvedDate));
+
+        // Morning NOT allowed on 6 Shahrivar (2026-08-28)
+        Assert.False(ShiftEligibilityResolver.IsAssignmentAllowed(user, Array.Empty<ShiftLabel>(), ShiftLabel.Morning, 1, true, shahrivar6));
+
+        // DayShiftQuotaEligibility also rejects Morning on 6 Shahrivar
+        var constraints = new ShiftConstraints();
+        var solution = new ShiftSolution();
+        Assert.False(DayShiftQuotaEligibility.CanAssignInCoverageFill(solution, constraints, user, ShiftLabel.Morning, shahrivar6));
+    }
 }

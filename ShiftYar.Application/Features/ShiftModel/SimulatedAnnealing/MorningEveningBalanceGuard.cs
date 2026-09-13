@@ -774,7 +774,7 @@ public static class MorningEveningBalanceGuard
         {
             var progressed = false;
             foreach (var target in users.Where(u =>
-                ShiftEligibilityResolver.MayEverTakeLabel(u, ShiftLabel.Evening) &&
+                ShiftEligibilityResolver.HasInherentPermission(u, ShiftLabel.Evening) &&
                 !u.HasExactEveningQuota &&
                 CountEvening(solution, u.UserId) < 2 &&
                 CountMorning(solution, u.UserId) >= 4))
@@ -792,7 +792,7 @@ public static class MorningEveningBalanceGuard
                         .Select(a => constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId))
                         .Where(x => x != null && x.ShiftType != ShiftTypes.FixedShift)
                         .Cast<UserConstraint>()
-                        .Where(d => ShiftEligibilityResolver.MayEverTakeLabel(d, ShiftLabel.Morning) && !d.HasExactMorningQuota)
+                        .Where(d => ShiftEligibilityResolver.HasInherentPermission(d, ShiftLabel.Morning) && !d.HasExactMorningQuota)
                         .Where(d => CountEvening(solution, d.UserId) >= 2)
                         .ToList();
 

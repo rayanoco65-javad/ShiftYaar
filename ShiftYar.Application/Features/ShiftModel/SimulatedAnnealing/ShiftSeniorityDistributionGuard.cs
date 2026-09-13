@@ -449,7 +449,7 @@ public static class ShiftSeniorityDistributionGuard
                 continue;
             }
 
-            if (!ShiftEligibilityResolver.MayEverTakeLabel(receiver, assignment.ShiftLabel))
+            if (!ShiftEligibilityResolver.MayTakeLabelOnDate(receiver, assignment.ShiftLabel, assignment.Date))
             {
                 continue;
             }
@@ -554,7 +554,7 @@ public static class ShiftSeniorityDistributionGuard
             return false;
         }
 
-        if (!ShiftEligibilityResolver.MayEverTakeLabel(user, assignment.ShiftLabel))
+        if (!ShiftEligibilityResolver.MayTakeLabelOnDate(user, assignment.ShiftLabel, assignment.Date))
         {
             return false;
         }

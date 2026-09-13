@@ -22,7 +22,7 @@ public static class DayShiftQuotaEligibility
             return true;
         }
 
-        if (!ShiftEligibilityResolver.MayEverTakeLabel(user, label))
+        if (!ShiftEligibilityResolver.MayTakeLabelOnDate(user, label, date))
         {
             return false;
         }
