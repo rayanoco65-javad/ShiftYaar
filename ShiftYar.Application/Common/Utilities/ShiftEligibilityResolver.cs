@@ -175,6 +175,42 @@ public static class ShiftEligibilityResolver
         return IsLabelAllowed(user.AllowedShiftLabels, label);
     }
 
+    /// <summary>
+    /// بررسی می‌کند که آیا کاربر مجوز ذاتی (بدون نیاز به درخواست تأییدشده) برای این نوع شیفت دارد.
+    /// برخلاف <see cref="MayEverTakeLabel"/>، درخواست‌های تأییدشده را در نظر نمی‌گیرد.
+    /// برای فیلتر کاندیداها در گاردهایی که شیفت routine (غیر ON) اضافه می‌کنند استفاده شود.
+    /// </summary>
+    public static bool HasInherentPermission(UserConstraint user, ShiftLabel label)
+    {
+        if (UsesPermissionModel(user))
+        {
+            if (HasSinglePermission(user.AllowedShiftPermissions, label))
+            {
+                return true;
+            }
+
+            return label == ShiftLabel.Night
+                   && user.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningNightSameDay);
+        }
+
+        return IsLabelAllowed(user.AllowedShiftLabels, label);
+    }
+
+    /// <summary>
+    /// بررسی می‌کند آیا کاربر می‌تواند این نوع شیفت را روی یک تاریخ خاص بگیرد:
+    /// یا مجوز ذاتی دارد، یا درخواست تأییدشده‌ای دقیقاً برای همان تاریخ دارد.
+    /// </summary>
+    public static bool MayTakeLabelOnDate(UserConstraint user, ShiftLabel label, DateTime date)
+    {
+        // درخواست تأییدشده دقیقاً برای همین تاریخ
+        if (user.RequiredShiftSlots.Any(s => s.ShiftLabel == label && s.Date.Date == date.Date))
+        {
+            return true;
+        }
+
+        return HasInherentPermission(user, label);
+    }
+
     public static bool SupportsMorningEveningCombo(UserConstraint user) =>
         UsesPermissionModel(user)
             ? user.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningEveningSameDay)

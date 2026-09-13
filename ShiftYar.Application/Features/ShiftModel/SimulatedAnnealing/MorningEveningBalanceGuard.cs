@@ -196,8 +196,8 @@ public static class MorningEveningBalanceGuard
             .ToList();
 
     private static bool CanBalanceMorningEvening(UserConstraint user) =>
-        ShiftEligibilityResolver.MayEverTakeLabel(user, ShiftLabel.Morning)
-        && ShiftEligibilityResolver.MayEverTakeLabel(user, ShiftLabel.Evening);
+        ShiftEligibilityResolver.HasInherentPermission(user, ShiftLabel.Morning)
+        && ShiftEligibilityResolver.HasInherentPermission(user, ShiftLabel.Evening);
 
     private static IEnumerable<(UserConstraint MHeavy, UserConstraint EHeavy)> BuildImbalancedPairs(
         ShiftSolution solution,
@@ -694,7 +694,7 @@ public static class MorningEveningBalanceGuard
         {
             var progressed = false;
             foreach (var target in users.Where(u =>
-                ShiftEligibilityResolver.MayEverTakeLabel(u, ShiftLabel.Morning) &&
+                ShiftEligibilityResolver.HasInherentPermission(u, ShiftLabel.Morning) &&
                 !u.HasExactMorningQuota &&
                 CountMorning(solution, u.UserId) < 2 &&
                 CountEvening(solution, u.UserId) >= 4))
@@ -712,7 +712,7 @@ public static class MorningEveningBalanceGuard
                         .Select(a => constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId))
                         .Where(x => x != null && x.ShiftType != ShiftTypes.FixedShift)
                         .Cast<UserConstraint>()
-                        .Where(d => ShiftEligibilityResolver.MayEverTakeLabel(d, ShiftLabel.Evening) && !d.HasExactEveningQuota)
+                        .Where(d => ShiftEligibilityResolver.HasInherentPermission(d, ShiftLabel.Evening) && !d.HasExactEveningQuota)
                         .Where(d => CountMorning(solution, d.UserId) >= 2)
                         .ToList();
 

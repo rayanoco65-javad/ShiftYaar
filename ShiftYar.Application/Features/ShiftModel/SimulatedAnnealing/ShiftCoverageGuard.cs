@@ -740,6 +740,22 @@ public static class ShiftCoverageGuard
         DateTime date,
         ShiftLabel label)
     {
+        // بررسی مجوز نوع شیفت با آگاهی از تاریخ:
+        // کاربر فقط در صورتی می‌تواند این نوع شیفت را بگیرد که یا مجوز کلی داشته باشد
+        // یا درخواست تأییدشده دقیقاً برای همین تاریخ و نوع شیفت داشته باشد.
+        if (!ShiftEligibilityResolver.IsAssignmentAllowed(
+                user,
+                solution.GetUserAssignments(user.UserId, date).Select(a => a.ShiftLabel),
+                label,
+                constraints.HardRules.EnforceMaxShiftsPerDay
+                    ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
+                    : 2,
+                constraints.HardRules.ForbidDuplicateDailyAssignments,
+                date))
+        {
+            return false;
+        }
+
         // عمداً سقف هفته اینجا اعمال نمی‌شود — پوشش ظرفیت اجباری است؛ سقف روزهای کاری متوالی اعمال می‌شود.
         var existing = solution.GetUserAssignments(user.UserId, date).Select(a => a.ShiftLabel);
         var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
