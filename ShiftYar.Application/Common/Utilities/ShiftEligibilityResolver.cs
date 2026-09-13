@@ -187,15 +187,26 @@ public static class ShiftEligibilityResolver
             : user.ShiftSubType == ShiftSubTypes.TwoShifts
               && user.TwoShiftRotationPattern == TwoShiftRotationPattern.MorningNight;
 
+    /// <summary>
+    /// بررسی مجاز بودن انتساب شیفت با در نظر گرفتن تاریخ مشخص.
+    /// اگر <paramref name="date"/> داده شود، درخواست تأییدشده فقط برای همان تاریخ bypass انجام می‌دهد.
+    /// اگر <paramref name="date"/> داده نشود (null)، رفتار قدیمی (بدون بررسی تاریخ) حفظ می‌شود.
+    /// </summary>
     public static bool IsAssignmentAllowed(
         UserConstraint user,
         IEnumerable<ShiftLabel> existingOnDay,
         ShiftLabel newLabel,
         int maxShiftsPerDay,
-        bool forbidDuplicateLabels = true)
+        bool forbidDuplicateLabels = true,
+        DateTime? date = null)
     {
         // درخواست شیفت تأییدشده صریح بر مجوزهای اولیه اولویت دارد
-        if (user.RequiredShiftSlots.Any(s => s.ShiftLabel == newLabel))
+        // اگر تاریخ داده شده، فقط درخواست‌های همان روز را در نظر می‌گیریم
+        bool hasApprovedSlotForLabel = date.HasValue
+            ? user.RequiredShiftSlots.Any(s => s.ShiftLabel == newLabel && s.Date.Date == date.Value.Date)
+            : user.RequiredShiftSlots.Any(s => s.ShiftLabel == newLabel);
+
+        if (hasApprovedSlotForLabel)
         {
             return DailyAssignmentRules.CanAddShift(
                 existingOnDay, newLabel, maxShiftsPerDay, forbidDuplicateLabels);

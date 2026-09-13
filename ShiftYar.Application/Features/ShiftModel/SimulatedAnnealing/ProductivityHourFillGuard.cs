@@ -1109,7 +1109,8 @@ public static class ProductivityHourFillGuard
                 constraints.HardRules.EnforceMaxShiftsPerDay
                     ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
                     : 2,
-                constraints.HardRules.ForbidDuplicateDailyAssignments))
+                constraints.HardRules.ForbidDuplicateDailyAssignments,
+                date))
         {
             return false;
         }
@@ -1179,7 +1180,8 @@ public static class ProductivityHourFillGuard
             : 2;
         if (!ShiftEligibilityResolver.IsAssignmentAllowed(
                 user, existingLabels, assignment.ShiftLabel, maxPerDay,
-                constraints.HardRules.ForbidDuplicateDailyAssignments))
+                constraints.HardRules.ForbidDuplicateDailyAssignments,
+                assignment.Date))
         {
             return false;
         }

@@ -318,7 +318,8 @@ public static class ManagerMixFeasibilityChecker
             .Select(a => a.ShiftLabel);
         if (!ShiftEligibilityResolver.IsAssignmentAllowed(
                 user, sameDay, shiftReq.ShiftLabel, maxPerDay,
-                constraints.HardRules.ForbidDuplicateDailyAssignments))
+                constraints.HardRules.ForbidDuplicateDailyAssignments,
+                date))
         {
             return false;
         }

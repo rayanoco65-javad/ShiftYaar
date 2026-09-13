@@ -309,7 +309,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         .Where(s => IsOffConflictFree(user, presenceDate, s.ShiftLabel))
                         .Where(s => Common.Utilities.ShiftEligibilityResolver.IsAssignmentAllowed(
                             user, existingLabels, s.ShiftLabel, maxPerDay,
-                            constraints.HardRules.ForbidDuplicateDailyAssignments))
+                            constraints.HardRules.ForbidDuplicateDailyAssignments,
+                            presenceDate))
                         .OrderByDescending(s => onCallOnly != null && s.ShiftId == onCallOnly.ShiftId ? 1_000_000 : 0)
                         .ThenByDescending(s =>
                         {
@@ -772,7 +773,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     .Where(a => a.ShiftLabel != shiftLabel)
                     .Select(a => a.ShiftLabel);
                 if (!Common.Utilities.ShiftEligibilityResolver.IsAssignmentAllowed(
-                        user, existing, shiftLabel, maxPerDay, constraints.HardRules.ForbidDuplicateDailyAssignments))
+                        user, existing, shiftLabel, maxPerDay, constraints.HardRules.ForbidDuplicateDailyAssignments,
+                        date))
                 {
                     return false;
                 }

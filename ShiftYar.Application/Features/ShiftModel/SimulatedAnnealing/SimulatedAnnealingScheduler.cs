@@ -3744,7 +3744,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     .Select(a => a.ShiftLabel);
             if (!ShiftEligibilityResolver.IsAssignmentAllowed(
                     user, existingLabels, shiftLabel, maxPerDay,
-                    _constraints.HardRules.ForbidDuplicateDailyAssignments))
+                    _constraints.HardRules.ForbidDuplicateDailyAssignments,
+                    date))
             {
                 return false;
             }
@@ -3909,7 +3910,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     .Select(a => a.ShiftLabel);
                 if (!ShiftEligibilityResolver.IsAssignmentAllowed(
                         user, existingLabels, shiftLabel, maxPerDay,
-                        _constraints.HardRules.ForbidDuplicateDailyAssignments))
+                        _constraints.HardRules.ForbidDuplicateDailyAssignments,
+                        date))
                 {
                     return false;
                 }

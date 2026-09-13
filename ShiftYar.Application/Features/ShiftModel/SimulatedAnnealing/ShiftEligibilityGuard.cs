@@ -92,6 +92,7 @@ public static class ShiftEligibilityGuard
             existing,
             assignment.ShiftLabel,
             maxPerDay,
-            constraints.HardRules.ForbidDuplicateDailyAssignments);
+            constraints.HardRules.ForbidDuplicateDailyAssignments,
+            assignment.Date);
     }
 }
