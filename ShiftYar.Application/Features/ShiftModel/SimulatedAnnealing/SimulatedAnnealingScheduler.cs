@@ -78,7 +78,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
             PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: false);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSolution, _constraints);
-            ShiftCoverageGuard.FillRemainingAfterForceApply(bestSolution, _constraints);
+            if (!AllExactNightQuotasMet(bestSolution))
+            {
+                RestoreDeficitNightQuotas(bestSolution);
+                PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: false);
+                AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSolution, _constraints);
+            }
+            ShiftCoverageGuard.ForceFillAllMissingCoverage(bestSolution, _constraints);
             ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
             RefreshSolutionViolations(bestSolution);
             stopwatch.Stop();
@@ -123,12 +129,15 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             ExactNightQuotaGuard.OptimizeSpread(bestSolution, _constraints);
             OvertimeBalanceGuard.Enforce(bestSolution, _constraints);
-            AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSolution, _constraints);
-            ShiftCoverageGuard.FillRemainingAfterForceApply(bestSolution, _constraints);
-            ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
             PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: false);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSolution, _constraints);
-            ShiftCoverageGuard.FillRemainingAfterForceApply(bestSolution, _constraints);
+            if (!AllExactNightQuotasMet(bestSolution))
+            {
+                RestoreDeficitNightQuotas(bestSolution);
+                PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: false);
+                AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSolution, _constraints);
+            }
+            ShiftCoverageGuard.ForceFillAllMissingCoverage(bestSolution, _constraints);
             ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
             RefreshSolutionViolations(bestSolution);
             stopwatch.Stop();
@@ -2298,18 +2307,22 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             if (currentL1Count >= reqL1 && currentManagerCount < reqTotal)
             {
-                var helper = _constraints.UserConstraints
+                var helpers = _constraints.UserConstraints
                     .Where(u => u.IsActive && ShiftManagerRules.IsManager(u) && !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
                     .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
                     .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
-                    .FirstOrDefault(u => !HasDailyConflict(solution, u.UserId, date, shiftReq.ShiftLabel));
+                    .Where(u => !HasDailyConflict(solution, u.UserId, date, shiftReq.ShiftLabel))
+                    .Where(u => !AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(u.UserId), date, shiftReq.ShiftLabel, _constraints))
+                    .Where(u => !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(solution, _constraints, u, date))
+                    .ToList();
 
-                if (helper != null)
+                foreach (var helper in helpers)
                 {
                     var backupHelper = solution.Clone();
                     MakeRoomInShift(solution, shiftReq, date, helper);
                     solution.AddAssignment(helper.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall: false);
-                    if (IsSlotManagerMixSatisfied(solution, shiftReq, date))
+                    if (IsSlotManagerMixSatisfied(solution, shiftReq, date)
+                        && !ShiftCoverageGuard.HasAnyOverCapacity(solution, _constraints))
                     {
                         return true;
                     }
@@ -3222,7 +3235,6 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(x => ShiftManagerRules.IsManager(x.User!))
                 .Where(x => !needLevel1 || ShiftManagerRules.IsLevel1(x.User!))
                 .Where(x => !solution.IsLockedSkeleton(x.Assignment.UserId, x.Assignment.ShiftId, x.Assignment.Date))
-                .Where(x => !x.Assignment.IsSkeleton)
                 .Where(x => !IsProtectedAssignment(solution, x.Assignment, forManagerInstall: true))
                 .Where(x => IsUserAvailableForManagerInstall(
                     x.User!, date, targetShift.ShiftLabel, solution, x.Assignment.ShiftId, ignoreSameDayAssignments: true)
@@ -3471,7 +3483,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
             else if (label == ShiftLabel.Evening && !_constraints.HardRules.AllowEveningAfterNightShift)
             {
-                if (!TryClearUserAssignmentsOnDate(solution, user, date.Date.AddDays(-1), ShiftLabel.Night))
+                if (!TryClearUserAssignmentsOnDate(solution, user, date.Date.AddDays(-1), ShiftLabel.Night, allowRelocation: true))
                 {
                     return false;
                 }
@@ -3518,6 +3530,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 var shiftReq = _constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftId == assignment.ShiftId);
                 if (shiftReq != null)
                 {
+                    if (!ShiftManagerRules.IsCriticalForManagerMix(_constraints, solution, assignment))
+                    {
+                        solution.UnlockSkeletonAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                        solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date, force: true);
+                        return true;
+                    }
+
                     if (!allowRelocation && assignment.ShiftLabel == ShiftLabel.Night && user.ExactNightShiftCount.HasValue)
                     {
                         var currentNights = solution.GetUserAllAssignments(user.UserId)
@@ -4050,8 +4069,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return false;
             }
 
-            if (solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
-                || assignment.IsSkeleton)
+            if (solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date))
+            {
+                return true;
+            }
+
+            if (!forManagerInstall && assignment.IsSkeleton)
             {
                 return true;
             }
@@ -4067,7 +4090,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return true;
             }
 
-            if (!forManagerInstall && ShiftManagerRules.IsCriticalForManagerMix(_constraints, solution, assignment))
+            if (ShiftManagerRules.IsCriticalForManagerMix(_constraints, solution, assignment))
             {
                 return true;
             }

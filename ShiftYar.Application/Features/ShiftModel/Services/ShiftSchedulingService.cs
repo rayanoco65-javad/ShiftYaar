@@ -929,13 +929,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             OvertimeBalanceGuard.Enforce(solution, constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
             MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
-            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
-            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
             ExactNightQuotaGuard.Enforce(solution, constraints);
+            ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
             scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
-            MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
-            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+            ExactNightQuotaGuard.Enforce(solution, constraints);
+            ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
             scheduler.RefreshSolutionViolations(solution);
 
@@ -946,6 +948,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             EnsureMaxConsecutiveWorkdaysOrThrow(solution, constraints);
             ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
+            EnsureAllShiftCoverageSatisfiedOrThrow(solution, constraints);
 
             var result = await ConvertSolutionToResultAsync(solution, constraints);
             result.AlgorithmUsed = SchedulingAlgorithm.SimulatedAnnealing;
@@ -1387,6 +1390,18 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 throw new InvalidOperationException(
                     "سهمیه حداقل شیفت صبح/عصر برای همه کاربران اعمال نشد:\n" + string.Join("\n", unmet));
             }
+        }
+
+        private static void EnsureAllShiftCoverageSatisfiedOrThrow(ShiftSolution solution, ShiftConstraints constraints)
+        {
+            var under = ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints);
+            if (under.Count == 0)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                "تکمیل نفرات شیفت‌ها در برخی روزها امکان‌پذیر نشد:\n" + string.Join("\n", under));
         }
 
         /// <summary>

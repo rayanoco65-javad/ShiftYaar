@@ -740,15 +740,15 @@ public static class ProductivityHourFillGuard
         List<UserConstraint> targetUsers,
         double deficitStopTolerance = DeficitToleranceHours)
     {
-        var allDates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
-            .Select(i => constraints.StartDate.Date.AddDays(i))
-            .ToList();
-
         foreach (var user in targetUsers
                      .OrderBy(u => ProjectPersonnelProductivityPriority.FillTier(u))
                      .ThenByDescending(u => GetDeficit(u, CalculateWorked(solution, u.UserId, lookup, constraints))))
         {
-            for (var attempt = 0; attempt < allDates.Count * 2; attempt++)
+            var userDates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
+                .Select(i => constraints.StartDate.Date.AddDays(i))
+                .ToList();
+
+            for (var attempt = 0; attempt < userDates.Count * 2; attempt++)
             {
                 var deficit = GetDeficit(user, CalculateWorked(solution, user.UserId, lookup, constraints));
                 if (deficit <= deficitStopTolerance)
@@ -756,7 +756,7 @@ public static class ProductivityHourFillGuard
                     break;
                 }
 
-                var date = PickBestFillDate(solution, constraints, user, allDates);
+                var date = PickBestFillDate(solution, constraints, user, userDates);
                 if (date == null)
                 {
                     break;
@@ -781,8 +781,8 @@ public static class ProductivityHourFillGuard
 
                 if (!added)
                 {
-                    allDates.Remove(date.Value);
-                    if (allDates.Count == 0)
+                    userDates.Remove(date.Value);
+                    if (userDates.Count == 0)
                     {
                         break;
                     }

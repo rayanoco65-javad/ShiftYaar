@@ -305,12 +305,7 @@ public static class ExactNightQuotaGuard
             .Where(u => u.HasExactNightQuota)
             .Sum(u => Math.Max(0, u.ExactNightShiftCount!.Value - CountNights(solution, u.UserId)));
 
-        var totalSurplus = constraints.UserConstraints
-            .Where(u => u.HasExactNightQuota)
-            .Sum(u => Math.Max(0, CountNights(solution, u.UserId) - u.ExactNightShiftCount!.Value));
-
-        var netDeficit = totalDeficit - totalSurplus;
-        if (netDeficit <= 0)
+        if (totalDeficit <= 0)
         {
             return false;
         }
@@ -320,7 +315,7 @@ public static class ExactNightQuotaGuard
 
         foreach (var vacantDate in dates)
         {
-            if (netDeficit <= 0) break;
+            if (totalDeficit <= 0) break;
 
             var specialtyReq = nightShift.SpecialtyRequirements.FirstOrDefault();
             var day = specialtyReq?.ForDay(constraints.IsHoliday(vacantDate));
@@ -335,12 +330,11 @@ public static class ExactNightQuotaGuard
                 continue;
             }
 
-            for (var s = 0; s < openSlots && netDeficit > 0; s++)
+            for (var s = 0; s < openSlots && totalDeficit > 0; s++)
             {
                 var candidateUsers = constraints.UserConstraints
-                    .Where(u => u.IsActive && ShiftEligibilityResolver.MayEverTakeLabel(u, ShiftLabel.Night))
-                    .OrderByDescending(u => HasNightQuotaDeficit(solution, u) ? 100 : 0)
-                    .ThenByDescending(u => ShiftManagerRules.IsLevel1(u) ? 2 : ShiftManagerRules.IsManager(u) ? 1 : 0)
+                    .Where(u => u.IsActive && ShiftEligibilityResolver.MayEverTakeLabel(u, ShiftLabel.Night) && HasNightQuotaDeficit(solution, u))
+                    .OrderByDescending(u => ShiftManagerRules.IsLevel1(u) ? 2 : ShiftManagerRules.IsManager(u) ? 1 : 0)
                     .ThenBy(u => CountNights(solution, u.UserId))
                     .ToList();
 
@@ -384,7 +378,7 @@ public static class ExactNightQuotaGuard
                     {
                         slotFilled = true;
                         anyAdded = true;
-                        netDeficit--;
+                        totalDeficit--;
                         break;
                     }
 
@@ -618,6 +612,130 @@ public static class ExactNightQuotaGuard
 
                             RestoreSolutionFrom(solution, backup3);
                         }
+                    }
+                }
+            }
+        }
+
+        if (TryAugmentingPathRebalance(solution, constraints, receiver, nightShift, maxDepth: 5))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// جستجوی مسیر افزایشی (BFS) برای زنجیره‌های چندمرحله‌ای انتقال سهمیه شب از کاربران دارای مازاد به کاربران دارای کسری.
+    /// این متد تمامی قیود سخت (ترکیب مسئولین، عدم تداخل مجاورت، سقف متوالی، ظرفیت تخصصی و عدم امکان حضور) را رعایت می‌کند.
+    /// </summary>
+    private static bool TryAugmentingPathRebalance(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint receiver,
+        ShiftRequirement nightShift,
+        int maxDepth = 5)
+    {
+        var receiverBefore = CountNights(solution, receiver.UserId);
+
+        var queue = new Queue<(ShiftSolution sol, int surplusUserId, HashSet<int> visitedUsers, int depth)>();
+
+        foreach (var (donor, night) in EnumerateSurplusNights(solution, constraints, excludeUserId: receiver.UserId))
+        {
+            var date = night.Date.Date;
+            foreach (var candidate in constraints.UserConstraints.Where(u => u.IsActive && u.UserId != donor.UserId))
+            {
+                var minGap = ResolveNightSpacingGap(constraints, candidate);
+                if (ViolatesNightSpacing(solution, constraints, candidate, date, minGap)) continue;
+                if (!HasSpecialtyCapacityIgnoring(solution, constraints, nightShift, date, candidate.SpecialtyId, donor.UserId)) continue;
+                if (!IsPersonallyFeasibleNightDate(solution, constraints, candidate, nightShift, date, holidayOnly: false)) continue;
+                if (!CanAcceptNightAfterClearing(solution, constraints, candidate, nightShift, date)) continue;
+
+                var clone = solution.Clone();
+                clone.UnlockSkeletonAssignment(donor.UserId, night.ShiftId, night.Date);
+                clone.RemoveAssignment(donor.UserId, night.ShiftId, night.Date, force: true);
+                ClearConflictingForNight(clone, constraints, candidate, date);
+                AddNightSafely(clone, constraints, candidate, nightShift, date);
+
+                if (!IsSlotManagerMixSatisfied(clone, constraints, nightShift, date)) continue;
+                if (AdjacentShiftRestRules.HasForbiddenAdjacentPair(clone.GetUserAllAssignments(candidate.UserId), constraints.HardRules)) continue;
+                if (constraints.HardRules.EnforceMaxConsecutiveShifts && MaxConsecutiveWorkdayRules.GetMaxConsecutiveWorkRun(clone, candidate.UserId) > candidate.MaxConsecutiveShifts) continue;
+                if (ShiftCoverageGuard.HasAnyOverCapacity(clone, constraints)) continue;
+
+                if (candidate.UserId == receiver.UserId)
+                {
+                    var donorOk = !donor.ExactNightShiftCount.HasValue || CountNights(clone, donor.UserId) >= donor.ExactNightShiftCount.Value;
+                    if (donorOk && CountNights(clone, receiver.UserId) > receiverBefore)
+                    {
+                        RestoreSolutionFrom(solution, clone);
+                        return true;
+                    }
+                }
+                else
+                {
+                    var visited = new HashSet<int> { donor.UserId, candidate.UserId };
+                    queue.Enqueue((clone, candidate.UserId, visited, 1));
+                }
+            }
+        }
+
+        while (queue.Count > 0)
+        {
+            var (currSol, surplusUserId, visited, depth) = queue.Dequeue();
+            if (depth >= maxDepth) continue;
+
+            var currUser = constraints.UserConstraints.FirstOrDefault(u => u.UserId == surplusUserId);
+            if (currUser == null) continue;
+
+            var currUserNights = GetNights(currSol, surplusUserId).Select(a => a.Date.Date).ToList();
+            foreach (var dropDate in currUserNights)
+            {
+                if (currSol.TryGetAssignment(surplusUserId, nightShift.ShiftId, dropDate, out var dropAsg) && IsProtected(constraints, surplusUserId, dropAsg))
+                {
+                    continue;
+                }
+
+                foreach (var candidate in constraints.UserConstraints.Where(u => u.IsActive && !visited.Contains(u.UserId)))
+                {
+                    var minGap = ResolveNightSpacingGap(constraints, candidate);
+                    if (ViolatesNightSpacing(currSol, constraints, candidate, dropDate, minGap)) continue;
+                    if (!HasSpecialtyCapacityIgnoring(currSol, constraints, nightShift, dropDate, candidate.SpecialtyId, surplusUserId)) continue;
+                    if (!IsPersonallyFeasibleNightDate(currSol, constraints, candidate, nightShift, dropDate, holidayOnly: false)) continue;
+                    if (!CanAcceptNightAfterClearing(currSol, constraints, candidate, nightShift, dropDate)) continue;
+
+                    var clone = currSol.Clone();
+                    clone.UnlockSkeletonAssignment(surplusUserId, nightShift.ShiftId, dropDate);
+                    clone.RemoveAssignment(surplusUserId, nightShift.ShiftId, dropDate, force: true);
+                    ClearConflictingForNight(clone, constraints, candidate, dropDate);
+                    AddNightSafely(clone, constraints, candidate, nightShift, dropDate);
+
+                    if (!IsSlotManagerMixSatisfied(clone, constraints, nightShift, dropDate)) continue;
+                    if (AdjacentShiftRestRules.HasForbiddenAdjacentPair(clone.GetUserAllAssignments(candidate.UserId), constraints.HardRules)) continue;
+                    if (constraints.HardRules.EnforceMaxConsecutiveShifts && MaxConsecutiveWorkdayRules.GetMaxConsecutiveWorkRun(clone, candidate.UserId) > candidate.MaxConsecutiveShifts) continue;
+                    if (ShiftCoverageGuard.HasAnyOverCapacity(clone, constraints)) continue;
+
+                    if (candidate.UserId == receiver.UserId)
+                    {
+                        var allOk = true;
+                        foreach (var vUid in visited)
+                        {
+                            var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == vUid);
+                            if (u != null && u.ExactNightShiftCount.HasValue && CountNights(clone, u.UserId) < u.ExactNightShiftCount.Value)
+                            {
+                                allOk = false;
+                                break;
+                            }
+                        }
+                        if (allOk && CountNights(clone, receiver.UserId) > receiverBefore)
+                        {
+                            RestoreSolutionFrom(solution, clone);
+                            return true;
+                        }
+                    }
+                    else if (depth + 1 < maxDepth)
+                    {
+                        var newVisited = new HashSet<int>(visited) { candidate.UserId };
+                        queue.Enqueue((clone, candidate.UserId, newVisited, depth + 1));
                     }
                 }
             }
@@ -2304,6 +2422,7 @@ public static class ExactNightQuotaGuard
     {
         var day = date.Date;
         var next = day.AddDays(1);
+        var prev = day.AddDays(-1);
         var maxPerDay = GetMaxShiftsPerDay(constraints);
 
         // عصر همان روز با شب متوالی است
@@ -2320,6 +2439,12 @@ public static class ExactNightQuotaGuard
 
         // روز بعد از شب
         RemoveForbiddenOnDayAfterNight(solution, constraints, user, next);
+
+        // روز قبل از شب (اگر عصر بعد از شب غیرمجاز است)
+        if (!constraints.HardRules.AllowEveningAfterNightShift)
+        {
+            RemoveClearableAssignments(solution, constraints, user, prev, ShiftLabel.Evening);
+        }
     }
 
     private static void RemoveClearableAssignments(
@@ -2368,6 +2493,7 @@ public static class ExactNightQuotaGuard
     {
         var day = nightDate.Date;
         var next = day.AddDays(1);
+        var prev = day.AddDays(-1);
         var userNightDates = GetNights(solution, user.UserId).Select(a => a.Date.Date).ToHashSet();
         var maxPerDay = GetMaxShiftsPerDay(constraints);
         var canKeepSameDayMorning = maxPerDay >= 2
@@ -2393,6 +2519,11 @@ public static class ExactNightQuotaGuard
                 }
 
                 if (a.Date.Date == next && !IsProtected(constraints, user.UserId, a))
+                {
+                    return false;
+                }
+
+                if (a.Date.Date == prev && a.ShiftLabel == ShiftLabel.Evening && !constraints.HardRules.AllowEveningAfterNightShift && !IsProtected(constraints, user.UserId, a))
                 {
                     return false;
                 }

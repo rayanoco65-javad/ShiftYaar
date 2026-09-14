@@ -154,6 +154,40 @@ public static class AdjacentShiftRestGuard
             return IsRequestProtected(user, later) || laterMixSkeleton ? null : later;
         }
 
+        // شب‌های سهمیه حداقل نباید برای تداخل‌های تنظیمات صوری قربانی شوند
+        var earlierQuota = IsQuotaNightProtected(user, earlier, solution);
+        var laterQuota = IsQuotaNightProtected(user, later, solution);
+
+        if (earlierQuota && !laterQuota && !IsRequestProtected(user, later) && !laterMixSkeleton)
+        {
+            return later;
+        }
+
+        if (laterQuota && !earlierQuota && !IsRequestProtected(user, earlier) && !earlierMixSkeleton)
+        {
+            return earlier;
+        }
+
+        if (earlierQuota && laterQuota)
+        {
+            if (IsRequestProtected(user, earlier) && !IsRequestProtected(user, later))
+            {
+                return later;
+            }
+
+            if (IsRequestProtected(user, later) && !IsRequestProtected(user, earlier))
+            {
+                return earlier;
+            }
+
+            if (IsRequestProtected(user, earlier) && IsRequestProtected(user, later))
+            {
+                return null;
+            }
+
+            return later;
+        }
+
         // محدودیت تنظیمات: جفت را بشکن، ولی شبِ mix-critical/L1 اسکلت را قربانی نکن
         if (AdjacentShiftRestRules.IsSettingsControlledAfterNightPair(
                 earlier.ShiftLabel, earlier.Date, later.ShiftLabel, later.Date)
@@ -243,9 +277,6 @@ public static class AdjacentShiftRestGuard
         {
             return null;
         }
-
-        var earlierQuota = IsQuotaNightProtected(user, earlier, solution);
-        var laterQuota = IsQuotaNightProtected(user, later, solution);
 
         if (!laterQuota)
         {

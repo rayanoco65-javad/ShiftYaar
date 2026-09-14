@@ -147,6 +147,54 @@ public static class ShiftCoverageGuard
         return violations;
     }
 
+    public static List<string> GetUnderCapacityViolations(ShiftSolution solution, ShiftConstraints constraints)
+    {
+        var violations = new List<string>();
+
+        var dates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
+            .Select(i => constraints.StartDate.Date.AddDays(i))
+            .ToList();
+
+        foreach (var date in dates)
+        {
+            foreach (var shiftReq in constraints.ShiftRequirements)
+            {
+                foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
+                {
+                    var day = specialtyReq.ForDay(constraints.IsHoliday(date));
+                    if (day.RequiredTotalCount <= 0) continue;
+
+                    var regular = GetSpecialtyAssignments(
+                        solution, constraints, shiftReq, date, specialtyReq.SpecialtyId, isOnCall: false);
+
+                    if (regular.Count < day.RequiredTotalCount)
+                    {
+                        violations.Add(
+                            $"ظرفیت تکمیل نشده در تاریخ {date:yyyy/MM/dd} شیفت {shiftReq.ShiftLabel} تخصص {specialtyReq.SpecialtyId}: " +
+                            $"{regular.Count} نفر از {day.RequiredTotalCount} نفر تخصیص داده شده است.");
+                    }
+                }
+            }
+        }
+
+        return violations;
+    }
+
+    /// <summary>
+    /// فاز جبران نهایی: تضمین پر شدن ۱۰۰٪ جای خالی تمام شیفت‌های ماه.
+    /// </summary>
+    public static void ForceFillAllMissingCoverage(ShiftSolution solution, ShiftConstraints constraints)
+    {
+        for (var pass = 0; pass < 5; pass++)
+        {
+            FillMissingCoverage(solution, constraints, reserveUnmetOnSlots: false);
+            if (GetUnderCapacityViolations(solution, constraints).Count == 0)
+            {
+                break;
+            }
+        }
+    }
+
     private static void StripSpecialtyExcess(
         ShiftSolution solution,
         ShiftConstraints constraints,

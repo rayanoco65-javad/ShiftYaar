@@ -327,7 +327,10 @@ public class ProductivityHourFillTests
         IReadOnlyDictionary<int, ShiftYar.Application.Common.Utilities.ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
         ShiftConstraints constraints) =>
         ShiftYar.Application.Common.Utilities.ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
-            solution.GetUserAllAssignments(userId), lookup, constraints.IsHoliday);
+            solution.GetUserAllAssignments(userId),
+            lookup,
+            constraints.IsHoliday,
+            ShiftYar.Application.Common.Utilities.ProductivityWorkedHoursCalculator.BuildProductivityPlanLookup(constraints.UserConstraints));
 
     [Fact]
     public void FillAllRequiredHoursPass_FillsProjectDeficitEvenWhenNonProjectHasSmallDeficit()
