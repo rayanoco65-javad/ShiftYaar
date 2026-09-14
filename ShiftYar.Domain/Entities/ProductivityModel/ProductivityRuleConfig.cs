@@ -10,28 +10,36 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
     /// </summary>
     public class ProductivityRuleConfig
     {
-        // قانون ارتقای بهره‌وری: ۰–۴، ۴–۸، ۸–۱۲، ۱۲–۱۶، ۱۶+ سال
+        // قانون ارتقای بهره‌وری: ۰.۵ ساعت به ازای هر ۵ سال سابقه کار بالینی (سقف ۲ ساعت برای ۲۰ سال و بالاتر)
         private static readonly IReadOnlyCollection<SeniorityReductionBand> DefaultSeniorityBands = new List<SeniorityReductionBand>
         {
-            new SeniorityReductionBand(0, 3, 1m),
-            new SeniorityReductionBand(4, 7, 2m),
-            new SeniorityReductionBand(8, 11, 3m),
-            new SeniorityReductionBand(12, 15, 4m),
-            new SeniorityReductionBand(16, null, 5m)
+            new SeniorityReductionBand(0, 4, 0m),
+            new SeniorityReductionBand(5, 9, 0.5m),
+            new SeniorityReductionBand(10, 14, 1.0m),
+            new SeniorityReductionBand(15, 19, 1.5m),
+            new SeniorityReductionBand(20, null, 2.0m)
         };
 
-        // صعوبت کار: ۸–۲۵٪، ۲۶–۵۰٪، ۵۱–۷۵٪، ۷۶٪+
+        // صعوبت کار: بخش‌های ویژه (۲ ساعت) و بخش‌های جنرال/عادی (۱ تا ۱.۵ ساعت)
         private static readonly IReadOnlyCollection<HardshipReductionBand> DefaultHardshipBands = new List<HardshipReductionBand>
         {
-            new HardshipReductionBand(8m, 25m, 0.5m),
-            new HardshipReductionBand(26m, 50m, 1m),
-            new HardshipReductionBand(51m, 75m, 1.5m),
-            new HardshipReductionBand(76m, null, 2m)
+            new HardshipReductionBand(0m, 25m, 1.0m),
+            new HardshipReductionBand(26m, 50m, 1.5m),
+            new HardshipReductionBand(51m, null, 2.0m)
         };
+
+        /// <summary>ساعت کار پایه روزانه غیرتعطیل (۷ ساعت و ۲۰ دقیقه = ۲۲/۳ = ۷.۳۳۳۳۳۳ ساعت)</summary>
+        public const decimal BaseDailyWorkingHours = 22m / 3m;
 
         public decimal BaseWeeklyHours { get; init; } = 44m;
         public decimal MaxWeeklyReduction { get; init; } = 8m;
-        public decimal RotatingShiftReductionPerWeek { get; init; } = 1m;
+        public decimal SpecialSectionHardshipReduction { get; init; } = 2.0m;
+        public decimal GeneralSectionHardshipReduction { get; init; } = 1.0m;
+        public decimal RotatingShiftReductionPerWeek { get; init; } = 3.0m;
+        public decimal ThreeShiftRotatingReductionHours { get; init; } = 1.0m;
+        public decimal TwoShiftRotatingReductionHours { get; init; } = 0.5m;
+        public decimal FixedNightReductionHours { get; init; } = 1.0m;
+        public decimal FixedDayReductionHours { get; init; } = 0.0m;
         public decimal NightHolidayMultiplier { get; init; } = 1.5m;
         public decimal MaxMonthlyOvertimeHours { get; init; } = 80m;
         public decimal MaxConsecutiveWorkHours { get; init; } = 12m;
@@ -55,13 +63,35 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
 
         public decimal GetHardshipReduction(decimal hardshipPercent)
         {
-            if (hardshipPercent < 8m || HardshipReductionBands == null || HardshipReductionBands.Count == 0)
+            if (hardshipPercent <= 0m || HardshipReductionBands == null || HardshipReductionBands.Count == 0)
             {
                 return 0m;
             }
 
             var band = HardshipReductionBands.FirstOrDefault(b => b.Contains(hardshipPercent));
             return band?.ReductionHours ?? 0m;
+        }
+
+        public decimal GetSectionHardshipReduction(bool isSpecialSection, decimal? customHardshipReduction = null)
+        {
+            if (customHardshipReduction.HasValue && customHardshipReduction.Value >= 0)
+            {
+                return customHardshipReduction.Value;
+            }
+
+            return isSpecialSection ? SpecialSectionHardshipReduction : GeneralSectionHardshipReduction;
+        }
+
+        public decimal GetShiftPatternReduction(ShiftPatternType pattern)
+        {
+            return pattern switch
+            {
+                ShiftPatternType.ThreeShiftRotating => ThreeShiftRotatingReductionHours,
+                ShiftPatternType.TwoShiftRotating   => TwoShiftRotatingReductionHours,
+                ShiftPatternType.FixedNight        => FixedNightReductionHours,
+                ShiftPatternType.FixedDay          => FixedDayReductionHours,
+                _ => 0.0m
+            };
         }
 
         public decimal CalculateWeeklyRequiredHours(int yearsOfService, decimal hardshipPercent, bool hasRotatingShifts)

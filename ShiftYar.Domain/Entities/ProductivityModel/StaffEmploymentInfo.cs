@@ -15,6 +15,7 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
         public int? YearsOfServiceOverride { get; init; }
         public decimal HardshipPercent { get; init; }
         public bool HasUncommonRotatingShifts { get; init; }
+        public ShiftPatternType ShiftPattern { get; init; } = ShiftPatternType.FixedDay;
 
         /// <summary>
         /// Resolves years of service based on either an explicit override or the employment start date.
@@ -83,6 +84,7 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
         /// </summary>
         public static StaffEmploymentInfo FromUser(
             User user,
+            ShiftPatternType? shiftPattern = null,
             bool hasUncommonRotatingShifts = false,
             int? yearsOfServiceOverride = null)
         {
@@ -91,13 +93,16 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
                 throw new ArgumentNullException(nameof(user));
             }
 
+            var pattern = shiftPattern ?? (hasUncommonRotatingShifts ? ShiftPatternType.ThreeShiftRotating : ShiftPatternType.FixedDay);
+
             return new StaffEmploymentInfo
             {
                 StaffId = user.Id ?? 0,
                 StaffFullName = user.FullName,
                 DateOfEmployment = NormalizeEmploymentDate(user.DateOfEmployment),
                 HardshipPercent = user.HardshipPercent ?? 0m,
-                HasUncommonRotatingShifts = hasUncommonRotatingShifts,
+                HasUncommonRotatingShifts = hasUncommonRotatingShifts || pattern == ShiftPatternType.ThreeShiftRotating || pattern == ShiftPatternType.TwoShiftRotating,
+                ShiftPattern = pattern,
                 YearsOfServiceOverride = yearsOfServiceOverride
             };
         }

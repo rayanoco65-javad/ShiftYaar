@@ -63,7 +63,7 @@ public static class ProductivityRequiredHoursResolver
             return;
         }
 
-        userConstraint.IncludedInProductivityPlan = true;
+        userConstraint.IncludedInProductivityPlan = calculatedSnapshot.Breakdown?.IsIncludedInProductivityPlan ?? (user.IncludedProductivityPlan != false);
         userConstraint.ProductivitySnapshot = calculatedSnapshot;
         userConstraint.ProductivityRequiredHours = calculatedSnapshot.FinalMonthlyRequiredHours;
     }

@@ -1164,38 +1164,59 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
         private WorkingHoursCalculationResultDto? CalculateProductivitySnapshot(User user, UserConstraint userConstraint, ShiftConstraints constraints, DepartmentSchedulingSettings? deptSetting, double nightShiftDurationHours)
         {
-            // فقط opt-out صریح؛ null برای پرسنل گردشی به‌معنی مشمول بودن است
-            if (user.IncludedProductivityPlan == false)
-            {
-                return null;
-            }
+            var isIncluded = user.IncludedProductivityPlan ?? (userConstraint.ShiftType == ShiftTypes.RotatingShift);
 
-            if (user.IncludedProductivityPlan != true && userConstraint.ShiftType != ShiftTypes.RotatingShift)
+            var totalDays = Math.Max(1, (int)(constraints.EndDate.Date - constraints.StartDate.Date).TotalDays + 1);
+            var workingDays = 0;
+            for (var d = constraints.StartDate.Date; d <= constraints.EndDate.Date; d = d.AddDays(1))
             {
-                return null;
+                if (!constraints.IsHoliday(d) && d.DayOfWeek != DayOfWeek.Friday)
+                {
+                    workingDays++;
+                }
             }
 
             var employmentDate = user.DateOfEmployment.HasValue
                 ? StaffEmploymentInfo.NormalizeEmploymentDate(user.DateOfEmployment.Value)
                 : (DateTime?)null;
 
+            ShiftPatternType shiftPattern;
+            if (userConstraint.ShiftType == ShiftTypes.FixedShift)
+            {
+                var isNight = userConstraint.AllowedShiftLabels.Contains(ShiftLabel.Night) ||
+                              userConstraint.AllowedShiftPermissions.HasFlag(UserShiftPermission.Night);
+                shiftPattern = isNight ? ShiftPatternType.FixedNight : ShiftPatternType.FixedDay;
+            }
+            else if (userConstraint.ShiftType == ShiftTypes.RotatingShift)
+            {
+                shiftPattern = userConstraint.ShiftSubType == ShiftSubTypes.TwoShifts
+                    ? ShiftPatternType.TwoShiftRotating
+                    : ShiftPatternType.ThreeShiftRotating;
+            }
+            else
+            {
+                shiftPattern = ShiftPatternType.FixedDay;
+            }
+
             var staffInfo = new StaffEmploymentInfoDto
             {
                 StaffId = user.Id ?? 0,
                 StaffFullName = user.FullName,
                 DateOfEmployment = employmentDate,
+                IsIncludedInProductivityPlan = isIncluded,
                 HardshipPercent = user.HardshipPercent ?? 0m,
-                HasUncommonRotatingShifts = userConstraint.ShiftType == ShiftTypes.RotatingShift
+                HasUncommonRotatingShifts = shiftPattern == ShiftPatternType.ThreeShiftRotating || shiftPattern == ShiftPatternType.TwoShiftRotating,
+                ShiftPattern = shiftPattern
             };
 
             var weeks = CalculateProductivityWeeks(constraints.StartDate, constraints.EndDate);
 
-            // برای سقف زمان‌بندی، اعتبار شب/تعطیل را از موظفی کم نمی‌کنیم
-            // (ساعات مؤثر با ضریب ۱.۵ جداگانه در SA محاسبه می‌شوند).
             var request = new WorkingHoursCalculationRequestDto
             {
                 Staff = staffInfo,
                 TargetMonth = new DateTime(constraints.StartDate.Year, constraints.StartDate.Month, 1),
+                TotalDays = totalDays,
+                WorkingDays = workingDays,
                 NumberOfWeeksInMonth = weeks,
                 NightHolidayHours = 0m
             };

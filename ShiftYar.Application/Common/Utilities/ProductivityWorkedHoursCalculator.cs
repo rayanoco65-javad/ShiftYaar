@@ -48,6 +48,14 @@ public static class ProductivityWorkedHoursCalculator
         }
 
         var clockHours = info.DurationHours > 0 ? info.DurationHours : 8.0;
+
+        // برای پرسنل غیرمشمول طرح بهره‌وری (عادی)، ضرایب ۱.۵ شب و تعطیل برای پر شدن موظفی اعمال نمی‌شود (ضریب ۱.۰)
+        if (!includedInProductivityPlan)
+        {
+            return clockHours;
+        }
+
+        // برای پرسنل مشمول طرح بهره‌وری: ضریب ۱.۵ شب یا روز تعطیل رسمی (قاعده تجمیع: سقف ضریب همان ۱.۵)
         var applyMultiplier = isHoliday || info.Label == ShiftLabel.Night;
         return applyMultiplier ? clockHours * nightHolidayMultiplier : clockHours;
     }

@@ -16,7 +16,7 @@ public class ProductivityWorkedHoursCalculatorTests
         };
 
     [Fact]
-    public void CalculateEffectiveWorkedHours_AppliesNightMultiplier()
+    public void CalculateEffectiveWorkedHours_AppliesNightMultiplierForPlanIncludedStaff()
     {
         var hours = ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
             new[]
@@ -24,9 +24,25 @@ public class ProductivityWorkedHoursCalculatorTests
                 new SaShiftAssignment { UserId = 1, ShiftId = 2, Date = new DateTime(2026, 1, 5), ShiftLabel = ShiftLabel.Night }
             },
             ShiftInfo,
-            _ => false);
+            isHoliday: _ => false,
+            isIncludedInProductivityPlan: _ => true);
 
         Assert.Equal(12, hours, precision: 2);
+    }
+
+    [Fact]
+    public void CalculateEffectiveWorkedHours_ReturnsOneToOneHoursForNonIncludedStaff()
+    {
+        var hours = ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
+            new[]
+            {
+                new SaShiftAssignment { UserId = 1, ShiftId = 2, Date = new DateTime(2026, 1, 5), ShiftLabel = ShiftLabel.Night }
+            },
+            ShiftInfo,
+            isHoliday: _ => true,
+            isIncludedInProductivityPlan: _ => false);
+
+        Assert.Equal(8, hours, precision: 2);
     }
 
     [Fact]

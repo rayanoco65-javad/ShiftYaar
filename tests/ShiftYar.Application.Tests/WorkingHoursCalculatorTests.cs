@@ -10,15 +10,19 @@ public class WorkingHoursCalculatorTests
     private readonly WorkingHoursCalculator _calculator = new();
 
     [Theory]
-    [InlineData(0, 0, false, 44)]
-    [InlineData(5, 0, false, 42)]
-    [InlineData(5, 30, false, 41)]
-    [InlineData(5, 30, true, 40)]
-    [InlineData(20, 80, true, 36)]
-    public void CalculateMonthlyHours_AppliesWeeklyReductionBands(
+    [InlineData(0, false, false, 0.0, 1.0, 0.0, 1.0, 43.0)]  // 0 yrs, General (1.0), Fixed (0) -> 1.0 deduction
+    [InlineData(5, false, false, 0.5, 1.0, 0.0, 1.5, 42.5)]  // 5 yrs (0.5), General (1.0), Fixed (0) -> 1.5 deduction
+    [InlineData(5, true, false, 0.5, 2.0, 0.0, 2.5, 41.5)]   // 5 yrs (0.5), ICU/Special (2.0), Fixed (0) -> 2.5 deduction
+    [InlineData(5, true, true, 0.5, 2.0, 1.0, 3.5, 40.5)]    // 5 yrs (0.5), Special (2.0), ThreeShiftRotating (1.0) -> 3.5 deduction
+    [InlineData(25, true, true, 2.0, 2.0, 1.0, 5.0, 39.0)]   // 25 yrs (2.0), Special (2.0), ThreeShiftRotating (1.0) -> 5.0 deduction
+    public void CalculateMonthlyHours_Group1_AppliesWeeklyReductionBands(
         int yearsOfService,
-        decimal hardshipPercent,
+        bool isSpecialSection,
         bool rotating,
+        decimal expectedSeniority,
+        decimal expectedHardship,
+        decimal expectedRotating,
+        decimal expectedTotalWeeklyReduction,
         decimal expectedWeeklyRequired)
     {
         var result = _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
@@ -26,28 +30,103 @@ public class WorkingHoursCalculatorTests
             Staff = new StaffEmploymentInfoDto
             {
                 StaffId = 1,
-                YearsOfServiceOverride = yearsOfService,
-                HardshipPercent = hardshipPercent,
-                HasUncommonRotatingShifts = rotating
+                ClinicalExperienceYears = yearsOfService,
+                IsSpecialSection = isSpecialSection,
+                HasUncommonRotatingShifts = rotating,
+                IsIncludedInProductivityPlan = true
             },
-            NumberOfWeeksInMonth = 4,
-            NightHolidayHours = 0
+            TotalDays = 30,
+            WorkingDays = 22
         });
 
+        Assert.Equal(expectedSeniority, result.Breakdown.SeniorityReductionPerWeek);
+        Assert.Equal(expectedHardship, result.Breakdown.HardshipReductionPerWeek);
+        Assert.Equal(expectedRotating, result.Breakdown.RotatingShiftReductionPerWeek);
+        Assert.Equal(expectedTotalWeeklyReduction, result.Breakdown.TotalWeeklyReduction);
         Assert.Equal(expectedWeeklyRequired, result.Breakdown.WeeklyRequiredHours);
-        Assert.Equal(expectedWeeklyRequired * 4, result.FinalMonthlyRequiredHours);
     }
 
     [Fact]
-    public void ProductivityRuleConfig_GetHardshipReduction_UsesPercentBands()
+    public void CalculateMonthlyHours_Group1_CalculatesExactBaseAndMonthlyDeductions()
     {
-        var config = ProductivityRuleConfig.CreateDefault();
+        // 22 working days in a 30-day month for a nurse with 10 yrs experience in ICU with 3-shift rotating
+        // BaseHours = 22 * (22 / 3) = 161.33333...
+        // Seniority = 1.0, Hardship = 2.0, Rotating = 1.0 => WeeklyDeduction = 4.0
+        // MonthlyDeduction = (30 / 7) * 4.0 = 17.142857...
+        // FinalRequired = 161.33333... - 17.142857... = 144.19
+        var result = _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
+        {
+            Staff = new StaffEmploymentInfoDto
+            {
+                StaffId = 10,
+                ClinicalExperienceYears = 10,
+                IsSpecialSection = true,
+                HasUncommonRotatingShifts = true,
+                IsIncludedInProductivityPlan = true
+            },
+            TotalDays = 30,
+            WorkingDays = 22
+        });
 
-        Assert.Equal(0m, config.GetHardshipReduction(7m));
-        Assert.Equal(0.5m, config.GetHardshipReduction(10m));
-        Assert.Equal(1m, config.GetHardshipReduction(40m));
-        Assert.Equal(1.5m, config.GetHardshipReduction(60m));
-        Assert.Equal(2m, config.GetHardshipReduction(90m));
+        Assert.True(result.Breakdown.IsIncludedInProductivityPlan);
+        Assert.Equal(161.33m, result.BaseMonthlyHours);
+        Assert.Equal(144.19m, result.FinalMonthlyRequiredHours);
+    }
+
+    [Fact]
+    public void CalculateMonthlyHours_Group2_OrdinaryStaff_NoDeduction()
+    {
+        // For non-included staff (ordinary staff / civil service law):
+        // BaseHours = WorkingDays * 7.3333333 = 22 * (22 / 3) = 161.33
+        // Deductions = 0
+        var result = _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
+        {
+            Staff = new StaffEmploymentInfoDto
+            {
+                StaffId = 20,
+                ClinicalExperienceYears = 15,
+                IsSpecialSection = true,
+                HasUncommonRotatingShifts = true,
+                IsIncludedInProductivityPlan = false
+            },
+            TotalDays = 30,
+            WorkingDays = 22
+        });
+
+        Assert.False(result.Breakdown.IsIncludedInProductivityPlan);
+        Assert.Equal(161.33m, result.BaseMonthlyHours);
+        Assert.Equal(0m, result.TotalDeductions);
+        Assert.Equal(161.33m, result.FinalMonthlyRequiredHours);
+    }
+
+    [Fact]
+    public void CalculateMonthlyHours_GuardClauses_ThrowsOnInvalidInputs()
+    {
+        Assert.Throws<ArgumentNullException>(() => _calculator.CalculateMonthlyHours(null!));
+
+        Assert.Throws<ArgumentException>(() => _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
+        {
+            Staff = null!
+        }));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
+        {
+            Staff = new StaffEmploymentInfoDto(),
+            TotalDays = -1
+        }));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
+        {
+            Staff = new StaffEmploymentInfoDto(),
+            WorkingDays = -5
+        }));
+
+        Assert.Throws<ArgumentException>(() => _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
+        {
+            Staff = new StaffEmploymentInfoDto(),
+            TotalDays = 28,
+            WorkingDays = 30
+        }));
     }
 
     [Fact]
@@ -55,12 +134,68 @@ public class WorkingHoursCalculatorTests
     {
         var result = _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
         {
-            Staff = new StaffEmploymentInfoDto { StaffId = 1 },
-            NumberOfWeeksInMonth = 4,
+            Staff = new StaffEmploymentInfoDto { StaffId = 1, IsIncludedInProductivityPlan = true },
+            TotalDays = 28,
+            WorkingDays = 24,
             NightHolidayHours = 16
         });
 
         Assert.Equal(8m, result.Breakdown.NightHolidayCreditHours);
-        Assert.Equal(168m, result.FinalMonthlyRequiredHours);
+    }
+
+    [Theory]
+    [InlineData(ShiftPatternType.FixedDay, 0.0)]
+    [InlineData(ShiftPatternType.TwoShiftRotating, 0.5)]
+    [InlineData(ShiftPatternType.ThreeShiftRotating, 1.0)]
+    [InlineData(ShiftPatternType.FixedNight, 1.0)]
+    public void CalculateMonthlyHours_Group1_ShiftPatternType_AppliesCorrectReductions(
+        ShiftPatternType pattern,
+        decimal expectedPatternReduction)
+    {
+        var result = _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
+        {
+            Staff = new StaffEmploymentInfoDto
+            {
+                StaffId = 1,
+                ClinicalExperienceYears = 0,
+                IsSpecialSection = false,
+                ShiftPattern = pattern,
+                IsIncludedInProductivityPlan = true
+            },
+            TotalDays = 28,
+            WorkingDays = 24
+        });
+
+        // 0 yrs seniority (0.0) + General section hardship (1.0) + pattern reduction
+        Assert.Equal(pattern, result.Breakdown.ShiftPattern);
+        Assert.Equal(expectedPatternReduction, result.Breakdown.ShiftPatternReductionPerWeek);
+        Assert.Equal(1.0m + expectedPatternReduction, result.Breakdown.TotalWeeklyReduction);
+    }
+
+    [Fact]
+    public void CalculateMonthlyHours_Group1_ShiftPatternType_SupportsOverrides()
+    {
+        var result = _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
+        {
+            Staff = new StaffEmploymentInfoDto
+            {
+                StaffId = 1,
+                ClinicalExperienceYears = 5, // 0.5
+                IsSpecialSection = true,     // 2.0
+                ShiftPattern = ShiftPatternType.TwoShiftRotating,
+                IsIncludedInProductivityPlan = true
+            },
+            RuleOverrides = new ProductivityRuleOverrideDto
+            {
+                TwoShiftRotatingReductionHours = 0.75m
+            },
+            TotalDays = 28,
+            WorkingDays = 24
+        });
+
+        // Seniority (0.5) + Special Hardship (2.0) + Override TwoShiftRotating (0.75) = 3.25
+        Assert.Equal(ShiftPatternType.TwoShiftRotating, result.Breakdown.ShiftPattern);
+        Assert.Equal(0.75m, result.Breakdown.ShiftPatternReductionPerWeek);
+        Assert.Equal(3.25m, result.Breakdown.TotalWeeklyReduction);
     }
 }

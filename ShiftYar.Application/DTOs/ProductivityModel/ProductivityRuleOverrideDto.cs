@@ -11,6 +11,10 @@ namespace ShiftYar.Application.DTOs.ProductivityModel
         public decimal? MaxWeeklyReduction { get; set; }
         public decimal? HardshipReductionPerWeek { get; set; }
         public decimal? RotatingShiftReductionPerWeek { get; set; }
+        public decimal? ThreeShiftRotatingReductionHours { get; set; }
+        public decimal? TwoShiftRotatingReductionHours { get; set; }
+        public decimal? FixedNightReductionHours { get; set; }
+        public decimal? FixedDayReductionHours { get; set; }
         public decimal? NightHolidayMultiplier { get; set; }
         public IList<SeniorityReductionBandDto>? SeniorityReductionBands { get; set; }
     }
