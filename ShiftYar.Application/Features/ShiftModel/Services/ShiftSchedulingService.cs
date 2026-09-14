@@ -27,6 +27,8 @@ using ShiftYar.Application.Features.UserModel.Services;
 using AutoMapper;
 using Microsoft.AspNetCore.Http;
 using System.Security.Claims;
+using System.IO;
+using System.Text.Json;
 
 namespace ShiftYar.Application.Features.ShiftModel.Services
 {
@@ -1170,14 +1172,20 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             var isIncluded = user.IncludedProductivityPlan ?? (userConstraint.ShiftType == ShiftTypes.RotatingShift);
 
             var totalDays = Math.Max(1, (int)(constraints.EndDate.Date - constraints.StartDate.Date).TotalDays + 1);
-            var workingDays = 0;
+            var fridays = 0;
+            var officialHolidays = 0;
             for (var d = constraints.StartDate.Date; d <= constraints.EndDate.Date; d = d.AddDays(1))
             {
-                if (!constraints.IsHoliday(d) && d.DayOfWeek != DayOfWeek.Friday)
+                if (d.DayOfWeek == DayOfWeek.Friday)
                 {
-                    workingDays++;
+                    fridays++;
+                }
+                else if (constraints.IsHoliday(d))
+                {
+                    officialHolidays++;
                 }
             }
+            var workingDays = Math.Max(0, totalDays - (fridays + officialHolidays));
 
             var employmentDate = user.DateOfEmployment.HasValue
                 ? StaffEmploymentInfo.NormalizeEmploymentDate(user.DateOfEmployment.Value)
@@ -1220,6 +1228,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 TargetMonth = new DateTime(constraints.StartDate.Year, constraints.StartDate.Month, 1),
                 TotalDays = totalDays,
                 WorkingDays = workingDays,
+                FridaysCount = fridays,
+                OfficialHolidaysCount = officialHolidays,
                 NumberOfWeeksInMonth = weeks,
                 NightHolidayHours = 0m
             };
@@ -1254,6 +1264,123 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             }
 
             return Math.Max(1, (int)Math.Ceiling(totalDays / 7.0));
+        }
+
+        /// <summary>
+        /// بارگذاری روزهای تعطیل رسمی و جمعه‌های بازه جهت استفاده در قواعد شیفت‌بندی و محاسبه دقیق موظفی.
+        /// </summary>
+        private async Task LoadHolidayDatesAsync(ShiftConstraints constraints)
+        {
+            var scheduleStartDate = constraints.StartDate.Date;
+            var scheduleEndExclusive = constraints.EndDate.Date.AddDays(1);
+
+            try
+            {
+                var (rangeDates, _) = await _shiftDateRepository.GetByFilterAsync(
+                    new Application.Common.Filters.SimpleFilter<ShiftDate>(d =>
+                        d.Date != null &&
+                        d.Date >= scheduleStartDate &&
+                        d.Date < scheduleEndExclusive));
+
+                constraints.HolidayDates = rangeDates
+                    .Where(d => d.IsHoliday == true && d.Date.HasValue)
+                    .Select(d => d.Date.Value.Date)
+                    .ToHashSet();
+
+                // جمعه‌ها همواره تعطیل هفتگی هستند
+                for (var d = scheduleStartDate; d < scheduleEndExclusive; d = d.AddDays(1))
+                {
+                    if (d.DayOfWeek == DayOfWeek.Friday)
+                    {
+                        constraints.HolidayDates.Add(d);
+                    }
+                }
+
+                // در صورتی که دیتابیس تقویم رکوردی نداشته باشد یا تعطیل رسمی غیرجمعه نداشته باشد،
+                // تعطیلات رسمی را از فایل مناسبت‌های تقویم به عنوان Fallback بارگذاری می‌کنیم
+                if (rangeDates.Count == 0 || !rangeDates.Any(d => d.IsHoliday == true && d.Date.HasValue && d.Date.Value.DayOfWeek != DayOfWeek.Friday))
+                {
+                    LoadFallbackHolidaysFromResource(constraints, scheduleStartDate, scheduleEndExclusive);
+                }
+
+                _logger.LogInformation(
+                    "LoadConstraints: Loaded {HolidayCount} holiday(s) (including Fridays) in range {Start}..{End}",
+                    constraints.HolidayDates.Count,
+                    scheduleStartDate.ToString("yyyy-MM-dd"),
+                    constraints.EndDate.ToString("yyyy-MM-dd"));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "LoadConstraints: failed to load holiday dates from repository; applying fallback holidays");
+                for (var d = scheduleStartDate; d < scheduleEndExclusive; d = d.AddDays(1))
+                {
+                    if (d.DayOfWeek == DayOfWeek.Friday)
+                    {
+                        constraints.HolidayDates.Add(d);
+                    }
+                }
+                LoadFallbackHolidaysFromResource(constraints, scheduleStartDate, scheduleEndExclusive);
+            }
+        }
+
+        private void LoadFallbackHolidaysFromResource(ShiftConstraints constraints, DateTime startDate, DateTime endDateExclusive)
+        {
+            try
+            {
+                var persianCalendar = new PersianCalendar();
+                var startYear = persianCalendar.GetYear(startDate);
+                var endYear = persianCalendar.GetYear(endDateExclusive.AddDays(-1));
+
+                for (var py = startYear; py <= endYear; py++)
+                {
+                    var possiblePaths = new[]
+                    {
+                        Path.Combine(AppContext.BaseDirectory, "Resources", "Holidays", $"holidays_{py}.json"),
+                        Path.Combine(Directory.GetCurrentDirectory(), "Resources", "Holidays", $"holidays_{py}.json"),
+                        Path.Combine(Directory.GetCurrentDirectory(), "ShiftYar.Api", "Resources", "Holidays", $"holidays_{py}.json")
+                    };
+
+                    var filePath = possiblePaths.FirstOrDefault(File.Exists);
+                    if (filePath != null)
+                    {
+                        var json = File.ReadAllText(filePath);
+                        using var doc = JsonDocument.Parse(json);
+                        foreach (var element in doc.RootElement.EnumerateArray())
+                        {
+                            if (element.TryGetProperty("Date", out var dateProp))
+                            {
+                                var pDateStr = dateProp.GetString();
+                                if (!string.IsNullOrWhiteSpace(pDateStr))
+                                {
+                                    var parts = pDateStr.Split('/');
+                                    if (parts.Length == 3 &&
+                                        int.TryParse(parts[0], out var y) &&
+                                        int.TryParse(parts[1], out var m) &&
+                                        int.TryParse(parts[2], out var d))
+                                    {
+                                        try
+                                        {
+                                            var gDate = persianCalendar.ToDateTime(y, m, d, 0, 0, 0, 0).Date;
+                                            if (gDate >= startDate && gDate < endDateExclusive)
+                                            {
+                                                constraints.HolidayDates.Add(gDate);
+                                            }
+                                        }
+                                        catch
+                                        {
+                                            // تاریخ شمسی نامعتبر احتمالی را نادیده بگیر
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "LoadFallbackHolidaysFromResource encountered an issue");
+            }
         }
 
         private static double CalculateShiftDurationHours(TimeSpan start, TimeSpan end)
@@ -1706,6 +1833,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     StartDate = DateConverter.ConvertToGregorianDate(request.StartDate.Trim()),
                     EndDate = DateConverter.ConvertToGregorianDate(request.EndDate.Trim())
                 };
+
+                // بارگذاری روزهای تعطیل رسمی و جمعه‌های بازه قبل از پردازش کاربران و محاسبه موظفی
+                await LoadHolidayDatesAsync(constraints);
 
                 // تنظیم قوانین قطعی/اختیاری بر اساس تنظیمات دپارتمان
                 var department = await _departmentRepository.GetByIdAsync(request.DepartmentId);
@@ -2467,30 +2597,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         approvedRequestItems.Count);
                 }
 
-                // بارگذاری روزهای تعطیل بازه (برای قاعدهٔ حضور روزانهٔ پرسنل فیکس)
-                try
-                {
-                    var (rangeDates, _) = await _shiftDateRepository.GetByFilterAsync(
-                        new Application.Common.Filters.SimpleFilter<ShiftDate>(d =>
-                            d.Date != null &&
-                            d.Date >= scheduleStartDate &&
-                            d.Date < scheduleEndExclusive));
-
-                    constraints.HolidayDates = rangeDates
-                        .Where(d => d.IsHoliday == true && d.Date.HasValue)
-                        .Select(d => d.Date.Value.Date)
-                        .ToHashSet();
-
-                    _logger.LogInformation(
-                        "LoadConstraints: Loaded {HolidayCount} holiday(s) in range {Start}..{End}",
-                        constraints.HolidayDates.Count,
-                        scheduleStartDate.ToString("yyyy-MM-dd"),
-                        constraints.EndDate.ToString("yyyy-MM-dd"));
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "LoadConstraints: failed to load holiday dates; fixed staff will be scheduled on all days");
-                }
+                // روزهای تعطیل بازه (تعطیلات رسمی و جمعه‌ها) قبلاً در ابتدای LoadConstraintsAsync بارگذاری شده‌اند.
 
                 // پرسنل فیکس (صبح/عصر) باید همهٔ روزهای غیرتعطیل شیفت باشند
                 // و در روزهای تعطیل هم نباید شیفت بگیرند (تعطیل = عدم‌حضور سخت)

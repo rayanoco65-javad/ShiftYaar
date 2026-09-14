@@ -7,6 +7,7 @@ namespace ShiftYar.Application.DTOs.ProductivityModel
     /// </summary>
     public class ProductivityRuleOverrideDto
     {
+        public decimal? BaseDailyWorkingHours { get; set; }
         public decimal? BaseWeeklyHours { get; set; }
         public decimal? MaxWeeklyReduction { get; set; }
         public decimal? HardshipReductionPerWeek { get; set; }

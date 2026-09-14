@@ -61,17 +61,41 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
                 ? request.TotalDays
                 : (request.NumberOfWeeksInMonth > 0 ? request.NumberOfWeeksInMonth * 7 : DateTime.DaysInMonth(targetMonth.Year, targetMonth.Month));
 
-            var workingDays = request.WorkingDays > 0
-                ? request.WorkingDays
-                : (request.TotalDays > 0 ? (int)Math.Round((request.TotalDays / 7.0) * 6) : (request.NumberOfWeeksInMonth > 0 ? request.NumberOfWeeksInMonth * 6 : 24));
+            var fridaysCount = request.FridaysCount;
+            var officialHolidaysCount = request.OfficialHolidaysCount;
+
+            int workingDays;
+            if (request.WorkingDays > 0)
+            {
+                workingDays = request.WorkingDays;
+                if (fridaysCount == 0 && officialHolidaysCount == 0)
+                {
+                    fridaysCount = (int)Math.Round(totalDays / 7.0);
+                    officialHolidaysCount = Math.Max(0, totalDays - workingDays - fridaysCount);
+                }
+            }
+            else if (fridaysCount > 0 || officialHolidaysCount > 0)
+            {
+                workingDays = Math.Max(0, totalDays - (fridaysCount + officialHolidaysCount));
+            }
+            else
+            {
+                fridaysCount = (int)Math.Round(totalDays / 7.0);
+                officialHolidaysCount = 0;
+                workingDays = Math.Max(0, totalDays - fridaysCount);
+            }
+
+            var dailyHours = request.RuleOverrides?.BaseDailyWorkingHours.HasValue == true && request.RuleOverrides.BaseDailyWorkingHours.Value > 0
+                ? request.RuleOverrides.BaseDailyWorkingHours.Value
+                : ruleConfig.DailyWorkingHours;
 
             var weeksInMonth = request.NumberOfWeeksInMonth > 0
                 ? (decimal)request.NumberOfWeeksInMonth
                 : (totalDays / 7.0m);
 
             // گام ۱: محاسبه ساعت کار پایه ماه (۷ ساعت و ۲۰ دقیقه به ازای هر روز کاری غیرتعطیل)
-            // WorkingDays * (22 / 3)
-            var baseMonthlyHours = Math.Max(0m, (decimal)workingDays * ProductivityRuleConfig.BaseDailyWorkingHours);
+            // WorkingDays * DailyWorkingHours
+            var baseMonthlyHours = Math.Max(0m, (decimal)workingDays * dailyHours);
 
             // بررسی شمول طرح بهره‌وری
             var isIncluded = request.Staff.IsIncludedInProductivityPlan;
@@ -92,9 +116,12 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
                         IsIncludedInProductivityPlan = false,
                         TotalDays = totalDays,
                         WorkingDays = workingDays,
-                        BaseHoursPerDay = ProductivityRuleConfig.BaseDailyWorkingHours,
+                        FridaysCount = fridaysCount,
+                        OfficialHolidaysCount = officialHolidaysCount,
+                        BaseHoursPerDay = dailyHours,
                         BaseWeeklyHours = ruleConfig.BaseWeeklyHours,
                         WeeklyRequiredHours = ruleConfig.BaseWeeklyHours,
+                        NetRequiredHours = finalRequiredForOrdinary,
                         SeniorityReductionPerWeek = 0m,
                         HardshipReductionPerWeek = 0m,
                         RotatingShiftReductionPerWeek = 0m,
@@ -106,8 +133,9 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
                         Notes = new List<string>
                         {
                             "پرسنل غیرمشمول قانون ارتقای بهره‌وری (پرسنل عادی / خدمات کشوری).",
-                            $"ساعت موظفی بر اساس ضرب تعداد روزهای کاری غیرتعطیل ({workingDays} روز) در ۷ ساعت و ۲۰ دقیقه محاسبه شد.",
-                            "کسورات ناشی از سابقه، سختی کار یا نوبت‌کاری بهره‌وری اعمال نمی‌شود."
+                            $"تقویم مبنا: {totalDays} روز کل، {fridaysCount} جمعه، {officialHolidaysCount} تعطیل رسمی، {workingDays} روز کاری موظف.",
+                            $"ساعت موظفی بر اساس ضرب تعداد روزهای کاری غیرتعطیل ({workingDays} روز) در {dailyHours:F2} ساعت محاسبه شد: {finalRequiredForOrdinary} ساعت.",
+                            "کسورات ناشی از سابقه، سختی کار یا نوبت‌کاری بهره‌وری برای این گروه اعمال نمی‌شود."
                         }
                     }
                 };
@@ -175,9 +203,12 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
                     IsIncludedInProductivityPlan = true,
                     TotalDays = totalDays,
                     WorkingDays = workingDays,
-                    BaseHoursPerDay = ProductivityRuleConfig.BaseDailyWorkingHours,
+                    FridaysCount = fridaysCount,
+                    OfficialHolidaysCount = officialHolidaysCount,
+                    BaseHoursPerDay = dailyHours,
                     BaseWeeklyHours = ruleConfig.BaseWeeklyHours,
                     WeeklyRequiredHours = weeklyRequiredHours,
+                    NetRequiredHours = finalMonthlyRequiredHours,
                     SeniorityReductionPerWeek = seniorityReduction,
                     HardshipReductionPerWeek = hardshipReduction,
                     ShiftPattern = shiftPattern,
@@ -190,9 +221,11 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
                     NightHolidayCreditHours = nightHolidayCredit,
                     Notes = new List<string>
                     {
-                        "ساعت موظفی پایه بر اساس تعداد روزهای کاری غیرتعطیل ماه ضرب در ۷ ساعت و ۲۰ دقیقه محاسبه شد.",
-                        "تخفیف هفتگی ناشی از سابقه، سختی بخش و الگوی نوبت‌کاری اعمال گردید (حداکثر سقف ۸ ساعت در هفته).",
-                        "تخفیف ماهانه متناسب با نسبت طول ماه (تعداد روزهای ماه تقسیم بر ۷) محاسبه گردید."
+                        $"تقویم مبنا: {totalDays} روز کل، {fridaysCount} جمعه، {officialHolidaysCount} تعطیل رسمی تقویمی، {workingDays} روز کاری موظف.",
+                        $"ساعت کار پایه ناخالص: {workingDays} روز کاری × {dailyHours:F2} ساعت = {Math.Round(baseMonthlyHours, 2)} ساعت.",
+                        $"تخفیف هفتگی بهره‌وری: سابقه ({seniorityReduction}h) + صعوبت ({hardshipReduction}h) + نوبت‌کاری ({shiftPatternReduction}h) = {totalWeeklyReduction} ساعت در هفته (سقف {ruleConfig.MaxWeeklyReduction}h).",
+                        $"کسر ماهانه بهره‌وری: ({totalDays}/7) × {totalWeeklyReduction} = {monthlyReductionFromWeekly} ساعت.",
+                        $"ساعت موظفی خالص نهایی: {finalMonthlyRequiredHours} ساعت."
                     }
                 }
             };
@@ -236,6 +269,7 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
 
             return new ProductivityRuleConfig
             {
+                DailyWorkingHours = overrides.BaseDailyWorkingHours ?? defaultConfig.DailyWorkingHours,
                 BaseWeeklyHours = overrides.BaseWeeklyHours ?? defaultConfig.BaseWeeklyHours,
                 MaxWeeklyReduction = overrides.MaxWeeklyReduction ?? defaultConfig.MaxWeeklyReduction,
                 RotatingShiftReductionPerWeek = overrides.RotatingShiftReductionPerWeek ?? defaultConfig.RotatingShiftReductionPerWeek,

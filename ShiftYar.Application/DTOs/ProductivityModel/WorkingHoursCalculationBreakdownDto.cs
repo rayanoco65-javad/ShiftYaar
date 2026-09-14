@@ -11,9 +11,12 @@ namespace ShiftYar.Application.DTOs.ProductivityModel
         public bool IsIncludedInProductivityPlan { get; set; } = true;
         public int TotalDays { get; set; }
         public int WorkingDays { get; set; }
+        public int FridaysCount { get; set; }
+        public int OfficialHolidaysCount { get; set; }
         public decimal BaseHoursPerDay { get; set; } = 22m / 3m;
         public decimal BaseWeeklyHours { get; set; }
         public decimal WeeklyRequiredHours { get; set; }
+        public decimal NetRequiredHours { get; set; }
         public decimal SeniorityReductionPerWeek { get; set; }
         public decimal HardshipReductionPerWeek { get; set; }
         public ShiftPatternType ShiftPattern { get; set; } = ShiftPatternType.FixedDay;

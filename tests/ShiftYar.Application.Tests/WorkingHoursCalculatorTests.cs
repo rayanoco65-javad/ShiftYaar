@@ -198,4 +198,73 @@ public class WorkingHoursCalculatorTests
         Assert.Equal(0.75m, result.Breakdown.ShiftPatternReductionPerWeek);
         Assert.Equal(3.25m, result.Breakdown.TotalWeeklyReduction);
     }
+
+    [Theory]
+    [InlineData(0, 0.0)]
+    [InlineData(3, 0.0)]
+    [InlineData(4, 0.5)]
+    [InlineData(7, 0.5)]
+    [InlineData(8, 1.0)]
+    [InlineData(11, 1.0)]
+    [InlineData(12, 1.5)]
+    [InlineData(15, 1.5)]
+    [InlineData(16, 2.0)]
+    [InlineData(22, 2.0)]
+    public void CalculateMonthlyHours_HospitalStandardSeniorityBands_AppliesCorrectReductions(
+        int yearsOfService,
+        decimal expectedSeniorityReduction)
+    {
+        var result = _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
+        {
+            Staff = new StaffEmploymentInfoDto
+            {
+                StaffId = 1,
+                ClinicalExperienceYears = yearsOfService,
+                IsSpecialSection = false,
+                ShiftPattern = ShiftPatternType.FixedDay,
+                IsIncludedInProductivityPlan = true
+            },
+            TotalDays = 30,
+            WorkingDays = 24
+        });
+
+        Assert.Equal(expectedSeniorityReduction, result.Breakdown.SeniorityReductionPerWeek);
+    }
+
+    [Fact]
+    public void CalculateMonthlyHours_StandardHospitalCalendar_CalculatesExactNetHours()
+    {
+        // ماه ۳۰ روزه فرضی با ۴ جمعه و ۲ تعطیل رسمی:
+        // WorkingDays = 30 - (4 + 2) = 24 روز
+        // BaseHours = 24 * (22 / 3) = 176.00
+        // پرستار با ۱۰ سال سابقه در بخش جنرال با شیفت گردشی:
+        // Seniority = 1.0, Hardship = 1.0, ShiftPattern = 1.0 => WeeklyReduction = 3.0
+        // MonthlyReduction = (30 / 7) * 3.0 = 12.8571 -> 12.86
+        // NetRequiredHours = 176.00 - 12.86 = 163.14
+        var result = _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
+        {
+            Staff = new StaffEmploymentInfoDto
+            {
+                StaffId = 50,
+                ClinicalExperienceYears = 10,
+                IsSpecialSection = false,
+                ShiftPattern = ShiftPatternType.ThreeShiftRotating,
+                IsIncludedInProductivityPlan = true
+            },
+            TotalDays = 30,
+            FridaysCount = 4,
+            OfficialHolidaysCount = 2
+        });
+
+        Assert.Equal(30, result.Breakdown.TotalDays);
+        Assert.Equal(4, result.Breakdown.FridaysCount);
+        Assert.Equal(2, result.Breakdown.OfficialHolidaysCount);
+        Assert.Equal(24, result.Breakdown.WorkingDays);
+        Assert.Equal(176.00m, result.BaseMonthlyHours);
+        Assert.Equal(12.86m, result.TotalDeductions);
+        Assert.Equal(163.14m, result.FinalMonthlyRequiredHours);
+        Assert.Equal(163.14m, result.NetRequiredHours);
+        Assert.Equal(163.14m, result.Breakdown.NetRequiredHours);
+        Assert.NotEmpty(result.Breakdown.Notes);
+    }
 }

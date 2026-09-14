@@ -10,14 +10,15 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
     /// </summary>
     public class ProductivityRuleConfig
     {
-        // قانون ارتقای بهره‌وری: ۰.۵ ساعت به ازای هر ۵ سال سابقه کار بالینی (سقف ۲ ساعت برای ۲۰ سال و بالاتر)
+        // قانون ارتقای بهره‌وری و استاندارد بیمارستانی:
+        // کمتر از ۴ سال: ۰ ساعت، ۴ تا ۸ سال: ۰.۵ ساعت، ۸ تا ۱۲ سال: ۱.۰ ساعت، ۱۲ تا ۱۶ سال: ۱.۵ ساعت، ۱۶ سال به بالا: ۲.۰ ساعت (سقف)
         private static readonly IReadOnlyCollection<SeniorityReductionBand> DefaultSeniorityBands = new List<SeniorityReductionBand>
         {
-            new SeniorityReductionBand(0, 4, 0m),
-            new SeniorityReductionBand(5, 9, 0.5m),
-            new SeniorityReductionBand(10, 14, 1.0m),
-            new SeniorityReductionBand(15, 19, 1.5m),
-            new SeniorityReductionBand(20, null, 2.0m)
+            new SeniorityReductionBand(0, 3, 0m),
+            new SeniorityReductionBand(4, 7, 0.5m),
+            new SeniorityReductionBand(8, 11, 1.0m),
+            new SeniorityReductionBand(12, 15, 1.5m),
+            new SeniorityReductionBand(16, null, 2.0m)
         };
 
         // صعوبت کار: بخش‌های ویژه (۲ ساعت) و بخش‌های جنرال/عادی (۱ تا ۱.۵ ساعت)
@@ -31,6 +32,7 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
         /// <summary>ساعت کار پایه روزانه غیرتعطیل (۷ ساعت و ۲۰ دقیقه = ۲۲/۳ = ۷.۳۳۳۳۳۳ ساعت)</summary>
         public const decimal BaseDailyWorkingHours = 22m / 3m;
 
+        public decimal DailyWorkingHours { get; init; } = BaseDailyWorkingHours;
         public decimal BaseWeeklyHours { get; init; } = 44m;
         public decimal MaxWeeklyReduction { get; init; } = 8m;
         public decimal SpecialSectionHardshipReduction { get; init; } = 2.0m;
