@@ -45,7 +45,12 @@ public static class ShiftEligibilityGuard
                 ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
                 : 2;
             var dayAssignments = solution.GetUserAssignments(user.UserId, assignment.Date).ToList();
-            if (MaxShiftsPerDayRules.WouldExceedDailyLimit(dayAssignments.Count - 1, maxPerDay, constraints.HardRules.EnforceMaxShiftsPerDay)
+            var isLongShift = dayAssignments.Count == 2
+                && dayAssignments.Any(a => a.ShiftLabel == ShiftLabel.Morning)
+                && dayAssignments.Any(a => a.ShiftLabel == ShiftLabel.Evening);
+
+            if (!isLongShift
+                && MaxShiftsPerDayRules.WouldExceedDailyLimit(dayAssignments.Count - 1, maxPerDay, constraints.HardRules.EnforceMaxShiftsPerDay)
                 && dayAssignments.Count > maxPerDay)
             {
                 violations.Add(
@@ -85,13 +90,20 @@ public static class ShiftEligibilityGuard
             : 2;
         var existing = solution.GetUserAssignments(assignment.UserId, assignment.Date)
             .Where(a => a.ShiftId != assignment.ShiftId || a.ShiftLabel != assignment.ShiftLabel)
-            .Select(a => a.ShiftLabel);
+            .Select(a => a.ShiftLabel)
+            .ToList();
+
+        var isLongShift = existing.Count == 1 && (
+            (existing[0] == ShiftLabel.Morning && assignment.ShiftLabel == ShiftLabel.Evening) ||
+            (existing[0] == ShiftLabel.Evening && assignment.ShiftLabel == ShiftLabel.Morning));
+
+        var effectiveMaxPerDay = isLongShift ? Math.Max(2, maxPerDay) : maxPerDay;
 
         return ShiftEligibilityResolver.IsAssignmentAllowed(
             user,
             existing,
             assignment.ShiftLabel,
-            maxPerDay,
+            effectiveMaxPerDay,
             constraints.HardRules.ForbidDuplicateDailyAssignments,
             assignment.Date);
     }

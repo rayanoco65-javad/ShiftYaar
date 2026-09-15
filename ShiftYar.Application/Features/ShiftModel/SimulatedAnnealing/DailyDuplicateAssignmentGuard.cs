@@ -59,7 +59,29 @@ public static class DailyDuplicateAssignmentGuard
 
         return solution.Assignments.Values
             .GroupBy(a => new { a.UserId, Date = a.Date.Date })
-            .Where(g => !DailyAssignmentRules.IsValidDaySet(g.Select(a => a.ShiftLabel), maxPerDay, forbidDup))
+            .Where(g =>
+            {
+                var labels = g.Select(a => a.ShiftLabel).ToList();
+                // ترکیب‌های ذاتاً غیرمجاز پزشکی (عصر+شب، تکرار همان نوع شیفت، بیش از ۲ شیفت)
+                if (!DailyAssignmentRules.IsValidDaySet(labels, maxShiftsPerDay: 2, forbidDup))
+                {
+                    return true;
+                }
+
+                // اگر سقف روزانه ۱ است، فقط شیفت لانگ استاندارد (صبح+عصر) به عنوان استثنای پوشش کسری پذیرفته می‌شود
+                if (maxPerDay == 1 && labels.Count > 1)
+                {
+                    var isLongShift = labels.Count == 2 && labels.Contains(ShiftLabel.Morning) && labels.Contains(ShiftLabel.Evening);
+                    if (isLongShift)
+                    {
+                        return false;
+                    }
+
+                    return true;
+                }
+
+                return false;
+            })
             .Select(g =>
             {
                 var labels = string.Join("+", g.Select(a => a.ShiftLabel));

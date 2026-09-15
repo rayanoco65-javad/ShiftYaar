@@ -190,7 +190,134 @@ public static class ShiftCoverageGuard
             FillMissingCoverage(solution, constraints, reserveUnmetOnSlots: false);
             if (GetUnderCapacityViolations(solution, constraints).Count == 0)
             {
-                break;
+                return;
+            }
+        }
+
+        // در صورت وجود کسری قطعی ناشی از کمبود فیزیکی نیرو (مانند مرخصی همزمان چند پرسنل)،
+        // از شیفت لانگ استاندارد (صبح+عصر) برای تکمیل ظرفیت استفاده می‌شود.
+        EmergencyFillMissingCoverageWithDoubleShift(solution, constraints);
+    }
+
+    /// <summary>
+    /// تکمیل اضطراری کسری ظرفیت با شیفت لانگ (صبح و عصر متوالی).
+    /// فقط در شرایط بحران کمبود فیزیکی نیرو (مانند مرخصی همزمان پرسنل) اجرا می‌شود.
+    /// </summary>
+    private static void EmergencyFillMissingCoverageWithDoubleShift(
+        ShiftSolution solution,
+        ShiftConstraints constraints)
+    {
+        var underViolations = GetUnderCapacityViolations(solution, constraints);
+        if (underViolations.Count == 0)
+        {
+            return;
+        }
+
+        var dates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
+            .Select(i => constraints.StartDate.Date.AddDays(i))
+            .ToList();
+
+        foreach (var date in dates)
+        {
+            foreach (var shiftReq in constraints.ShiftRequirements)
+            {
+                // فقط شیفت‌های صبح یا عصر مجاز به ترکیب روزانه (لانگ) هستند؛ عصر+شب اکیداً ممنوع است.
+                if (shiftReq.ShiftLabel != ShiftLabel.Morning && shiftReq.ShiftLabel != ShiftLabel.Evening)
+                {
+                    continue;
+                }
+
+                var complementaryLabel = shiftReq.ShiftLabel == ShiftLabel.Evening
+                    ? ShiftLabel.Morning
+                    : ShiftLabel.Evening;
+
+                foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
+                {
+                    var day = specialtyReq.ForDay(constraints.IsHoliday(date));
+                    if (day.RequiredTotalCount <= 0) continue;
+
+                    var regular = GetSpecialtyAssignments(
+                        solution, constraints, shiftReq, date, specialtyReq.SpecialtyId, isOnCall: false);
+
+                    var missing = day.RequiredTotalCount - regular.Count;
+                    if (missing <= 0) continue;
+
+                    var requiresManager = ShiftManagerRules.RequiresAnyManager(shiftReq);
+                    var (reqTotal, reqL1) = ShiftManagerRules.GetRequirement(shiftReq);
+
+                    // کاندیداها: پرسنلی که امروز در شیفت مکمل (صبح/عصر) حضور دارند و مجاز به لانگ هستند
+                    var candidates = constraints.UserConstraints
+                        .Where(u => u.IsActive && u.SpecialtyId == specialtyReq.SpecialtyId)
+                        .Where(u => u.ShiftType != ShiftTypes.FixedShift)
+                        .Where(ShiftEligibilityResolver.SupportsMorningEveningCombo)
+                        .Where(u => ShiftEligibilityResolver.HasInherentPermission(u, shiftReq.ShiftLabel))
+                        .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
+                        .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
+                        .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
+                        .Where(u =>
+                        {
+                            var existing = solution.GetUserAssignments(u.UserId, date).Select(a => a.ShiftLabel).ToList();
+                            if (!existing.Contains(complementaryLabel))
+                            {
+                                return false;
+                            }
+
+                            // بررسی ترکیب مجاز روزانه حداکثر ۲ شیفت (صبح+عصر)
+                            if (!DailyAssignmentRules.CanAddShift(existing, shiftReq.ShiftLabel, maxShiftsPerDay: 2, forbidDuplicateLabels: true))
+                            {
+                                return false;
+                            }
+
+                            // بررسی صلاحیت انتساب شیفت با در نظر گرفتن مجوزهای روزانه
+                            if (!ShiftEligibilityResolver.IsAssignmentAllowed(
+                                    u,
+                                    existing,
+                                    shiftReq.ShiftLabel,
+                                    maxShiftsPerDay: 2,
+                                    forbidDuplicateLabels: true,
+                                    date: date))
+                            {
+                                return false;
+                            }
+
+                            // عدم تداخل با استراحت‌های شیفت مجاور (شب روز قبل یا صبح روز بعد)
+                            if (AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(u.UserId), date, shiftReq.ShiftLabel, constraints))
+                            {
+                                return false;
+                            }
+
+                            return true;
+                        })
+                        .OrderBy(u =>
+                        {
+                            if (requiresManager)
+                            {
+                                var currentAssignees = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                                    .Where(a => !a.IsOnCall)
+                                    .Select(a => constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId))
+                                    .Where(x => x != null)
+                                    .Cast<UserConstraint>()
+                                    .ToList();
+                                if (currentAssignees.Count(ShiftManagerRules.IsLevel1) < reqL1 && ShiftManagerRules.IsLevel1(u))
+                                    return -20000;
+                                if (currentAssignees.Count(ShiftManagerRules.IsManager) < reqTotal && ShiftManagerRules.IsManager(u))
+                                    return -10000;
+                            }
+                            return 0;
+                        })
+                        .ThenBy(u => u.OvertimeConsent ? 0 : 1) // اولویت ۱: داشتن رضایت به اضافه کار
+                        .ThenBy(u => solution.GetUserAssignments(u.UserId, date.AddDays(1)).Any(a => !a.IsOnCall) ? 1 : 0) // اولویت ۲: داشتن استراحت در روز بعد
+                        .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
+                        .ToList();
+
+                    foreach (var user in candidates)
+                    {
+                        if (missing <= 0) break;
+
+                        solution.AddAssignment(user.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall: false);
+                        missing--;
+                    }
+                }
             }
         }
     }
@@ -546,8 +673,6 @@ public static class ShiftCoverageGuard
                     ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
                     : 2;
                 if (!DailyAssignmentRules.CanAddShift(existing, shiftReq.ShiftLabel, maxPerDay, constraints.HardRules.ForbidDuplicateDailyAssignments))
-                    return false;
-                if (AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(u.UserId), date, shiftReq.ShiftLabel, constraints))
                     return false;
                 return true;
             })

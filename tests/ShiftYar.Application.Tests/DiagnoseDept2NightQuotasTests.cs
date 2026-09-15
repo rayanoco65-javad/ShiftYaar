@@ -431,8 +431,34 @@ public class DiagnoseDept2NightQuotasTests
         _output.WriteLine($"After ForceFillAllMissingCoverage under-capacity count: {afterUnder.Count}");
         foreach (var u in afterUnder)
         {
-            _output.WriteLine($"  After: {u}");
+            _output.WriteLine($"  After Under: {u}");
         }
+
+        var dailyViolations = DailyDuplicateAssignmentGuard.GetViolations(solution, constraints);
+        _output.WriteLine($"Daily duplicate violations: {dailyViolations.Count}");
+        foreach (var v in dailyViolations)
+        {
+            _output.WriteLine($"  Daily violation: {v}");
+        }
+
+        var restViolations = AdjacentShiftRestGuard.GetViolations(solution, constraints);
+        _output.WriteLine($"Adjacent rest violations: {restViolations.Count}");
+        foreach (var r in restViolations)
+        {
+            _output.WriteLine($"  Rest violation: {r}");
+        }
+
+        var eligibilityViolations = ShiftEligibilityGuard.GetViolations(solution, constraints);
+        _output.WriteLine($"Shift eligibility violations: {eligibilityViolations.Count}");
+        foreach (var ev in eligibilityViolations)
+        {
+            _output.WriteLine($"  Eligibility violation: {ev}");
+        }
+
+        Assert.Empty(afterUnder);
+        Assert.Empty(dailyViolations);
+        Assert.Empty(restViolations);
+        Assert.Empty(eligibilityViolations);
     }
 
     [Fact]
