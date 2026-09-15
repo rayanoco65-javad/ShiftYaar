@@ -397,6 +397,45 @@ public class DiagnoseDept2NightQuotasTests
     }
 
     [Fact]
+    public void Test_DiagnoseCoverageUnderCapacityJob73()
+    {
+        var jsonPath = @"C:\Users\Paria\.gemini\antigravity\brain\2e803de5-ca99-49b4-a5e7-a2d4d5605940\scratch\dept2_loaded_constraints.json";
+        var constraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(System.IO.File.ReadAllText(jsonPath))!;
+
+        var jobJsonPath = @"C:\Users\Paria\.gemini\antigravity\brain\2e803de5-ca99-49b4-a5e7-a2d4d5605940\scratch\latest_job_result.json";
+        var jobDoc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(jobJsonPath));
+        var optElem = jobDoc.RootElement.GetProperty("optimizationResult");
+        var asgElems = optElem.GetProperty("assignments").EnumerateArray();
+
+        var solution = new ShiftSolution();
+        foreach (var a in asgElems)
+        {
+            var uid = a.GetProperty("userId").GetInt32();
+            var sid = a.GetProperty("shiftId").GetInt32();
+            var dt = a.GetProperty("date").GetDateTime();
+            var lbl = (ShiftLabel)a.GetProperty("shiftLabel").GetInt32();
+            var onCall = a.GetProperty("isOnCall").GetBoolean();
+            solution.AddAssignment(uid, sid, dt, lbl, onCall);
+        }
+
+        var initialUnder = ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints);
+        _output.WriteLine($"Initial under-capacity count: {initialUnder.Count}");
+        foreach (var u in initialUnder)
+        {
+            _output.WriteLine($"  Initial: {u}");
+        }
+
+        ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
+
+        var afterUnder = ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints);
+        _output.WriteLine($"After ForceFillAllMissingCoverage under-capacity count: {afterUnder.Count}");
+        foreach (var u in afterUnder)
+        {
+            _output.WriteLine($"  After: {u}");
+        }
+    }
+
+    [Fact]
     public void Test_SimulateOvertimeOnJob73()
     {
         var jsonPath = @"C:\Users\Paria\.gemini\antigravity\brain\2e803de5-ca99-49b4-a5e7-a2d4d5605940\scratch\dept2_loaded_constraints.json";
