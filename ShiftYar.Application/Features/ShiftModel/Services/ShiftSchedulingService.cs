@@ -1167,8 +1167,13 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             return (1000.0, 0.1, 0.997, defaultMaxIterations, defaultMaxWithoutImprovement);
         }
 
-        private WorkingHoursCalculationResultDto? CalculateProductivitySnapshot(User user, UserConstraint userConstraint, ShiftConstraints constraints, DepartmentSchedulingSettings? deptSetting, double nightShiftDurationHours)
+        internal WorkingHoursCalculationResultDto? CalculateProductivitySnapshot(User user, UserConstraint userConstraint, ShiftConstraints constraints, DepartmentSchedulingSettings? deptSetting, double nightShiftDurationHours)
         {
+            if (_workingHoursCalculator == null)
+            {
+                return null;
+            }
+
             var isIncluded = user.IncludedProductivityPlan ?? (userConstraint.ShiftType == ShiftTypes.RotatingShift);
 
             var totalDays = Math.Max(1, (int)(constraints.EndDate.Date - constraints.StartDate.Date).TotalDays + 1);
@@ -1219,6 +1224,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 StaffId = user.Id ?? 0,
                 StaffFullName = user.FullName,
                 DateOfEmployment = employmentDate,
+                ClinicalExperienceYears = userConstraint.ExperienceYears,
                 IsIncludedInProductivityPlan = isIncluded,
                 HardshipPercent = user.HardshipPercent ?? 0m,
                 HasUncommonRotatingShifts = shiftPattern == ShiftPatternType.ThreeShiftRotating || shiftPattern == ShiftPatternType.TwoShiftRotating,
@@ -1238,16 +1244,28 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 ThursdaysCount = thursdays,
                 NumberOfWeeksInMonth = weeks,
                 NightHolidayHours = 0m,
-                CapBaseHoursToStandardMonth = false
+                CapBaseHoursToStandardMonth = true
             };
 
             try
             {
-                return _workingHoursCalculator.CalculateMonthlyHours(request);
+                var result = _workingHoursCalculator.CalculateMonthlyHours(request);
+                _logger?.LogInformation(
+                    "ProductivitySnapshot calculated for User {UserId} ({UserName}): BaseHours={BaseHours}, SeniorityRed={SeniorityRed}h, HardshipRed={HardshipRed}h, ShiftRed={ShiftRed}h, TotalWeeklyRed={WeeklyRed}h, MonthlyRed={MonthlyRed}h => FinalRequiredHours={FinalHours}",
+                    user.Id,
+                    user.FullName,
+                    result.BaseMonthlyHours,
+                    result.Breakdown?.SeniorityReductionPerWeek,
+                    result.Breakdown?.HardshipReductionPerWeek,
+                    result.Breakdown?.ShiftPatternReductionPerWeek,
+                    result.Breakdown?.TotalWeeklyReduction,
+                    result.Breakdown?.MonthlyReductionFromWeeklyAdjustments,
+                    result.FinalMonthlyRequiredHours);
+                return result;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to calculate productivity hours for user {UserId}", user.Id);
+                _logger?.LogWarning(ex, "Failed to calculate productivity hours for user {UserId}", user.Id);
                 return null;
             }
         }
