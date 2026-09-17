@@ -11,17 +11,16 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
     public class ProductivityRuleConfig
     {
         // قانون ارتقای بهره‌وری و استاندارد بیمارستانی:
-        // کمتر از ۴ سال: ۰ ساعت، ۴ تا ۸ سال: ۰.۵ ساعت، ۸ تا ۱۲ سال: ۱.۰ ساعت، ۱۲ تا ۱۶ سال: ۱.۵ ساعت، ۱۶ سال به بالا: ۲.۰ ساعت (سقف)
+        // کمتر از ۵ سال: ۰ ساعت، ۵ تا ۱۲ سال: ۱.۰ ساعت، ۱۳ تا ۱۷ سال: ۲.۰ ساعت، ۱۸ سال به بالا: ۳.۰ ساعت (سقف)
         private static readonly IReadOnlyCollection<SeniorityReductionBand> DefaultSeniorityBands = new List<SeniorityReductionBand>
         {
-            new SeniorityReductionBand(0, 3, 0m),
-            new SeniorityReductionBand(4, 7, 0.5m),
-            new SeniorityReductionBand(8, 11, 1.0m),
-            new SeniorityReductionBand(12, 15, 1.5m),
-            new SeniorityReductionBand(16, null, 2.0m)
+            new SeniorityReductionBand(0, 4, 0m),
+            new SeniorityReductionBand(5, 12, 1.0m),
+            new SeniorityReductionBand(13, 17, 2.0m),
+            new SeniorityReductionBand(18, null, 3.0m)
         };
 
-        // صعوبت کار: بخش‌های ویژه (۲ ساعت) و بخش‌های جنرال/عادی (۱ تا ۱.۵ ساعت)
+        // صعوبت کار: بخش‌های ویژه (۲ ساعت) و بخش‌های جنرال/عادی (۰ ساعت)
         private static readonly IReadOnlyCollection<HardshipReductionBand> DefaultHardshipBands = new List<HardshipReductionBand>
         {
             new HardshipReductionBand(0m, 25m, 1.0m),
@@ -42,10 +41,10 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
         /// <summary>فعال بودن سقف‌گذاری ساعت پایه بر مبنای ماه استاندارد (پیش‌فرض: false تا روزهای کاری تقویمی دقیقاً محاسبه شوند)</summary>
         public bool CapBaseHoursToStandardMonth { get; init; } = false;
         public decimal SpecialSectionHardshipReduction { get; init; } = 2.0m;
-        public decimal GeneralSectionHardshipReduction { get; init; } = 1.0m;
-        public decimal RotatingShiftReductionPerWeek { get; init; } = 3.0m;
+        public decimal GeneralSectionHardshipReduction { get; init; } = 0.0m;
+        public decimal RotatingShiftReductionPerWeek { get; init; } = 1.0m;
         public decimal ThreeShiftRotatingReductionHours { get; init; } = 1.0m;
-        public decimal TwoShiftRotatingReductionHours { get; init; } = 0.5m;
+        public decimal TwoShiftRotatingReductionHours { get; init; } = 0.0m;
         public decimal FixedNightReductionHours { get; init; } = 1.0m;
         public decimal FixedDayReductionHours { get; init; } = 0.0m;
         public decimal NightHolidayMultiplier { get; init; } = 1.5m;

@@ -10,11 +10,11 @@ public class WorkingHoursCalculatorTests
     private readonly WorkingHoursCalculator _calculator = new();
 
     [Theory]
-    [InlineData(0, false, false, 0.0, 1.0, 0.0, 1.0, 43.0)]  // 0 yrs, General (1.0), Fixed (0) -> 1.0 deduction
-    [InlineData(5, false, false, 0.5, 1.0, 0.0, 1.5, 42.5)]  // 5 yrs (0.5), General (1.0), Fixed (0) -> 1.5 deduction
-    [InlineData(5, true, false, 0.5, 2.0, 0.0, 2.5, 41.5)]   // 5 yrs (0.5), ICU/Special (2.0), Fixed (0) -> 2.5 deduction
-    [InlineData(5, true, true, 0.5, 2.0, 1.0, 3.5, 40.5)]    // 5 yrs (0.5), Special (2.0), ThreeShiftRotating (1.0) -> 3.5 deduction
-    [InlineData(25, true, true, 2.0, 2.0, 1.0, 5.0, 39.0)]   // 25 yrs (2.0), Special (2.0), ThreeShiftRotating (1.0) -> 5.0 deduction
+    [InlineData(0, false, false, 0.0, 0.0, 0.0, 0.0, 44.0)]  // 0 yrs, General (0.0), Fixed (0) -> 0.0 deduction
+    [InlineData(5, false, false, 1.0, 0.0, 0.0, 1.0, 43.0)]  // 5 yrs (1.0), General (0.0), Fixed (0) -> 1.0 deduction
+    [InlineData(5, true, false, 1.0, 2.0, 0.0, 3.0, 41.0)]   // 5 yrs (1.0), ICU/Special (2.0), Fixed (0) -> 3.0 deduction
+    [InlineData(10, true, true, 1.0, 2.0, 1.0, 4.0, 40.0)]   // 10 yrs (1.0), Special (2.0), ThreeShiftRotating (1.0) -> 4.0 deduction
+    [InlineData(25, true, true, 3.0, 2.0, 1.0, 6.0, 38.0)]   // 25 yrs (3.0), Special (2.0), ThreeShiftRotating (1.0) -> 6.0 deduction
     public void CalculateMonthlyHours_Group1_AppliesWeeklyReductionBands(
         int yearsOfService,
         bool isSpecialSection,
@@ -106,26 +106,28 @@ public class WorkingHoursCalculatorTests
 
         Assert.Throws<ArgumentException>(() => _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
         {
-            Staff = null!
+            Staff = null!,
+            TotalDays = 30
         }));
 
         Assert.Throws<ArgumentOutOfRangeException>(() => _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
         {
-            Staff = new StaffEmploymentInfoDto(),
+            Staff = new StaffEmploymentInfoDto { StaffId = 1 },
             TotalDays = -1
         }));
 
         Assert.Throws<ArgumentOutOfRangeException>(() => _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
         {
-            Staff = new StaffEmploymentInfoDto(),
-            WorkingDays = -5
+            Staff = new StaffEmploymentInfoDto { StaffId = 1 },
+            TotalDays = 30,
+            WorkingDays = -1
         }));
 
         Assert.Throws<ArgumentException>(() => _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
         {
-            Staff = new StaffEmploymentInfoDto(),
-            TotalDays = 28,
-            WorkingDays = 30
+            Staff = new StaffEmploymentInfoDto { StaffId = 1 },
+            TotalDays = 30,
+            WorkingDays = 31
         }));
     }
 
@@ -134,9 +136,15 @@ public class WorkingHoursCalculatorTests
     {
         var result = _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
         {
-            Staff = new StaffEmploymentInfoDto { StaffId = 1, IsIncludedInProductivityPlan = true },
-            TotalDays = 28,
-            WorkingDays = 24,
+            Staff = new StaffEmploymentInfoDto
+            {
+                StaffId = 1,
+                ClinicalExperienceYears = 0,
+                IsSpecialSection = false,
+                IsIncludedInProductivityPlan = true
+            },
+            TotalDays = 30,
+            WorkingDays = 22,
             NightHolidayHours = 16
         });
 
@@ -145,7 +153,7 @@ public class WorkingHoursCalculatorTests
 
     [Theory]
     [InlineData(ShiftPatternType.FixedDay, 0.0)]
-    [InlineData(ShiftPatternType.TwoShiftRotating, 0.5)]
+    [InlineData(ShiftPatternType.TwoShiftRotating, 0.0)]
     [InlineData(ShiftPatternType.ThreeShiftRotating, 1.0)]
     [InlineData(ShiftPatternType.FixedNight, 1.0)]
     public void CalculateMonthlyHours_Group1_ShiftPatternType_AppliesCorrectReductions(
@@ -157,7 +165,7 @@ public class WorkingHoursCalculatorTests
             Staff = new StaffEmploymentInfoDto
             {
                 StaffId = 1,
-                ClinicalExperienceYears = 0,
+                ClinicalExperienceYears = 10,
                 IsSpecialSection = false,
                 ShiftPattern = pattern,
                 IsIncludedInProductivityPlan = true
@@ -166,7 +174,7 @@ public class WorkingHoursCalculatorTests
             WorkingDays = 24
         });
 
-        // 0 yrs seniority (0.0) + General section hardship (1.0) + pattern reduction
+        // 10 yrs seniority (1.0) + General section hardship (0.0) + pattern reduction
         Assert.Equal(pattern, result.Breakdown.ShiftPattern);
         Assert.Equal(expectedPatternReduction, result.Breakdown.ShiftPatternReductionPerWeek);
         Assert.Equal(1.0m + expectedPatternReduction, result.Breakdown.TotalWeeklyReduction);
@@ -180,7 +188,7 @@ public class WorkingHoursCalculatorTests
             Staff = new StaffEmploymentInfoDto
             {
                 StaffId = 1,
-                ClinicalExperienceYears = 5, // 0.5
+                ClinicalExperienceYears = 5, // 1.0
                 IsSpecialSection = true,     // 2.0
                 ShiftPattern = ShiftPatternType.TwoShiftRotating,
                 IsIncludedInProductivityPlan = true
@@ -193,23 +201,23 @@ public class WorkingHoursCalculatorTests
             WorkingDays = 24
         });
 
-        // Seniority (0.5) + Special Hardship (2.0) + Override TwoShiftRotating (0.75) = 3.25
+        // Seniority (1.0) + Special Hardship (2.0) + Override TwoShiftRotating (0.75) = 3.75
         Assert.Equal(ShiftPatternType.TwoShiftRotating, result.Breakdown.ShiftPattern);
         Assert.Equal(0.75m, result.Breakdown.ShiftPatternReductionPerWeek);
-        Assert.Equal(3.25m, result.Breakdown.TotalWeeklyReduction);
+        Assert.Equal(3.75m, result.Breakdown.TotalWeeklyReduction);
     }
 
     [Theory]
     [InlineData(0, 0.0)]
-    [InlineData(3, 0.0)]
-    [InlineData(4, 0.5)]
-    [InlineData(7, 0.5)]
-    [InlineData(8, 1.0)]
-    [InlineData(11, 1.0)]
-    [InlineData(12, 1.5)]
-    [InlineData(15, 1.5)]
-    [InlineData(16, 2.0)]
-    [InlineData(22, 2.0)]
+    [InlineData(4, 0.0)]
+    [InlineData(5, 1.0)]
+    [InlineData(10, 1.0)]
+    [InlineData(12, 1.0)]
+    [InlineData(13, 2.0)]
+    [InlineData(17, 2.0)]
+    [InlineData(18, 3.0)]
+    [InlineData(22, 3.0)]
+    [InlineData(25, 3.0)]
     public void CalculateMonthlyHours_HospitalStandardSeniorityBands_AppliesCorrectReductions(
         int yearsOfService,
         decimal expectedSeniorityReduction)
@@ -238,9 +246,9 @@ public class WorkingHoursCalculatorTests
         // WorkingDays = 30 - (4 + 2) = 24 روز
         // BaseHours = 24 * (22 / 3) = 176.00
         // پرستار با ۱۰ سال سابقه در بخش جنرال با شیفت گردشی:
-        // Seniority = 1.0, Hardship = 1.0, ShiftPattern = 1.0 => WeeklyReduction = 3.0
-        // MonthlyReduction = (30 / 7) * 3.0 = 12.8571 -> 12.86
-        // NetRequiredHours = 176.00 - 12.86 = 163.14
+        // Seniority = 1.0, Hardship = 0.0, ShiftPattern = 1.0 => WeeklyReduction = 2.0
+        // MonthlyReduction = (30 / 7) * 2.0 = 8.5714 -> 8.57
+        // NetRequiredHours = 176.00 - 8.57 = 167.43
         var result = _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
         {
             Staff = new StaffEmploymentInfoDto
@@ -261,10 +269,10 @@ public class WorkingHoursCalculatorTests
         Assert.Equal(2, result.Breakdown.OfficialHolidaysCount);
         Assert.Equal(24, result.Breakdown.WorkingDays);
         Assert.Equal(176.00m, result.BaseMonthlyHours);
-        Assert.Equal(12.86m, result.TotalDeductions);
-        Assert.Equal(163.14m, result.FinalMonthlyRequiredHours);
-        Assert.Equal(163.14m, result.NetRequiredHours);
-        Assert.Equal(163.14m, result.Breakdown.NetRequiredHours);
+        Assert.Equal(8.57m, result.TotalDeductions);
+        Assert.Equal(167.43m, result.FinalMonthlyRequiredHours);
+        Assert.Equal(167.43m, result.NetRequiredHours);
+        Assert.Equal(167.43m, result.Breakdown.NetRequiredHours);
         Assert.NotEmpty(result.Breakdown.Notes);
     }
 
@@ -272,7 +280,7 @@ public class WorkingHoursCalculatorTests
     [InlineData(4, 158.29, 158)] // بهار بهاری: تخفیف ۴ ساعت -> ۱۵۸.۲۹ (تقریب ۱۵۸)
     [InlineData(3, 162.71, 163)] // فرشته ساکی، درخشانی، حاتمی: تخفیف ۳ ساعت -> ۱۶۲.۷۱ (تقریب ۱۶۳)
     [InlineData(2, 167.14, 167)] // فاطمه رضایی، متقی، رحیمی: تخفیف ۲ ساعت -> ۱۶۷.۱۴ (تقریب ۱۶۷)
-    [InlineData(1, 171.57, 172)] // فاطمه مدهنی: تخفیف ۱ ساعت -> ۱۷۱.۵۷ (رند به ۱۷۲ یا قطع اعشار به ۱۷۱)
+    [InlineData(1, 171.00, 171)] // فاطمه مدهنی، رازانی: تخفیف ۱ ساعت -> کسر ۵ ساعت ماهانه -> ۱۷۱
     [InlineData(0, 176.00, 176)] // مریم کرمی، مریم امیدی: تخفیف ۰ ساعت (پایه) -> ۱۷۶.۰۰ (۱۷۶)
     public void CalculateMonthlyHours_Shahrivar1405_HospitalStaffExactMatches(
         decimal weeklyReduction,

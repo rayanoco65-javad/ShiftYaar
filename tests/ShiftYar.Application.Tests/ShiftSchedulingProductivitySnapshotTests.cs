@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging.Abstractions;
 using ShiftYar.Application.Common.Utilities;
@@ -63,27 +63,27 @@ public class ShiftSchedulingProductivitySnapshotTests
     [Fact]
     public void CalculateProductivitySnapshot_FereshtehSaki_Calculates163Hours()
     {
-        // فرشته ساکی: ۸ سال سابقه (۱ ساعت کسر سابقه) + بخش عادی (۱ ساعت کسر سختی) + ۳ شیفت گردشی (۱ ساعت کسر نوبت‌کاری) = ۳ ساعت تخفیف هفتگی
+        // فرشته ساکی: ۲۲ سال سابقه (۳ ساعت کسر سابقه) + ثابت صبح (۰ ساعت کسر نوبت‌کاری) = ۳ ساعت تخفیف هفتگی
         // ساعت موظفی بیمارستان: ۱۶۳ ساعت (مبنای ۱۷۶ منهای ۱۳.۲۹ = ۱۶۲.۷۱)
         var constraints = CreateShahrivar1405Constraints();
         var user = new User
         {
-            Id = 101,
+            Id = 12,
             FullName = "فرشته ساکی",
             IncludedProductivityPlan = true,
-            ShiftType = ShiftTypes.RotatingShift,
-            ShiftSubType = ShiftSubTypes.ThreeShifts,
-            HardshipPercent = 0m,
-            DateOfEmployment = new DateTime(2018, 8, 23) // 8 years before 2026
+            ShiftType = ShiftTypes.FixedShift,
+            ShiftSubType = ShiftSubTypes.FixedMorning,
+            HardshipPercent = 100m,
+            DateOfEmployment = new DateTime(2004, 8, 21) // 22 years
         };
         var userConstraint = new UserConstraint
         {
-            UserId = 101,
+            UserId = 12,
             UserName = "فرشته ساکی",
-            ShiftType = ShiftTypes.RotatingShift,
-            ShiftSubType = ShiftSubTypes.ThreeShifts,
-            ExperienceYears = 8,
-            HardshipPercent = 0m
+            ShiftType = ShiftTypes.FixedShift,
+            ShiftSubType = ShiftSubTypes.FixedMorning,
+            ExperienceYears = 22,
+            HardshipPercent = 100m
         };
 
         var snapshot = _service.CalculateProductivitySnapshot(user, userConstraint, constraints, deptSetting: null, nightShiftDurationHours: 12.0);
@@ -103,27 +103,27 @@ public class ShiftSchedulingProductivitySnapshotTests
     [Fact]
     public void CalculateProductivitySnapshot_FatemehRezaei_Calculates167Hours()
     {
-        // فاطمه رضایی: ۲ سال سابقه (۰ ساعت کسر سابقه) + بخش عادی (۱ ساعت کسر سختی) + ۳ شیفت گردشی (۱ ساعت کسر نوبت‌کاری) = ۲ ساعت تخفیف هفتگی
+        // فاطمه رضایی: ۱۱ سال سابقه (۱ ساعت کسر سابقه) + ۳ شیفت گردشی (۱ ساعت کسر نوبت‌کاری) = ۲ ساعت تخفیف هفتگی
         // ساعت موظفی بیمارستان: ۱۶۷ ساعت (مبنای ۱۷۶ منهای ۸.۸۶ = ۱۶۷.۱۴)
         var constraints = CreateShahrivar1405Constraints();
         var user = new User
         {
-            Id = 102,
+            Id = 17,
             FullName = "فاطمه رضایی",
             IncludedProductivityPlan = true,
             ShiftType = ShiftTypes.RotatingShift,
             ShiftSubType = ShiftSubTypes.ThreeShifts,
-            HardshipPercent = 0m,
-            DateOfEmployment = new DateTime(2024, 8, 23) // 2 years before 2026
+            HardshipPercent = 100m,
+            DateOfEmployment = new DateTime(2015, 5, 21) // 11 years
         };
         var userConstraint = new UserConstraint
         {
-            UserId = 102,
+            UserId = 17,
             UserName = "فاطمه رضایی",
             ShiftType = ShiftTypes.RotatingShift,
             ShiftSubType = ShiftSubTypes.ThreeShifts,
-            ExperienceYears = 2,
-            HardshipPercent = 0m
+            ExperienceYears = 11,
+            HardshipPercent = 100m
         };
 
         var snapshot = _service.CalculateProductivitySnapshot(user, userConstraint, constraints, deptSetting: null, nightShiftDurationHours: 12.0);
@@ -142,27 +142,27 @@ public class ShiftSchedulingProductivitySnapshotTests
     [Fact]
     public void CalculateProductivitySnapshot_BaharBahari_Calculates158Hours()
     {
-        // بهار بهاری: ۱۸ سال سابقه (۲ ساعت کسر سابقه) + بخش عادی (۱ ساعت کسر سختی) + ۳ شیفت گردشی (۱ ساعت کسر نوبت‌کاری) = ۴ ساعت تخفیف هفتگی
+        // بهار بهاری: ۱۸ سال سابقه (۳ ساعت کسر سابقه) + ۳ شیفت گردشی (۱ ساعت کسر نوبت‌کاری) = ۴ ساعت تخفیف هفتگی
         // ساعت موظفی بیمارستان: ۱۵۸ ساعت (مبنای ۱۷۶ منهای ۱۷.۷۱ = ۱۵۸.۲۹)
         var constraints = CreateShahrivar1405Constraints();
         var user = new User
         {
-            Id = 103,
+            Id = 14,
             FullName = "بهار بهاری",
             IncludedProductivityPlan = true,
             ShiftType = ShiftTypes.RotatingShift,
             ShiftSubType = ShiftSubTypes.ThreeShifts,
-            HardshipPercent = 0m,
-            DateOfEmployment = new DateTime(2008, 8, 23) // 18 years
+            HardshipPercent = 100m,
+            DateOfEmployment = new DateTime(2008, 6, 21) // 18 years
         };
         var userConstraint = new UserConstraint
         {
-            UserId = 103,
+            UserId = 14,
             UserName = "بهار بهاری",
             ShiftType = ShiftTypes.RotatingShift,
             ShiftSubType = ShiftSubTypes.ThreeShifts,
             ExperienceYears = 18,
-            HardshipPercent = 0m
+            HardshipPercent = 100m
         };
 
         var snapshot = _service.CalculateProductivitySnapshot(user, userConstraint, constraints, deptSetting: null, nightShiftDurationHours: 12.0);
@@ -179,32 +179,94 @@ public class ShiftSchedulingProductivitySnapshotTests
     }
 
     [Fact]
-    public void CalculateProductivitySnapshot_OrdinaryStaff_Calculates176Hours()
+    public void CalculateProductivitySnapshot_JuniorNurseUnder5Years_Calculates176Hours()
     {
+        // پرسنل زیر ۵ سال سابقه خدمت (بدو خدمت/طرحی): تخفیف هفتگی ۰ -> موظفی پایه ۱۷۶ ساعت
         var constraints = CreateShahrivar1405Constraints();
         var user = new User
         {
-            Id = 104,
+            Id = 23,
             FullName = "مریم کرمی",
-            IncludedProductivityPlan = false
+            IncludedProductivityPlan = true,
+            ShiftType = ShiftTypes.RotatingShift,
+            ShiftSubType = ShiftSubTypes.ThreeShifts,
+            HardshipPercent = 100m,
+            DateOfEmployment = new DateTime(2022, 7, 22) // 4 years
         };
         var userConstraint = new UserConstraint
         {
-            UserId = 104,
+            UserId = 23,
             UserName = "مریم کرمی",
-            ShiftType = ShiftTypes.FixedShift,
-            ShiftSubType = ShiftSubTypes.FixedMorning
+            ShiftType = ShiftTypes.RotatingShift,
+            ShiftSubType = ShiftSubTypes.ThreeShifts,
+            ExperienceYears = 4,
+            HardshipPercent = 100m
         };
 
         var snapshot = _service.CalculateProductivitySnapshot(user, userConstraint, constraints, deptSetting: null, nightShiftDurationHours: 12.0);
 
         Assert.NotNull(snapshot);
-        Assert.False(snapshot.Breakdown?.IsIncludedInProductivityPlan);
+        Assert.True(snapshot.Breakdown?.IsIncludedInProductivityPlan);
+        Assert.Equal(0.0m, snapshot.Breakdown?.TotalWeeklyReduction);
         Assert.Equal(176.00m, snapshot.BaseMonthlyHours);
         Assert.Equal(176.00m, snapshot.FinalMonthlyRequiredHours);
         Assert.Equal(176, snapshot.FinalMonthlyRequiredHoursRounded);
 
         ProductivityRequiredHoursResolver.ApplyToUserConstraint(user, userConstraint, snapshot);
         Assert.Equal(176.00m, userConstraint.ProductivityRequiredHours);
+    }
+
+    [Theory]
+    [InlineData("مهدی رستمی", 1, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
+    [InlineData("محمد یوسفی", 1, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
+    [InlineData("مهدی دریکوند", 1, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
+    [InlineData("سیده زهرا باقری", 1, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
+    [InlineData("فائزه سبزواری", 2, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
+    [InlineData("سیده فاطمه کاظمی", 2, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
+    [InlineData("فاطمه دبستانیان", 2, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
+    [InlineData("شکیبا موسیوند", 3, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
+    [InlineData("مریم کرمی", 4, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
+    [InlineData("مریم امیدی منش", 4, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
+    [InlineData("فاطمه رازانی", 5, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 171)]
+    [InlineData("حدیث کاظمی", 10, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 167)]
+    [InlineData("عاطفه رحیمی منفرد", 10, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 167)]
+    [InlineData("فاطمه رضایی", 11, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 167)]
+    [InlineData("خدیجه متقی", 11, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 167)]
+    [InlineData("فاطمه سلیمی", 13, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 163)]
+    [InlineData("فرشته ساکی", 22, ShiftTypes.FixedShift, ShiftSubTypes.FixedMorning, 163)]
+    [InlineData("صبا حاتمی فیضی", 24, ShiftTypes.FixedShift, ShiftSubTypes.FixedMorning, 163)]
+    [InlineData("زهرا درخشانی الوار", 25, ShiftTypes.RotatingShift, ShiftSubTypes.TwoShifts, 163)]
+    [InlineData("بهاره بهاری پور", 18, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 158)]
+    public void CalculateProductivitySnapshot_AllHospitalStaff_MatchExactHospitalDutyHours(
+        string fullName,
+        int experienceYears,
+        ShiftTypes shiftType,
+        ShiftSubTypes subType,
+        int expectedHospitalHours)
+    {
+        var constraints = CreateShahrivar1405Constraints();
+        var user = new User
+        {
+            Id = 999,
+            FullName = fullName,
+            IncludedProductivityPlan = true,
+            ShiftType = shiftType,
+            ShiftSubType = subType,
+            HardshipPercent = 100m
+        };
+        var userConstraint = new UserConstraint
+        {
+            UserId = 999,
+            UserName = fullName,
+            ShiftType = shiftType,
+            ShiftSubType = subType,
+            ExperienceYears = experienceYears,
+            HardshipPercent = 100m
+        };
+
+        var snapshot = _service.CalculateProductivitySnapshot(user, userConstraint, constraints, deptSetting: null, nightShiftDurationHours: 12.0);
+
+        Assert.NotNull(snapshot);
+        Assert.Equal(expectedHospitalHours, snapshot.FinalMonthlyRequiredHoursRounded);
     }
 }

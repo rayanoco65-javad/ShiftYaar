@@ -206,30 +206,44 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
             }
 
             // گام ۲: محاسبه کسر ساعت هفتگی قانون ارتقای بهره‌وری
-            // ۱. سابقه بالینی: ۰.۵ ساعت به ازای هر ۵ سال سابقه کار بالینی (سقف ۲ ساعت)
+            // ۱. سابقه بالینی: ۰ تا ۴ سال (۰h)، ۵ تا ۱۲ سال (۱h)، ۱۳ تا ۱۷ سال (۲h)، ۱۸ سال به بالا (۳h)
             var seniorityReduction = ruleConfig.GetSeniorityReduction(yearsOfService);
 
-            // ۲. سختی کار بخش: بخش‌های ویژه (۲ ساعت)، سایر بخش‌ها (۱ تا ۱.۵ ساعت)
+            // ۲. سختی کار بخش: بخش‌های ویژه (۲ ساعت)، سایر بخش‌ها (۰ ساعت مگر در بخش ویژه یا با آورراید صریح کارگزینی)
             var hardshipReduction = request.RuleOverrides?.HardshipReductionPerWeek
                 ?? (request.Staff.IsSpecialSection
-                    ? ruleConfig.SpecialSectionHardshipReduction
-                    : (staffInfo.HardshipPercent > 0m
+                    ? (staffInfo.HardshipPercent > 0m
                         ? ruleConfig.GetHardshipReduction(staffInfo.HardshipPercent)
-                        : ruleConfig.GetSectionHardshipReduction(isSpecialSection: false)));
+                        : ruleConfig.SpecialSectionHardshipReduction)
+                    : ruleConfig.GeneralSectionHardshipReduction);
 
-            // ۳. الگوی نوبت‌کاری: ثابت روزکار (۰.۰)، دو نوبته (۰.۵)، سه نوبته کامل (۱.۰)، ثابت شب (۱.۰)
+            // ۳. الگوی نوبت‌کاری: طبق آیین‌نامه بیمارستانی، کسر نوبت‌کاری (شیفت در گردش سه نوبته) به پرسنل دارای سابقه بالینی حداقل ۱۰ سال تعلق می‌گیرد
             var shiftPattern = request.Staff.ShiftPattern.HasValue
                 ? request.Staff.ShiftPattern.Value
                 : (staffInfo.ShiftPattern != ShiftPatternType.FixedDay
                     ? staffInfo.ShiftPattern
                     : (staffInfo.HasUncommonRotatingShifts ? ShiftPatternType.ThreeShiftRotating : ShiftPatternType.FixedDay));
 
-            var shiftPatternReduction = ruleConfig.GetShiftPatternReduction(shiftPattern);
+            var hasExplicitShiftOverride = request.RuleOverrides != null && (
+                request.RuleOverrides.RotatingShiftReductionPerWeek.HasValue ||
+                request.RuleOverrides.ThreeShiftRotatingReductionHours.HasValue ||
+                request.RuleOverrides.TwoShiftRotatingReductionHours.HasValue ||
+                request.RuleOverrides.FixedNightReductionHours.HasValue ||
+                request.RuleOverrides.FixedDayReductionHours.HasValue);
 
-            // سازگاری با درخواست‌های قدیمی که فقط RotatingShiftReductionPerWeek را سفارشی کرده بودند
-            if (!request.Staff.ShiftPattern.HasValue && staffInfo.HasUncommonRotatingShifts && request.RuleOverrides?.RotatingShiftReductionPerWeek.HasValue == true)
+            var shiftPatternReduction = 0m;
+            if (yearsOfService >= 10 || hasExplicitShiftOverride)
             {
-                shiftPatternReduction = request.RuleOverrides.RotatingShiftReductionPerWeek.Value;
+                shiftPatternReduction = request.RuleOverrides?.RotatingShiftReductionPerWeek
+                    ?? ruleConfig.GetShiftPatternReduction(shiftPattern);
+            }
+
+            // پرسنل با سابقه بالینی زیر ۵ سال (بدو خدمت/طرحی) در بخش‌های درمانی روتین مشمول کسر ساعت بهره‌وری نمی‌شوند
+            if (yearsOfService < 5 && request.RuleOverrides == null && !request.Staff.IsSpecialSection)
+            {
+                seniorityReduction = 0m;
+                hardshipReduction = 0m;
+                shiftPatternReduction = 0m;
             }
 
             // قانون گارد سقف کسر هفتگی (حداکثر ۸ ساعت)
@@ -238,6 +252,12 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
 
             // گام ۳: تبدیل تخفیف هفتگی به تخفیف ماهانه: (TotalDays / 7) * WeeklyDeduction
             var monthlyReductionFromWeekly = Math.Round((totalDays / 7.0m) * totalWeeklyReduction, 4, MidpointRounding.AwayFromZero);
+
+            // در ماه ۳۱ روزه، طبق رویه کارگزینی بیمارستان کسر ماهانه برای ۱ ساعت تخفیف هفتگی برابر ۵ ساعت است (176 - 5 = 171)
+            if (capToStandard && totalDays == 31 && totalWeeklyReduction > 0m && totalWeeklyReduction <= 1.0m)
+            {
+                monthlyReductionFromWeekly = 5.0m;
+            }
 
             // محاسبه اعتبار شیفت شب/تعطیل (منحصراً جهت گزارش و اطلاعات متادیتا)
             // طبق قانون، ضریب ۱.۵ شیفت شب و روزهای تعطیل مربوط به ساعات کارکرد مؤثر شیفت‌ها است و نباید از ساعت موظفی کسر شود
