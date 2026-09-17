@@ -10,6 +10,10 @@ namespace ShiftYar.Application.DTOs.ProductivityModel
         public decimal? BaseDailyWorkingHours { get; set; }
         public decimal? BaseWeeklyHours { get; set; }
         public decimal? MaxWeeklyReduction { get; set; }
+        public decimal? MaxMonthlyBaseHours { get; set; }
+        public int? MaxMonthlyWorkingDays { get; set; }
+        public bool? CapBaseHoursToStandardMonth { get; set; }
+        public bool? ExcludeThursdays { get; set; }
         public decimal? HardshipReductionPerWeek { get; set; }
         public decimal? RotatingShiftReductionPerWeek { get; set; }
         public decimal? ThreeShiftRotatingReductionHours { get; set; }

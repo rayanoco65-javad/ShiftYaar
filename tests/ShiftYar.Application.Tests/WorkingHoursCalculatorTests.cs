@@ -267,4 +267,113 @@ public class WorkingHoursCalculatorTests
         Assert.Equal(163.14m, result.Breakdown.NetRequiredHours);
         Assert.NotEmpty(result.Breakdown.Notes);
     }
+
+    [Theory]
+    [InlineData(4, 158.29, 158)] // بهار بهاری: تخفیف ۴ ساعت -> ۱۵۸.۲۹ (تقریب ۱۵۸)
+    [InlineData(3, 162.71, 163)] // فرشته ساکی، درخشانی، حاتمی: تخفیف ۳ ساعت -> ۱۶۲.۷۱ (تقریب ۱۶۳)
+    [InlineData(2, 167.14, 167)] // فاطمه رضایی، متقی، رحیمی: تخفیف ۲ ساعت -> ۱۶۷.۱۴ (تقریب ۱۶۷)
+    [InlineData(1, 171.57, 172)] // فاطمه مدهنی: تخفیف ۱ ساعت -> ۱۷۱.۵۷ (رند به ۱۷۲ یا قطع اعشار به ۱۷۱)
+    [InlineData(0, 176.00, 176)] // مریم کرمی، مریم امیدی: تخفیف ۰ ساعت (پایه) -> ۱۷۶.۰۰ (۱۷۶)
+    public void CalculateMonthlyHours_Shahrivar1405_HospitalStaffExactMatches(
+        decimal weeklyReduction,
+        decimal expectedDecimal,
+        int expectedRounded)
+    {
+        // در شهریور ۱۴۰۵ (۳۱ روزه، ۴ جمعه و ۱ تعطیل رسمی = ۲۶ روز تقویمی):
+        // سیستم روزهای کاری را به سقف استاندارد ۲۴ روز و ساعت پایه را به ۱۷۶ ساعت محدود می‌کند
+        // تخفیف ماهانه: (31 / 7) * weeklyReduction
+        var result = _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
+        {
+            Staff = new StaffEmploymentInfoDto
+            {
+                StaffId = 100,
+                IsIncludedInProductivityPlan = true,
+                ClinicalExperienceYears = 0,
+                IsSpecialSection = false,
+                ShiftPattern = ShiftPatternType.FixedDay
+            },
+            RuleOverrides = new ProductivityRuleOverrideDto
+            {
+                HardshipReductionPerWeek = weeklyReduction // اعمال مستقیم تخفیف هفتگی موردنظر
+            },
+            TotalDays = 31,
+            FridaysCount = 4,
+            OfficialHolidaysCount = 1
+        });
+
+        Assert.True(result.Breakdown.IsCappedToStandardMonth);
+        Assert.Equal(24, result.Breakdown.WorkingDays);
+        Assert.Equal(176.00m, result.BaseMonthlyHours);
+        Assert.Equal(expectedDecimal, result.FinalMonthlyRequiredHours);
+        Assert.Equal(expectedRounded, result.FinalMonthlyRequiredHoursRounded);
+        Assert.Equal(expectedRounded, result.Breakdown.NetRequiredHoursRounded);
+    }
+
+    [Fact]
+    public void CalculateMonthlyHours_Shahrivar1405_OrdinaryStaff_CappedAt176()
+    {
+        var result = _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
+        {
+            Staff = new StaffEmploymentInfoDto
+            {
+                StaffId = 200,
+                IsIncludedInProductivityPlan = false
+            },
+            TotalDays = 31,
+            FridaysCount = 4,
+            OfficialHolidaysCount = 1
+        });
+
+        Assert.True(result.Breakdown.IsCappedToStandardMonth);
+        Assert.Equal(24, result.Breakdown.WorkingDays);
+        Assert.Equal(176.00m, result.BaseMonthlyHours);
+        Assert.Equal(176.00m, result.FinalMonthlyRequiredHours);
+        Assert.Equal(176, result.FinalMonthlyRequiredHoursRounded);
+    }
+
+    [Fact]
+    public void CalculateMonthlyHours_OptOutCap_AllowsRawCalendarHours()
+    {
+        var result = _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
+        {
+            Staff = new StaffEmploymentInfoDto
+            {
+                StaffId = 300,
+                IsIncludedInProductivityPlan = false
+            },
+            CapBaseHoursToStandardMonth = false,
+            TotalDays = 31,
+            FridaysCount = 4,
+            OfficialHolidaysCount = 1
+        });
+
+        Assert.False(result.Breakdown.IsCappedToStandardMonth);
+        Assert.Equal(26, result.Breakdown.WorkingDays);
+        Assert.Equal(190.67m, result.BaseMonthlyHours);
+        Assert.Equal(190.67m, result.FinalMonthlyRequiredHours);
+    }
+
+    [Fact]
+    public void CalculateMonthlyHours_ExcludeThursdays_ReducesWorkingDays()
+    {
+        var result = _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
+        {
+            Staff = new StaffEmploymentInfoDto
+            {
+                StaffId = 400,
+                IsIncludedInProductivityPlan = false
+            },
+            CapBaseHoursToStandardMonth = false,
+            ExcludeThursdays = true,
+            ThursdaysCount = 4,
+            TotalDays = 31,
+            FridaysCount = 4,
+            OfficialHolidaysCount = 1
+        });
+
+        // 31 - 5 = 26 - 4 thursdays = 22 working days
+        Assert.Equal(22, result.Breakdown.WorkingDays);
+        Assert.Equal(161.33m, result.BaseMonthlyHours);
+    }
 }
+

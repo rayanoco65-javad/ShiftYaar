@@ -13,10 +13,14 @@ namespace ShiftYar.Application.DTOs.ProductivityModel
         public int WorkingDays { get; set; }
         public int FridaysCount { get; set; }
         public int OfficialHolidaysCount { get; set; }
+        public int ThursdaysCount { get; set; }
+        public bool IsCappedToStandardMonth { get; set; }
         public decimal BaseHoursPerDay { get; set; } = 22m / 3m;
         public decimal BaseWeeklyHours { get; set; }
         public decimal WeeklyRequiredHours { get; set; }
         public decimal NetRequiredHours { get; set; }
+        /// <summary>ساعت موظفی خالص گردشده به نزدیک‌ترین عدد صحیح.</summary>
+        public int NetRequiredHoursRounded => (int)System.Math.Round(NetRequiredHours, System.MidpointRounding.AwayFromZero);
         public decimal SeniorityReductionPerWeek { get; set; }
         public decimal HardshipReductionPerWeek { get; set; }
         public ShiftPatternType ShiftPattern { get; set; } = ShiftPatternType.FixedDay;

@@ -14,6 +14,8 @@ namespace ShiftYar.Application.DTOs.ProductivityModel
             get => FinalMonthlyRequiredHours;
             set => FinalMonthlyRequiredHours = value;
         }
+        /// <summary>ساعت موظفی خالص نهایی گردشده به نزدیک‌ترین عدد صحیح.</summary>
+        public int FinalMonthlyRequiredHoursRounded => (int)System.Math.Round(FinalMonthlyRequiredHours, System.MidpointRounding.AwayFromZero);
         public WorkingHoursCalculationBreakdownDto Breakdown { get; set; } = new WorkingHoursCalculationBreakdownDto();
     }
 }
