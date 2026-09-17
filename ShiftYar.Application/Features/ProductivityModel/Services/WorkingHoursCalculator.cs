@@ -102,7 +102,8 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
 
             // سقف‌گذاری استاندارد ماهانه (۴ هفته × ۴۴ ساعت = ۱۷۶ ساعت، ۴ هفته × ۶ روز = ۲۴ روز کاری)
             var capToStandard = request.RuleOverrides?.CapBaseHoursToStandardMonth
-                ?? (request.CapBaseHoursToStandardMonth && ruleConfig.CapBaseHoursToStandardMonth);
+                ?? request.CapBaseHoursToStandardMonth
+                ?? ruleConfig.CapBaseHoursToStandardMonth;
 
             var maxWorkingDays = request.MaxMonthlyWorkingDays
                 ?? request.RuleOverrides?.MaxMonthlyWorkingDays
@@ -238,11 +239,13 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
             // گام ۳: تبدیل تخفیف هفتگی به تخفیف ماهانه: (TotalDays / 7) * WeeklyDeduction
             var monthlyReductionFromWeekly = Math.Round((totalDays / 7.0m) * totalWeeklyReduction, 4, MidpointRounding.AwayFromZero);
 
-            // محاسبه اعتبار شیفت شب/تعطیل (در صورت گزارش مجزا)
+            // محاسبه اعتبار شیفت شب/تعطیل (منحصراً جهت گزارش و اطلاعات متادیتا)
+            // طبق قانون، ضریب ۱.۵ شیفت شب و روزهای تعطیل مربوط به ساعات کارکرد مؤثر شیفت‌ها است و نباید از ساعت موظفی کسر شود
             var nightHolidayWeightedHours = nightHolidayHours * ruleConfig.NightHolidayMultiplier;
             var nightHolidayCredit = nightHolidayWeightedHours - nightHolidayHours;
 
-            var totalDeductions = monthlyReductionFromWeekly + nightHolidayCredit;
+            // کسورات ساعت موظفی منحصراً ناشی از تخفیف‌های سه‌گانه قانون ارتقای بهره‌وری (سابقه، سختی کار، نوبت‌کاری) است
+            var totalDeductions = monthlyReductionFromWeekly;
 
             // گام ۴: محاسبه ساعت موظفی خالص ماه
             var finalMonthlyRequiredHours = Math.Max(0m, Math.Round(baseMonthlyHours - totalDeductions, 2, MidpointRounding.AwayFromZero));

@@ -14,12 +14,12 @@ namespace ShiftYar.Application.DTOs.ProductivityModel
         public int FridaysCount { get; set; }
         /// <summary>تعداد روزهای تعطیل رسمی تقویم شمسی به جز جمعه‌ها.</summary>
         public int OfficialHolidaysCount { get; set; }
-        /// <summary>تعداد روزهای پنجشنبه در بازه ماه.</summary>
+        /// <summary>تعداد روزهای پنجشنبه در بازه ماه (صرفاً آماری).</summary>
         public int ThursdaysCount { get; set; }
-        /// <summary>آیا پنج‌شنبه‌ها از روزهای کاری کسر شوند.</summary>
-        public bool ExcludeThursdays { get; set; }
-        /// <summary>اعمال سقف قانونی ماه استاندارد (حداکثر ۲۴ روز کاری / ۱۷۶ ساعت در ماه ۴ هفته‌ای).</summary>
-        public bool CapBaseHoursToStandardMonth { get; set; } = true;
+        /// <summary>آیا پنج‌شنبه‌ها از روزهای کاری کسر شوند (پیش‌فرض false: بیمارستان‌ها ۲۴ ساعته هستند و پنج‌شنبه روز کاری است).</summary>
+        public bool ExcludeThursdays { get; set; } = false;
+        /// <summary>سقف‌گذاری اختیاری ساعت پایه بر مبنای ماه استاندارد کارگزینی (حداکثر ۲۴ روز کاری / ۱۷۶ ساعت).</summary>
+        public bool? CapBaseHoursToStandardMonth { get; set; }
         /// <summary>سقف دستی اختیاری برای ساعت پایه ناخالص ماهانه (پیش‌فرض ۱۷۶ ساعت).</summary>
         public decimal? MaxMonthlyBaseHours { get; set; }
         /// <summary>سقف دستی اختیاری برای تعداد روزهای کاری ماهانه (پیش‌فرض ۲۴ روز).</summary>

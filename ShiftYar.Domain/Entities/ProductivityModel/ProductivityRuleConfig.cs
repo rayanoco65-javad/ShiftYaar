@@ -35,12 +35,12 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
         public decimal DailyWorkingHours { get; init; } = BaseDailyWorkingHours;
         public decimal BaseWeeklyHours { get; init; } = 44m;
         public decimal MaxWeeklyReduction { get; init; } = 8m;
-        /// <summary>سقف استاندارد ساعت کار پایه ماهانه در ماه ۴ هفته‌ای (۴۴ × ۴ = ۱۷۶ ساعت)</summary>
+        /// <summary>سقف استاندارد ساعت کار پایه ماهانه در صورت فعال‌سازی تنظیم کارگزینی (۴۴ × ۴ = ۱۷۶ ساعت)</summary>
         public decimal MaxMonthlyBaseHours { get; init; } = 176m;
-        /// <summary>سقف استاندارد روزهای کاری موظف در ماه ۴ هفته‌ای (۶ × ۴ = ۲۴ روز)</summary>
+        /// <summary>سقف استاندارد روزهای کاری موظف در صورت فعال‌سازی تنظیم کارگزینی (۶ × ۴ = ۲۴ روز)</summary>
         public int MaxMonthlyWorkingDays { get; init; } = 24;
-        /// <summary>فعال بودن سقف‌گذاری ساعت پایه و روزهای کاری بر مبنای ماه استاندارد (پیش‌فرض: true)</summary>
-        public bool CapBaseHoursToStandardMonth { get; init; } = true;
+        /// <summary>فعال بودن سقف‌گذاری ساعت پایه بر مبنای ماه استاندارد (پیش‌فرض: false تا روزهای کاری تقویمی دقیقاً محاسبه شوند)</summary>
+        public bool CapBaseHoursToStandardMonth { get; init; } = false;
         public decimal SpecialSectionHardshipReduction { get; init; } = 2.0m;
         public decimal GeneralSectionHardshipReduction { get; init; } = 1.0m;
         public decimal RotatingShiftReductionPerWeek { get; init; } = 3.0m;

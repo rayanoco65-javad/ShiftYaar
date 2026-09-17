@@ -1192,12 +1192,6 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             }
             var workingDays = Math.Max(0, totalDays - (fridays + officialHolidays));
 
-            // در ماه‌های استاندارد (۲۸ روز به بالا)، سقف روزهای موظف بالینی ۲۴ روز کاری (۱۷۶ ساعت پایه) است
-            if (totalDays >= 28 && workingDays > 24)
-            {
-                workingDays = 24;
-            }
-
             var employmentDate = user.DateOfEmployment.HasValue
                 ? StaffEmploymentInfo.NormalizeEmploymentDate(user.DateOfEmployment.Value)
                 : (DateTime?)null;
@@ -1244,7 +1238,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 ThursdaysCount = thursdays,
                 NumberOfWeeksInMonth = weeks,
                 NightHolidayHours = 0m,
-                CapBaseHoursToStandardMonth = true
+                CapBaseHoursToStandardMonth = false
             };
 
             try

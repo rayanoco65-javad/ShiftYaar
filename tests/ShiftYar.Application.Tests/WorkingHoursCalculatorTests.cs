@@ -296,6 +296,7 @@ public class WorkingHoursCalculatorTests
             {
                 HardshipReductionPerWeek = weeklyReduction // اعمال مستقیم تخفیف هفتگی موردنظر
             },
+            CapBaseHoursToStandardMonth = true,
             TotalDays = 31,
             FridaysCount = 4,
             OfficialHolidaysCount = 1
@@ -309,6 +310,95 @@ public class WorkingHoursCalculatorTests
         Assert.Equal(expectedRounded, result.Breakdown.NetRequiredHoursRounded);
     }
 
+    [Theory]
+    [InlineData(0, 183.33)] // سناریو ب: ۳۰ روزه با ۲۵ روز کاری: پایه = 25 * (22/3) = 183.33
+    [InlineData(1, 179.05)] // تخفیف ۱ ساعت: 183.33 - (30/7 * 1) = 183.33 - 4.2857 = 179.05
+    [InlineData(2, 174.76)] // تخفیف ۲ ساعت: 183.33 - (30/7 * 2) = 183.33 - 8.5714 = 174.76
+    [InlineData(3, 170.48)] // تخفیف ۳ ساعت: 183.33 - (30/7 * 3) = 183.33 - 12.8571 = 170.48
+    public void CalculateMonthlyHours_ScenarioB_30Days25WorkingDays(decimal weeklyReduction, decimal expectedFinal)
+    {
+        // سناریو ب: ماه ۳۰ روزه با ۴ جمعه و ۱ تعطیل رسمی وسط هفته (۲۵ روز کاری بدون سقف دستی)
+        var result = _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
+        {
+            Staff = new StaffEmploymentInfoDto
+            {
+                StaffId = 101,
+                IsIncludedInProductivityPlan = true,
+                ClinicalExperienceYears = 0,
+                IsSpecialSection = false,
+                ShiftPattern = ShiftPatternType.FixedDay
+            },
+            RuleOverrides = new ProductivityRuleOverrideDto
+            {
+                HardshipReductionPerWeek = weeklyReduction
+            },
+            TotalDays = 30,
+            FridaysCount = 4,
+            OfficialHolidaysCount = 1
+        });
+
+        Assert.Equal(25, result.Breakdown.WorkingDays);
+        Assert.Equal(183.33m, result.BaseMonthlyHours);
+        Assert.Equal(expectedFinal, result.FinalMonthlyRequiredHours);
+    }
+
+    [Fact]
+    public void CalculateMonthlyHours_ScenarioC_29DaysEsfand_CalculatesCalendarDeduction()
+    {
+        // سناریو ج: ماه ۲۹ روزه (اسفند): ضریب کسر هفتگی = 29 / 7 = 4.1429
+        var result = _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
+        {
+            Staff = new StaffEmploymentInfoDto
+            {
+                StaffId = 102,
+                IsIncludedInProductivityPlan = true,
+                ClinicalExperienceYears = 0,
+                IsSpecialSection = false,
+                ShiftPattern = ShiftPatternType.FixedDay
+            },
+            RuleOverrides = new ProductivityRuleOverrideDto
+            {
+                HardshipReductionPerWeek = 1.0m
+            },
+            TotalDays = 29,
+            WorkingDays = 24
+        });
+
+        // 24 * (22/3) = 176.00; MonthlyReduction = (29/7) * 1.0 = 4.1429
+        // Final = 176.00 - 4.1429 = 171.86
+        Assert.Equal(24, result.Breakdown.WorkingDays);
+        Assert.Equal(176.00m, result.BaseMonthlyHours);
+        Assert.Equal(4.1429m, result.Breakdown.MonthlyReductionFromWeeklyAdjustments);
+        Assert.Equal(171.86m, result.FinalMonthlyRequiredHours);
+    }
+
+    [Fact]
+    public void CalculateMonthlyHours_NightHolidayCredit_DoesNotDeductFromRequiredHours()
+    {
+        // ضریب ۱.۵ شیفت شب/تعطیل نباید از ساعت موظفی کسر شود، بلکه در ساعات کارکرد پرسنل اثر می‌گذارد
+        var resultWithoutNight = _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
+        {
+            Staff = new StaffEmploymentInfoDto { StaffId = 103, IsIncludedInProductivityPlan = true },
+            TotalDays = 30,
+            WorkingDays = 24,
+            NightHolidayHours = 0
+        });
+
+        var resultWithNight = _calculator.CalculateMonthlyHours(new WorkingHoursCalculationRequestDto
+        {
+            Staff = new StaffEmploymentInfoDto { StaffId = 103, IsIncludedInProductivityPlan = true },
+            TotalDays = 30,
+            WorkingDays = 24,
+            NightHolidayHours = 32 // ۳۲ ساعت شب -> ۱۶ ساعت اعتبار
+        });
+
+        // ساعت موظفی نهایی نباید هیچ تغییری کند
+        Assert.Equal(resultWithoutNight.FinalMonthlyRequiredHours, resultWithNight.FinalMonthlyRequiredHours);
+        Assert.Equal(resultWithoutNight.TotalDeductions, resultWithNight.TotalDeductions);
+        // اما در Breakdown اعتبار شب برای گزارش ثبت می‌شود
+        Assert.Equal(16m, resultWithNight.Breakdown.NightHolidayCreditHours);
+    }
+
     [Fact]
     public void CalculateMonthlyHours_Shahrivar1405_OrdinaryStaff_CappedAt176()
     {
@@ -319,6 +409,7 @@ public class WorkingHoursCalculatorTests
                 StaffId = 200,
                 IsIncludedInProductivityPlan = false
             },
+            CapBaseHoursToStandardMonth = true,
             TotalDays = 31,
             FridaysCount = 4,
             OfficialHolidaysCount = 1
