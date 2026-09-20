@@ -1983,10 +1983,14 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         Math.Max(0.0, deptSettingEarly.NightShiftDistributionWeight ?? 0.0);
 
                     constraints.EnableOvertimeDistributionBySeniority =
-                        deptSettingEarly.EnableOvertimeDistributionBySeniority ?? false;
+                        deptSettingEarly.EnableOvertimeDistributionBySeniority ??
+                        (deptSettingEarly.OvertimePreferenceType is 0 or 1);
                     constraints.OvertimePreferenceType = deptSettingEarly.OvertimePreferenceType ?? 2;
                     constraints.SoftWeights.OvertimeDistributionWeight =
                         Math.Max(0.0, deptSettingEarly.OvertimeDistributionWeight ?? 1.0);
+                    constraints.OvertimeSeniorityDistributionSlope =
+                        deptSettingEarly.OvertimeSeniorityDistributionSlope ??
+                        deptSettingEarly.SeniorityDistributionSlope ?? 1.0;
 
                     constraints.HardRules.EnforceProductivityHours = true;
 
@@ -2888,7 +2892,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     }
 
                     constraints.EnableOvertimeDistributionBySeniority =
-                        deptSetting.EnableOvertimeDistributionBySeniority ?? constraints.EnableOvertimeDistributionBySeniority;
+                        deptSetting.EnableOvertimeDistributionBySeniority ??
+                        (deptSetting.OvertimePreferenceType is 0 or 1 ? true : constraints.EnableOvertimeDistributionBySeniority);
                     if (deptSetting.OvertimePreferenceType.HasValue)
                     {
                         constraints.OvertimePreferenceType = deptSetting.OvertimePreferenceType.Value;
@@ -2897,6 +2902,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     {
                         constraints.SoftWeights.OvertimeDistributionWeight =
                             Math.Max(0.0, deptSetting.OvertimeDistributionWeight.Value);
+                    }
+                    if (deptSetting.OvertimeSeniorityDistributionSlope.HasValue)
+                    {
+                        constraints.OvertimeSeniorityDistributionSlope =
+                            deptSetting.OvertimeSeniorityDistributionSlope.Value;
                     }
 
                     constraints.HardRules.EnforceProductivityHours = true;

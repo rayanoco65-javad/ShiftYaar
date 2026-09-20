@@ -216,6 +216,11 @@ namespace ShiftYar.Application.Features.DepartmentModel.Services
                 return false;
             }
             if (!ok(dto.OvertimeDistributionWeight)) { message = "وزن توزیع اضافه کار بر اساس سابقه باید نامنفی باشد."; return false; }
+            if (dto.OvertimeSeniorityDistributionSlope.HasValue && (dto.OvertimeSeniorityDistributionSlope.Value < 0.05 || dto.OvertimeSeniorityDistributionSlope.Value > 10.0))
+            {
+                message = "شیب توزیع اضافه کار بر اساس سابقه باید بین 0.1 تا 10 باشد.";
+                return false;
+            }
 
             return true;
         }
@@ -249,11 +254,13 @@ namespace ShiftYar.Application.Features.DepartmentModel.Services
                 dto.SeniorityDistributionSlope = 1.0;
 
             if (!dto.EnableOvertimeDistributionBySeniority.HasValue)
-                dto.EnableOvertimeDistributionBySeniority = false;
+                dto.EnableOvertimeDistributionBySeniority = dto.OvertimePreferenceType is 0 or 1;
             if (!dto.OvertimePreferenceType.HasValue)
                 dto.OvertimePreferenceType = 2;
             if (!dto.OvertimeDistributionWeight.HasValue)
                 dto.OvertimeDistributionWeight = 0.0;
+            if (!dto.OvertimeSeniorityDistributionSlope.HasValue)
+                dto.OvertimeSeniorityDistributionSlope = dto.SeniorityDistributionSlope ?? 1.0;
         }
 
         private static void NormalizeMaxShiftsPerDay(DepartmentSchedulingSettingsDtoAdd dto)

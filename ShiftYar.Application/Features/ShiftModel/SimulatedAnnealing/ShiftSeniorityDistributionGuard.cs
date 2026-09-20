@@ -365,6 +365,28 @@ public static class ShiftSeniorityDistributionGuard
         };
     }
 
+    /// <summary>
+    /// محاسبه وزن توزیع اضافه کار بر اساس سنوات خدمت و نوع تمایل دپارتمان به اضافه کار:
+    /// 0 (OvertimeFriendly): سابقه بیشتر = اضافه کار بیشتر
+    /// 1 (OvertimeAvoiding): سابقه کمتر = اضافه کار بیشتر، سابقه بیشتر = اضافه کار کمتر (نزدیک به صفر)
+    /// 2 (Neutral): توزیع مساوی
+    /// </summary>
+    public static double ResolveOvertimeWeight(int experienceYears, int overtimePreferenceType, double slope)
+    {
+        var years = Math.Clamp(experienceYears, 0, 40);
+        var s = Math.Max(0.1, slope);
+        return overtimePreferenceType switch
+        {
+            // علاقه‌مند به اضافه کار: سابقه بیشتر = وزن بیشتر
+            0 => Math.Pow(Math.Max(1.0, years + 1.0), s),
+
+            // گریزان از اضافه کار: سابقه کمتر = وزن به مراتب بیشتر، سابقه بیشتر = وزن ناچیز
+            1 => Math.Pow(30.0 / Math.Max(1.0, years + 1.0), 1.5 * s),
+
+            _ => 1.0
+        };
+    }
+
     private static Dictionary<int, double> BuildWorkedLookup(
         ShiftSolution solution,
         ShiftConstraints constraints,

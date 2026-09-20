@@ -881,10 +881,10 @@ public static class ShiftCoverageGuard
                     var seniorityFactor = 1.0;
                     if (constraints.EnableOvertimeDistributionBySeniority && constraints.OvertimePreferenceType != 2)
                     {
-                        var weight = ShiftSeniorityDistributionGuard.ResolveWeight(
+                        var weight = ShiftSeniorityDistributionGuard.ResolveOvertimeWeight(
                             user.ExperienceYears,
                             constraints.OvertimePreferenceType,
-                            constraints.SeniorityDistributionSlope);
+                            constraints.OvertimeSeniorityDistributionSlope);
                         seniorityFactor = Math.Max(0.2, weight);
                     }
                     score += (int)((ot * 30) / seniorityFactor);

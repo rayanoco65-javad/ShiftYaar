@@ -81,6 +81,7 @@ namespace ShiftYar.Application.DTOs.DepartmentModel
         public bool? EnableOvertimeDistributionBySeniority { get; set; }
         public int? OvertimePreferenceType { get; set; }
         public double? OvertimeDistributionWeight { get; set; }
+        public double? OvertimeSeniorityDistributionSlope { get; set; }
 
         /// <summary>امکان شیفت‌بندی ماه جاری (توسعه/تست)</summary>
         public bool? AllowCurrentMonthScheduling { get; set; }

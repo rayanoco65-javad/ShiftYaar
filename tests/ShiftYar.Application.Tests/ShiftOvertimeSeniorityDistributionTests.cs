@@ -92,6 +92,42 @@ public class ShiftOvertimeSeniorityDistributionTests
     }
 
     [Fact]
+    public void OvertimeBalanceGuard_WhenOvertimeAvoidingWithProductivityRequiredHoursDiff_ProtectsSeniorUser()
+    {
+        // سناریوی واقعی دپارتمان ۲:
+        // پرسنل با سابقه ۱۳ سال با موظفی کمتر (۱۶۲.۷ ساعت) در برابر پرسنل ۳ سال با موظفی ۱۷۶ ساعت
+        // در دپارتمان گریزان از اضافه کار، پرسنل کم‌سابقه اضافه کار بیشتری دریافت می‌کنند
+        var start = new DateTime(2026, 9, 1);
+        var senior = MakeUser(1, experienceYears: 13, requiredHours: 162.7m, overtimeConsent: true);
+        var junior = MakeUser(2, experienceYears: 3, requiredHours: 176.0m, overtimeConsent: true);
+
+        var constraints = BuildConstraints(start, [senior, junior], overtimeDistributionEnabled: true, overtimePreferenceType: 1);
+
+        var solution = new ShiftSolution();
+        // فرض اولیه: هر دو پرسنل به تعداد مساوی ۲۷ شیفت (۱۸۹ ساعت) شیفت دارند
+        // ساعت اولیه سنیور: ۱۸۹ (اضافه کار: ۲۶.۳ ساعت)
+        // ساعت اولیه جونیور: ۱۸۹ (اضافه کار: ۱۳ ساعت)
+        for (var i = 0; i < 27; i++)
+        {
+            solution.AddAssignment(senior.UserId, 1, start.AddDays(i), ShiftLabel.Morning, false);
+            solution.AddAssignment(junior.UserId, 1, start.AddDays(i + 28), ShiftLabel.Morning, false);
+        }
+
+        OvertimeBalanceGuard.Enforce(solution, constraints);
+
+        var lookup = ProductivityWorkedHoursCalculator.BuildShiftInfoLookup(constraints.ShiftRequirements);
+        var seniorHours = OvertimeBalanceGuard.CalculateHours(solution, senior, lookup, constraints);
+        var juniorHours = OvertimeBalanceGuard.CalculateHours(solution, junior, lookup, constraints);
+
+        var seniorOt = seniorHours - (double)senior.ProductivityRequiredHours!.Value;
+        var juniorOt = juniorHours - (double)junior.ProductivityRequiredHours!.Value;
+
+        Assert.True(
+            juniorOt >= seniorOt,
+            $"Expected junior overtime >= senior overtime in OvertimeAvoiding department; got seniorOt={seniorOt:F1}, juniorOt={juniorOt:F1}");
+    }
+
+    [Fact]
     public void OvertimeBalanceGuard_WhenNeutral_BalancesOvertimeEqually()
     {
         // دپارتمان خنثی (Type = 2): اضافه کار مساوی تقسیم می‌شود
@@ -184,11 +220,55 @@ public class ShiftOvertimeSeniorityDistributionTests
         }
     }
 
+    [Theory]
+    [InlineData(0.0, false)]
+    [InlineData(0.5, true)]
+    [InlineData(1.0, true)]
+    [InlineData(2.5, true)]
+    [InlineData(10.0, true)]
+    [InlineData(11.0, false)]
+    public void DepartmentSchedulingSettingsService_ValidatesOvertimeSeniorityDistributionSlope(double slope, bool expectedValid)
+    {
+        var dto = new DepartmentSchedulingSettingsDtoAdd
+        {
+            DepartmentId = 1,
+            OvertimePreferenceType = 1,
+            OvertimeDistributionWeight = 1.0,
+            OvertimeSeniorityDistributionSlope = slope
+        };
+
+        var isValid = DepartmentSchedulingSettingsService.ValidateSettings(dto, out var message);
+
+        Assert.Equal(expectedValid, isValid);
+        if (!expectedValid)
+        {
+            Assert.Contains("شیب توزیع اضافه کار بر اساس سابقه باید بین 0.1 تا 10 باشد", message);
+        }
+    }
+
+    [Fact]
+    public void OvertimeSeniorityDistributionSlope_SteeperSlope_ProducesGreaterDivergenceInWeight()
+    {
+        // در شیب تندتر (مثلاً 2.0)، نسبت وزن اضافه کار بین پرسنل کم‌سابقه (3 سال) و باسابقه (13 سال) به مراتب بیشتر از شیب ملایم (0.5) است
+        var weightJuniorMild = ShiftSeniorityDistributionGuard.ResolveOvertimeWeight(3, 1, 0.5);
+        var weightSeniorMild = ShiftSeniorityDistributionGuard.ResolveOvertimeWeight(13, 1, 0.5);
+        var ratioMild = weightJuniorMild / weightSeniorMild;
+
+        var weightJuniorSteep = ShiftSeniorityDistributionGuard.ResolveOvertimeWeight(3, 1, 2.0);
+        var weightSeniorSteep = ShiftSeniorityDistributionGuard.ResolveOvertimeWeight(13, 1, 2.0);
+        var ratioSteep = weightJuniorSteep / weightSeniorSteep;
+
+        Assert.True(
+            ratioSteep > ratioMild * 2.0,
+            $"Steeper slope must produce much greater ratio; ratioSteep={ratioSteep:F2}, ratioMild={ratioMild:F2}");
+    }
+
     private static ShiftConstraints BuildConstraints(
         DateTime start,
         List<UserConstraint> users,
         bool overtimeDistributionEnabled,
-        int overtimePreferenceType)
+        int overtimePreferenceType,
+        double overtimeSeniorityDistributionSlope = 1.0)
     {
         return new ShiftConstraints
         {
@@ -220,7 +300,8 @@ public class ShiftOvertimeSeniorityDistributionTests
             SoftWeights = SoftRuleWeights.CreateDefault(),
             EnableOvertimeDistributionBySeniority = overtimeDistributionEnabled,
             OvertimePreferenceType = overtimePreferenceType,
-            SeniorityDistributionSlope = 1.0
+            SeniorityDistributionSlope = 1.0,
+            OvertimeSeniorityDistributionSlope = overtimeSeniorityDistributionSlope
         };
     }
 

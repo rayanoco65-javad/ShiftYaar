@@ -84,6 +84,7 @@ namespace ShiftYar.Domain.Entities.DepartmentModel
         public bool? EnableOvertimeDistributionBySeniority { get; set; } // فعال‌سازی توزیع اضافه کار بر اساس سابقه
         public int? OvertimePreferenceType { get; set; } // نوع تنظیمات اضافه کار: 0=علاقه‌مند، 1=گریزان، 2=خنثی
         public double? OvertimeDistributionWeight { get; set; } // وزن توزیع اضافه کار بر اساس سابقه
+        public double? OvertimeSeniorityDistributionSlope { get; set; } // شیب توزیع اضافه کار بر اساس سابقه (پیش‌فرض: 1.0)
 
         /// <summary>
         /// امکان شیفت‌بندی ماه جاری — فقط برای توسعه/تست.

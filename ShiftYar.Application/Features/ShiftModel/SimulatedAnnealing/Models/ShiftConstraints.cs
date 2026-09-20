@@ -58,6 +58,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         /// <summary>نوع ترجیح اضافه کار: ۰=علاقه‌مند (سابقه بیشتر)، ۱=گریزان (سابقه کمتر)، ۲=خنثی.</summary>
         public int OvertimePreferenceType { get; set; } = 2;
 
+        /// <summary>شیب اختصاصی وزن‌دهی سابقه برای توزیع اضافه کار (پیش‌فرض: 1.0).</summary>
+        public double OvertimeSeniorityDistributionSlope { get; set; } = 1.0;
+
         public GlobalConstraints GlobalConstraints { get; set; } = new GlobalConstraints();
         // قوانین قطعی (سراسری برای همه دپارتمان‌ها)
         public HardRuleSet HardRules { get; set; } = HardRuleSet.CreateDefault();

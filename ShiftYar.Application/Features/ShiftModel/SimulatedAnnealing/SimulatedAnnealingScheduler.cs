@@ -692,11 +692,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 var seniorityFactor = 1.0;
                 if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType != 2)
                 {
-                    var weight = ShiftSeniorityDistributionGuard.ResolveWeight(
+                    var weight = ShiftSeniorityDistributionGuard.ResolveOvertimeWeight(
                         user.ExperienceYears,
                         _constraints.OvertimePreferenceType,
-                        _constraints.SeniorityDistributionSlope);
-                    seniorityFactor = Math.Max(0.2, weight);
+                        _constraints.OvertimeSeniorityDistributionSlope);
+                    seniorityFactor = Math.Max(0.1, weight);
                 }
 
                 penalty += (excess * excess) / seniorityFactor;
@@ -4678,7 +4678,14 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     })
                     .Where(x => (!x.Consent && x.Overtime > 2.0) || x.ExceedsMax || x.Overtime > 7.0)
                     .OrderByDescending(x => !x.Consent && x.Overtime > 0 ? 2 : (x.ExceedsMax ? 1 : 0))
-                    .ThenByDescending(x => x.Overtime)
+                    .ThenByDescending(x =>
+                    {
+                        if (!_constraints.EnableOvertimeDistributionBySeniority || _constraints.OvertimePreferenceType == 2)
+                            return x.Overtime;
+                        if (_constraints.OvertimePreferenceType == 1)
+                            return x.User.ExperienceYears * 10.0 + x.Overtime;
+                        return -x.User.ExperienceYears * 10.0 + x.Overtime;
+                    })
                     .FirstOrDefault();
 
                 if (donorOt == null)
@@ -4701,7 +4708,14 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         };
                     })
                     .Where(x => x.CanAccept && (donorOt.Overtime - x.Overtime) > 7.0)
-                    .OrderBy(x => x.Overtime)
+                    .OrderBy(x =>
+                    {
+                        if (!_constraints.EnableOvertimeDistributionBySeniority || _constraints.OvertimePreferenceType == 2)
+                            return x.Overtime;
+                        if (_constraints.OvertimePreferenceType == 1)
+                            return x.User.ExperienceYears * 10.0 + x.Overtime;
+                        return -x.User.ExperienceYears * 10.0 + x.Overtime;
+                    })
                     .FirstOrDefault();
 
                 if (receiverOt == null)

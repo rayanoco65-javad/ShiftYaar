@@ -131,6 +131,8 @@ namespace ShiftYar.Api.Controllers.DepartmentModel
                 dtoAdd.OvertimePreferenceType = dto.OvertimePreferenceType;
             if (dto.OvertimeDistributionWeight.HasValue)
                 dtoAdd.OvertimeDistributionWeight = dto.OvertimeDistributionWeight;
+            if (dto.OvertimeSeniorityDistributionSlope.HasValue)
+                dtoAdd.OvertimeSeniorityDistributionSlope = dto.OvertimeSeniorityDistributionSlope;
 
             var result = await _service.UpdateSettingAsync(id, dtoAdd);
             if (!result.IsSuccess) return BadRequest(result);
@@ -186,6 +188,7 @@ namespace ShiftYar.Api.Controllers.DepartmentModel
             EnableOvertimeDistributionBySeniority = s.EnableOvertimeDistributionBySeniority,
             OvertimePreferenceType = s.OvertimePreferenceType,
             OvertimeDistributionWeight = s.OvertimeDistributionWeight,
+            OvertimeSeniorityDistributionSlope = s.OvertimeSeniorityDistributionSlope,
             AllowCurrentMonthScheduling = s.AllowCurrentMonthScheduling,
             AllowMonthlyRescheduleWithAutoDelete = s.AllowMonthlyRescheduleWithAutoDelete,
             AllowEveningAfterNightShift = s.AllowEveningAfterNightShift,
@@ -227,5 +230,6 @@ namespace ShiftYar.Api.Controllers.DepartmentModel
         public bool? EnableOvertimeDistributionBySeniority { get; set; }
         public int? OvertimePreferenceType { get; set; }
         public double? OvertimeDistributionWeight { get; set; }
+        public double? OvertimeSeniorityDistributionSlope { get; set; }
     }
 }

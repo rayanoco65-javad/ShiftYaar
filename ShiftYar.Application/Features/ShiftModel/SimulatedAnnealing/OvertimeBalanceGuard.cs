@@ -189,15 +189,35 @@ public static class OvertimeBalanceGuard
                               Delta: x.Overtime - targetLookup[x.User.UserId]))
                 .ToList();
 
-            // مرتب‌سازی بر اساس انحراف از اضافه کاری هدف:
+            // مرتب‌سازی بر اساس انحراف از اضافه کاری هدف و اولویت سابقه:
             // Donors: بیشترین اضافه کاری مازاد بر سهمیه هدف (Delta > 0)
             // Receivers: کمترین اضافه کاری نسبت به سهمیه هدف (Delta < 0)
             var donors = consentingStats
                 .OrderByDescending(x => x.Delta)
+                .ThenBy(x =>
+                {
+                    if (!constraints.EnableOvertimeDistributionBySeniority || constraints.OvertimePreferenceType == 2)
+                        return 0;
+                    // در حالت گریزان از اضافه کار (1)، پرسنل با سابقه بیشتر اولویت اهدا (کاهش شیفت) دارند
+                    if (constraints.OvertimePreferenceType == 1)
+                        return -x.User.ExperienceYears;
+                    // در حالت علاقه‌مند (0)، پرسنل با سابقه کمتر اولویت اهدا دارند
+                    return x.User.ExperienceYears;
+                })
                 .ToList();
 
             var receivers = consentingStats
                 .OrderBy(x => x.Delta)
+                .ThenBy(x =>
+                {
+                    if (!constraints.EnableOvertimeDistributionBySeniority || constraints.OvertimePreferenceType == 2)
+                        return 0;
+                    // در حالت گریزان از اضافه کار (1)، پرسنل با سابقه کمتر اولویت دریافت دارند
+                    if (constraints.OvertimePreferenceType == 1)
+                        return x.User.ExperienceYears;
+                    // در حالت علاقه‌مند (0)، پرسنل با سابقه بیشتر اولویت دریافت دارند
+                    return -x.User.ExperienceYears;
+                })
                 .ToList();
 
             var highestDonor = donors.First();
@@ -216,6 +236,15 @@ public static class OvertimeBalanceGuard
             {
                 var receiver = receiverInfo.User;
 
+                // در دپارتمان‌های گریزان از اضافه کار، پرسنل باسابقه (بالای ۷ سال) که به موظفی رسیده‌اند نباید اضافه کار مازاد بگیرند
+                if (constraints.EnableOvertimeDistributionBySeniority && constraints.OvertimePreferenceType == 1)
+                {
+                    if (receiver.ExperienceYears >= 7 && receiverInfo.Overtime >= 0)
+                    {
+                        continue;
+                    }
+                }
+
                 foreach (var donorInfo in donors.Where(d => d.User.UserId != receiver.UserId && d.User.SpecialtyId == receiver.SpecialtyId))
                 {
                     var donor = donorInfo.User;
@@ -232,7 +261,15 @@ public static class OvertimeBalanceGuard
                         var shiftEffectiveHours = ProductivityWorkedHoursCalculator.ResolveCreditedHours(
                             lookup[asg.ShiftId], constraints.IsHoliday(asg.Date), donor.IncludedInProductivityPlan);
 
-                        // شرط کاهش شکاف انحراف از هدف و جلوگیری از معکوس شدن یا نوسان پینگ‌پونگی:
+                        // شرط کاهش شکاف انحراف از هدف بر اساس قدرمطلق انحراف‌ها
+                        var oldImbalance = Math.Abs(donorInfo.Delta) + Math.Abs(receiverInfo.Delta);
+                        var newImbalance = Math.Abs(donorInfo.Delta - shiftEffectiveHours) + Math.Abs(receiverInfo.Delta + shiftEffectiveHours);
+                        if (newImbalance >= oldImbalance - 0.01)
+                        {
+                            continue;
+                        }
+
+                        // جلوگیری از معکوس شدن جایگاه دهنده و گیرنده یا نوسان پینگ‌پونگی
                         if (donorInfo.Delta - shiftEffectiveHours < receiverInfo.Delta + shiftEffectiveHours - 0.5)
                         {
                             continue;
@@ -307,10 +344,10 @@ public static class OvertimeBalanceGuard
             var weights = members.ToDictionary(
                 m => m.User.UserId,
                 m => constraints.EnableOvertimeDistributionBySeniority && constraints.OvertimePreferenceType != 2
-                    ? ShiftSeniorityDistributionGuard.ResolveWeight(
+                    ? ShiftSeniorityDistributionGuard.ResolveOvertimeWeight(
                         m.User.ExperienceYears,
                         constraints.OvertimePreferenceType,
-                        constraints.SeniorityDistributionSlope)
+                        constraints.OvertimeSeniorityDistributionSlope)
                     : 1.0);
 
             var totalWeight = weights.Values.Sum();
