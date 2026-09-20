@@ -262,7 +262,7 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
         {
             try
             {
-                var entity = await _repository.GetByIdAsync(id, "User", "Supervisor");
+                var entity = await _repository.GetByIdAsync(id, "User", "Supervisor", "User.Specialty");
                 if (entity == null)
                     return ApiResponse<ShiftRequestDtoGet>.Fail("درخواست مورد نظر یافت نشد.");
 
@@ -472,6 +472,12 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 return nightQuotaError;
             }
 
+            var leaveCapacityError = await ValidateDailyLeaveCapacityAsync(entity);
+            if (leaveCapacityError != null)
+            {
+                return leaveCapacityError;
+            }
+
             if (entity.RequestAction != RequestAction.RequestToBeOnShift ||
                 entity.RequestType != RequestType.SpecificShift ||
                 !entity.ShiftLabel.HasValue ||
@@ -594,6 +600,101 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 capacity,
                 shiftLabel,
                 requestDate,
+                approvedNames);
+        }
+
+        /// <summary>
+        /// سوپروایزر نباید درخواست مرخصی بیش از سقف مجاز روزانه را تأیید کند.
+        /// سقف مجاز = کل پرسنل فعال - (مجموع شیفت‌های امروز + شیفت شب روز قبل)
+        /// </summary>
+        private async Task<string?> ValidateDailyLeaveCapacityAsync(ShiftRequest entity)
+        {
+            if (entity.RequestAction != RequestAction.RequestToBeOffShift ||
+                entity.RequestType != RequestType.FullDay ||
+                !entity.RequestDate.HasValue ||
+                entity.User == null ||
+                !entity.User.DepartmentId.HasValue ||
+                !entity.User.SpecialtyId.HasValue)
+            {
+                return null;
+            }
+
+            var departmentId = entity.User.DepartmentId.Value;
+            var specialtyId = entity.User.SpecialtyId.Value;
+            var requestDate = entity.RequestDate.Value.Date;
+            var prevDate = requestDate.AddDays(-1);
+
+            var (departmentUsers, _) = await _repositoryUser.GetByFilterAsync(
+                new SimpleFilter<User>(u =>
+                    u.DepartmentId == departmentId &&
+                    u.SpecialtyId == specialtyId &&
+                    (u.IsActive == null || u.IsActive == true)));
+
+            var departmentUserIds = departmentUsers
+                .Where(u => u.Id.HasValue)
+                .Select(u => u.Id!.Value)
+                .ToHashSet();
+
+            if (departmentUserIds.Count == 0)
+            {
+                return null;
+            }
+
+            var (shifts, _) = await _shiftRepository.GetByFilterAsync(
+                new ShiftFilter
+                {
+                    DepartmentId = departmentId,
+                    PageNumber = 1,
+                    PageSize = 100
+                },
+                "RequiredSpecialties");
+
+            var isHolidayToday = await IsHolidayDateAsync(requestDate);
+            var isHolidayYesterday = await IsHolidayDateAsync(prevDate);
+
+            var todayShiftDemand = ApprovedLeaveCapacityValidator.CalculateDailyShiftDemandForSpecialty(
+                shifts, specialtyId, isHolidayToday);
+            var yesterdayNightDemand = ApprovedLeaveCapacityValidator.CalculateNightShiftDemandForSpecialty(
+                shifts, specialtyId, isHolidayYesterday);
+
+            var totalActivePersonnel = departmentUsers.Count;
+            var maxCapacity = ApprovedLeaveCapacityValidator.CalculateMaxDailyLeaveCapacity(
+                totalActivePersonnel, todayShiftDemand, yesterdayNightDemand);
+
+            var (approvedRequests, _) = await _repository.GetByFilterAsync(
+                new SimpleFilter<ShiftRequest>(r =>
+                    r.Id != entity.Id &&
+                    r.Status == RequestStatus.Approved &&
+                    r.RequestAction == RequestAction.RequestToBeOffShift &&
+                    r.RequestType == RequestType.FullDay &&
+                    r.RequestDate != null &&
+                    r.RequestDate.Value.Date == requestDate &&
+                    r.UserId != null &&
+                    departmentUserIds.Contains(r.UserId.Value)),
+                "User");
+
+            var approvedUserIds = approvedRequests
+                .Where(r => r.UserId.HasValue)
+                .Select(r => r.UserId!.Value)
+                .Distinct()
+                .ToHashSet();
+
+            var approvedNames = approvedRequests
+                .Where(r => r.UserId.HasValue && approvedUserIds.Contains(r.UserId.Value))
+                .GroupBy(r => r.UserId)
+                .Select(g => FormatUserDisplayName(g.First().User))
+                .ToList();
+
+            var specialtyName = entity.User.Specialty?.SpecialtyName;
+
+            return ApprovedLeaveCapacityValidator.BuildExceededCapacityMessage(
+                approvedUserIds.Count,
+                maxCapacity,
+                totalActivePersonnel,
+                todayShiftDemand,
+                yesterdayNightDemand,
+                requestDate,
+                specialtyName,
                 approvedNames);
         }
 

@@ -1657,6 +1657,139 @@ public class DiagnoseDept2NightQuotasTests
         Assert.Empty(nightDeficits);
         Assert.Equal(0, underCoveredDays);
     }
+
+    [Fact]
+    public void Test_DiagnoseUserReportedCase()
+    {
+        var path = @"C:\Users\Paria\.gemini\antigravity\brain\2e803de5-ca99-49b4-a5e7-a2d4d5605940\scratch\dept2_loaded_constraints.json";
+        if (!System.IO.File.Exists(path))
+        {
+            _output.WriteLine("Diagnostic file not found; skipping.");
+            return;
+        }
+
+        var json = System.IO.File.ReadAllText(path);
+        var constraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(json)!;
+
+        var targetDates = new[]
+        {
+            (Date: new DateTime(2026, 8, 24), Persian: "1405/06/02"),
+            (Date: new DateTime(2026, 9, 5), Persian: "1405/06/14")
+        };
+
+        _output.WriteLine("=========================================================================");
+        _output.WriteLine("تحلیل جامع کمبود فیزیکی نیرو در برابر چیدمان (Diagnosing Physical Deficit vs Layout)");
+        _output.WriteLine("=========================================================================");
+
+        foreach (var (date, persian) in targetDates)
+        {
+            _output.WriteLine($"\n--------------------------------------------------");
+            _output.WriteLine($"تاریخ: {persian} ({date:yyyy-MM-dd}) - تعطیل: {constraints.IsHoliday(date)}");
+            _output.WriteLine($"--------------------------------------------------");
+
+            var spec2Users = constraints.UserConstraints
+                .Where(u => u.IsActive && u.SpecialtyId == 2)
+                .ToList();
+
+            var onLeave = spec2Users.Where(u => u.UnavailableDates.Any(d => d.Date == date.Date)).ToList();
+            var availablePool = spec2Users.Where(u => !onLeave.Contains(u)).ToList();
+
+            _output.WriteLine($"کل پرسنل فعال تخصص ۲: {spec2Users.Count}");
+            _output.WriteLine($"مرخصی ({onLeave.Count} نفر): {string.Join(", ", onLeave.Select(u => $"{u.UserName}(id={u.UserId})"))}");
+            _output.WriteLine($"حاضر ({availablePool.Count} نفر): {string.Join(", ", availablePool.Select(u => $"{u.UserName}(id={u.UserId},L={u.ShiftManagerLevel})"))}");
+        }
+
+        // اکنون اجرای بهینه‌ساز برای دیدن رفتار الگوریتم
+        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            MaxIterations = 2000,
+            MaxIterationsWithoutImprovement = 300
+        });
+
+        ShiftSolution? solution = null;
+        try
+        {
+            solution = scheduler.Optimize();
+        }
+        catch (Exception ex)
+        {
+            _output.WriteLine($"[Optimize threw exception]: {ex.Message}");
+            solution = scheduler.LastSolution;
+        }
+
+        Assert.NotNull(solution);
+
+        foreach (var (date, persian) in targetDates)
+        {
+            _output.WriteLine($"\n==================================================");
+            _output.WriteLine($"وضعیت خروجی الگوریتم در تاریخ {persian} ({date:yyyy-MM-dd}):");
+            _output.WriteLine($"==================================================");
+
+            var prevDate = date.AddDays(-1);
+            var prevNightAsgs = solution.GetShiftAssignments(constraints.ShiftRequirements.First(x => x.ShiftLabel == ShiftLabel.Night).ShiftId, prevDate).Where(a => !a.IsOnCall).ToList();
+            var prevNightUserIds = prevNightAsgs.Select(a => a.UserId).ToHashSet();
+            var onLeaveToday = constraints.UserConstraints.Where(u => u.IsActive && u.SpecialtyId == 2 && u.UnavailableDates.Any(d => d.Date == date.Date)).ToList();
+            var notOnLeaveToday = constraints.UserConstraints.Where(u => u.IsActive && u.SpecialtyId == 2 && !u.UnavailableDates.Any(d => d.Date == date.Date)).ToList();
+            var restingFromPrevNight = notOnLeaveToday.Where(u => prevNightUserIds.Contains(u.UserId)).ToList();
+            var physicallyAvailableToday = notOnLeaveToday.Where(u => !prevNightUserIds.Contains(u.UserId)).ToList();
+
+            _output.WriteLine($"\n[تحلیل ظرفیت فیزیکی روز {persian}]:");
+            _output.WriteLine($"  - کل پرسنل: {constraints.UserConstraints.Count(u => u.IsActive && u.SpecialtyId == 2)}");
+            _output.WriteLine($"  - مرخصی امروز: {onLeaveToday.Count} نفر -> [{string.Join(", ", onLeaveToday.Select(u => u.UserName))}]");
+            _output.WriteLine($"  - غیرمرخصی امروز: {notOnLeaveToday.Count} نفر");
+            _output.WriteLine($"  - شیفت شب روز قبل ({prevDate:MM-dd}): {prevNightAsgs.Count} نفر -> [{string.Join(", ", prevNightAsgs.Select(a => constraints.UserConstraints.First(u => u.UserId == a.UserId).UserName))}]");
+            _output.WriteLine($"  - پرسنل غیرمرخصی که شب قبل کار کرده و امروز در استراحت اجباری‌اند: {restingFromPrevNight.Count} نفر -> [{string.Join(", ", restingFromPrevNight.Select(u => u.UserName))}]");
+            _output.WriteLine($"  - پرسنل واجد شرایط فیزیکی برای کار امروز: {physicallyAvailableToday.Count} نفر -> [{string.Join(", ", physicallyAvailableToday.Select(u => u.UserName))}]");
+            _output.WriteLine($"  - مجموع شیفت‌های مورد نیاز امروز: 11 (صبح: 4، عصر: 3، شب: 4)");
+            _output.WriteLine($"  - تراز فیزیکی: {physicallyAvailableToday.Count} نفر حاضر در برابر 11 شیفت مورد نیاز -> کسری قطعی: {11 - physicallyAvailableToday.Count} نفر!");
+
+            _output.WriteLine($"\n  آیا امکان داشت کسی از افراد مرخصیِ امروز، شبِ روز قبل ({prevDate:MM-dd}) شیفت شب می‌گرفت؟");
+            foreach (var u in onLeaveToday)
+            {
+                var reasons = new List<string>();
+                if (u.UnavailableDates.Any(d => d.Date == prevDate.Date)) reasons.Add("مرخصی در روز قبل");
+                if (u.UnavailableShiftSlots.Any(s => s.Date.Date == prevDate.Date && s.ShiftLabel == ShiftLabel.Night)) reasons.Add("عدم تمایل به شب روز قبل");
+                if (solution.GetUserAssignments(u.UserId, prevDate.Date).Any(a => a.ShiftLabel != ShiftLabel.Night)) reasons.Add("انتساب در شیفت دیگر روز قبل");
+                if (solution.GetUserAssignments(u.UserId, prevDate.AddDays(-1).Date).Any(a => a.ShiftLabel == ShiftLabel.Night)) reasons.Add("شیفت شب دو روز قبل");
+                _output.WriteLine($"    * {u.UserName} (id={u.UserId}): {(reasons.Count == 0 ? "می‌توانست شب روز قبل را بگیرد" : string.Join(", ", reasons))}");
+            }
+
+            // پرسنل حاضر که در این روز اصلاً هیچ شیفتی نگرفته‌اند
+            var unassignedOnDate = constraints.UserConstraints
+                .Where(u => u.IsActive && u.SpecialtyId == 2)
+                .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
+                .Where(u => !solution.GetUserAssignments(u.UserId, date).Any(a => !a.IsOnCall))
+                .ToList();
+
+            _output.WriteLine($"\nپرسنل حاضر که هیچ شیفتی در این روز نگرفته‌اند ({unassignedOnDate.Count} نفر):");
+            foreach (var u in unassignedOnDate)
+            {
+                _output.WriteLine($"\nبررسی کاربر {u.UserName} (id={u.UserId}, L={u.ShiftManagerLevel}, ShiftType={u.ShiftType}, SubType={u.ShiftSubType}):");
+                var allAsgs = solution.GetUserAllAssignments(u.UserId).Where(a => !a.IsOnCall).OrderBy(a => a.Date).Select(a => $"{a.Date:MM-dd}:{a.ShiftLabel}").ToList();
+                _output.WriteLine($"  شیفت‌های نزدیک کاربر: {string.Join(", ", allAsgs)}");
+
+                foreach (var label in new[] { ShiftLabel.Morning, ShiftLabel.Evening, ShiftLabel.Night })
+                {
+                    var reasons = new List<string>();
+                    if (u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == label)) reasons.Add("UnavailableShiftSlot");
+                    if (!ShiftEligibilityResolver.MayEverTakeLabel(u, label)) reasons.Add("MayEverTakeLabel=false");
+                    if (!ShiftEligibilityResolver.MayTakeLabelOnDate(u, label, date)) reasons.Add("MayTakeLabelOnDate=false");
+                    if (AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(u.UserId), date, label, constraints)) reasons.Add("AdjacentConflict");
+                    if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(solution, constraints, u, date)) reasons.Add("MaxConsecutiveWorkdays");
+
+                    var sReq = constraints.ShiftRequirements.FirstOrDefault(x => x.ShiftLabel == label);
+                    if (sReq != null)
+                    {
+                        var canAccept = ShiftCoverageGuard.CanAcceptShift(solution, constraints, u, date, label);
+                        if (!canAccept) reasons.Add("CanAcceptShift=false");
+                    }
+
+                    _output.WriteLine($"    - شیفت {label}: {(reasons.Count == 0 ? "کاملاً مجاز و آماده تخصیص است!" : string.Join(", ", reasons))}");
+                }
+            }
+        }
+    }
 }
+
 
 

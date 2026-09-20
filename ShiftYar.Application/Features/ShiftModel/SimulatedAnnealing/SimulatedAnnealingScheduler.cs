@@ -23,6 +23,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         private readonly Dictionary<int, double> _shiftDurationLookup;
         private readonly Dictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> _shiftInfoLookup;
         private readonly Func<int, bool> _isInProductivityPlan;
+        public ShiftSolution? LastSolution { get; private set; }
 
         public SimulatedAnnealingScheduler(ShiftConstraints constraints, SimulatedAnnealingParameters parameters)
         {
@@ -62,6 +63,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ExactNightQuotaGuard.GlobalRebalanceNightQuotas(bestSolution, _constraints);
             ExactNightQuotaGuard.Enforce(bestSolution, _constraints);
 
+            LastSolution = bestSolution;
             PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: true);
             ShiftManagerMixGuard.EnsureOrThrow(bestSolution, _constraints);
 

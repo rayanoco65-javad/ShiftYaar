@@ -921,7 +921,7 @@ public static class ShiftCoverageGuard
         return score;
     }
 
-    private static bool CanAcceptShift(
+    internal static bool CanAcceptShift(
         ShiftSolution solution,
         ShiftConstraints constraints,
         UserConstraint user,
