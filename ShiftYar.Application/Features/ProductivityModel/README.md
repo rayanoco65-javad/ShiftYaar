@@ -8,8 +8,8 @@ This feature contains the productivity rules mandated by the *Regulation of Prod
 - **Working days:** `WorkingDays = TotalDays − (FridaysCount + OfficialHolidaysCount)` (Thursdays are standard working days in 24/7 healthcare facilities)
 - **Gross monthly base hours:** `BaseMonthlyHours = WorkingDays × (22 / 3)`
 - **Standard month cap (optional):** When `CapBaseHoursToStandardMonth = true`, working days are capped at 24 and base hours at 176.0 (4 weeks × 44h).
-- **Weekly reduction caps:** Seniority (up to 2h) + Hardship (up to 2h) + Rotating (up to 1h) → max 8h weekly
-- **Monthly reduction formula:** `MonthlyReductions = (TotalDays / 7) × WeeklyReduction`
+- **Weekly reduction caps:** Seniority (0h for <5y, 1h for 5-12y, 2h for 13-17y, up to 3h for 18+y) + Hardship (2h for special sections, 0h for general) + Rotating shift (1h for 3-shift rotating with ≥10y seniority) → max 8h weekly.
+- **Monthly reduction formula:** `MonthlyReductions = (TotalDays / 7) × WeeklyReduction` (in 31-day months, 1h weekly maps to 5h monthly reduction).
 
 The final monthly duty hours obligation is computed as:
 

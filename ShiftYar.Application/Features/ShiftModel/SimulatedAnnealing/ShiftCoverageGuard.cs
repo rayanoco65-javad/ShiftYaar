@@ -195,18 +195,33 @@ public static class ShiftCoverageGuard
         }
 
         // در صورت وجود کسری قطعی ناشی از کمبود فیزیکی نیرو (مانند مرخصی همزمان چند پرسنل)،
-        // از شیفت لانگ استاندارد (صبح+عصر) برای تکمیل ظرفیت استفاده می‌شود.
-        EmergencyFillMissingCoverageWithDoubleShift(solution, constraints);
+        // از شیفت لانگ استاندارد (صبح+عصر) فقط در صورتی که سقف روزانه حداقل ۲ باشد استفاده می‌شود.
+        var maxDaily = constraints.HardRules.EnforceMaxShiftsPerDay
+            ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
+            : 2;
+        if (maxDaily >= 2)
+        {
+            EmergencyFillMissingCoverageWithDoubleShift(solution, constraints);
+        }
     }
 
     /// <summary>
     /// تکمیل اضطراری کسری ظرفیت با شیفت لانگ (صبح و عصر متوالی).
-    /// فقط در شرایط بحران کمبود فیزیکی نیرو (مانند مرخصی همزمان پرسنل) اجرا می‌شود.
+    /// فقط در شرایط بحران کمبود فیزیکی نیرو (مانند مرخصی همزمان پرسنل) و در صورت مجاز بودن سقف روزانه (>= 2) اجرا می‌شود.
     /// </summary>
     private static void EmergencyFillMissingCoverageWithDoubleShift(
         ShiftSolution solution,
         ShiftConstraints constraints)
     {
+        var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
+            ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
+            : 2;
+
+        if (maxPerDay < 2)
+        {
+            return;
+        }
+
         var underViolations = GetUnderCapacityViolations(solution, constraints);
         if (underViolations.Count == 0)
         {
@@ -262,8 +277,8 @@ public static class ShiftCoverageGuard
                                 return false;
                             }
 
-                            // بررسی ترکیب مجاز روزانه حداکثر ۲ شیفت (صبح+عصر)
-                            if (!DailyAssignmentRules.CanAddShift(existing, shiftReq.ShiftLabel, maxShiftsPerDay: 2, forbidDuplicateLabels: true))
+                            // بررسی ترکیب مجاز روزانه بر اساس سقف معتبر دپارتمان
+                            if (!DailyAssignmentRules.CanAddShift(existing, shiftReq.ShiftLabel, maxShiftsPerDay: maxPerDay, forbidDuplicateLabels: true))
                             {
                                 return false;
                             }
@@ -273,7 +288,7 @@ public static class ShiftCoverageGuard
                                     u,
                                     existing,
                                     shiftReq.ShiftLabel,
-                                    maxShiftsPerDay: 2,
+                                    maxShiftsPerDay: maxPerDay,
                                     forbidDuplicateLabels: true,
                                     date: date))
                             {

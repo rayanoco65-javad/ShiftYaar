@@ -938,9 +938,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
             ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
-            ExactNightQuotaGuard.Enforce(solution, constraints);
             ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
+            ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
             scheduler.RefreshSolutionViolations(solution);
 
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
@@ -1558,18 +1559,45 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
         /// <summary>
         /// سقف روزانه و توالی ممنوع شب→صبح / عصر→شب نباید در خروجی نهایی باقی بمانند.
+        /// مرز هر روز بر اساس تقویم هجری شمسی (۰۰:۰۰ تا ۲۳:۵۹) به صورت قید سخت (Hard Guard) اعتبارسنجی می‌شود.
         /// </summary>
         private static void EnsureHardDailyRulesOrThrow(ShiftSolution solution, ShiftConstraints constraints)
         {
             var daily = DailyDuplicateAssignmentGuard.GetViolations(solution, constraints);
             var adjacency = AdjacentShiftRestGuard.GetViolations(solution, constraints);
-            if (daily.Count == 0 && adjacency.Count == 0)
+            var eligibility = ShiftEligibilityGuard.GetViolations(solution, constraints);
+
+            var persianDailyViolations = new List<string>();
+            if (constraints.HardRules.EnforceMaxShiftsPerDay)
+            {
+                var maxPerDay = Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay);
+                var groupedByPersianDate = solution.Assignments.Values
+                    .GroupBy(a => new
+                    {
+                        a.UserId,
+                        PersianDate = DateConverter.ConvertToPersianDate(a.Date)
+                    })
+                    .Where(g => g.Count() > maxPerDay)
+                    .ToList();
+
+                foreach (var group in groupedByPersianDate)
+                {
+                    var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == group.Key.UserId);
+                    var userName = user?.UserName ?? $"کاربر {group.Key.UserId}";
+                    var shifts = string.Join(" + ", group.Select(a => a.ShiftLabel));
+                    persianDailyViolations.Add(
+                        $"نقض محدودیت قطعی سقف شیفت روزانه: کاربر {group.Key.UserId} ({userName}) در تاریخ شمسی {group.Key.PersianDate} دارای {group.Count()} شیفت ({shifts}) است در حالی که حداکثر شیفت مجاز {maxPerDay} می‌باشد.");
+                }
+            }
+
+            var allViolations = daily.Concat(adjacency).Concat(eligibility).Concat(persianDailyViolations).Distinct().ToList();
+            if (allViolations.Count == 0)
             {
                 return;
             }
 
             throw new InvalidOperationException(
-                "قیود سخت روزانه رعایت نشدند:\n" + string.Join("\n", daily.Concat(adjacency)));
+                "قیود سخت روزانه رعایت نشدند:\n" + string.Join("\n", allViolations));
         }
 
         /// <summary>
@@ -3217,6 +3245,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
             ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
+            ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
             scheduler.RefreshSolutionViolations(solution);
 
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
@@ -3326,6 +3356,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
             ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
+            ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
             scheduler.RefreshSolutionViolations(solution);
 
             _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureApprovedRequests...", request.DepartmentId);

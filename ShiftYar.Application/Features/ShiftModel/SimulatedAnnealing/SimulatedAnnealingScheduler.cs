@@ -1583,9 +1583,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
-            MaxConsecutiveWorkdayGuard.Enforce(solution, _constraints, RepairManagerMix);
             ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
+            DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
+            ShiftEligibilityGuard.StripIneligibleAssignments(solution, _constraints);
             solution.Score = CalculateSolutionScore(solution);
             RefreshSolutionViolations(solution);
         }
