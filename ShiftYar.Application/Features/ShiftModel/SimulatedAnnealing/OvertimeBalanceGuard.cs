@@ -38,6 +38,9 @@ public static class OvertimeBalanceGuard
 
         // ۲) فاز دوم: مهار سقف ۸۰ ساعت و توازن عادلانه اضافه‌کاری بین پرسنل متقاضی
         EnforceConsentingOvertimeBalance(solution, constraints, users, lookup);
+
+        // ۳) فاز سوم: یکنواخت‌سازی و برابرسازی اضافه کاری میان پرسنل هم‌سابقه (Peer Overtime Equalization)
+        EnforcePeerOvertimeEqualization(solution, constraints, users, lookup);
     }
 
     /// <summary>
@@ -261,16 +264,19 @@ public static class OvertimeBalanceGuard
                         var shiftEffectiveHours = ProductivityWorkedHoursCalculator.ResolveCreditedHours(
                             lookup[asg.ShiftId], constraints.IsHoliday(asg.Date), donor.IncludedInProductivityPlan);
 
-                        // شرط کاهش شکاف انحراف از هدف بر اساس قدرمطلق انحراف‌ها
-                        var oldImbalance = Math.Abs(donorInfo.Delta) + Math.Abs(receiverInfo.Delta);
-                        var newImbalance = Math.Abs(donorInfo.Delta - shiftEffectiveHours) + Math.Abs(receiverInfo.Delta + shiftEffectiveHours);
+                        // شرط کاهش شکاف انحراف از هدف بر اساس مجموع مربعات انحراف (SSE)
+                        var oldImbalance = donorInfo.Delta * donorInfo.Delta + receiverInfo.Delta * receiverInfo.Delta;
+                        var newDonorDelta = donorInfo.Delta - shiftEffectiveHours;
+                        var newReceiverDelta = receiverInfo.Delta + shiftEffectiveHours;
+                        var newImbalance = newDonorDelta * newDonorDelta + newReceiverDelta * newReceiverDelta;
+
                         if (newImbalance >= oldImbalance - 0.01)
                         {
                             continue;
                         }
 
                         // جلوگیری از معکوس شدن جایگاه دهنده و گیرنده یا نوسان پینگ‌پونگی
-                        if (donorInfo.Delta - shiftEffectiveHours < receiverInfo.Delta + shiftEffectiveHours - 0.5)
+                        if (newDonorDelta < newReceiverDelta - 0.5)
                         {
                             continue;
                         }
@@ -318,6 +324,129 @@ public static class OvertimeBalanceGuard
             {
                 break;
             }
+        }
+    }
+
+    /// <summary>
+    /// یکنواخت‌سازی و تعادل قطعی اضافه کاری میان پرسنلی که سابقه خدمت یکسان یا نزدیک به هم دارند.
+    /// این فاز تضمین می‌کند که پرسنل هم‌تراز به دلیل ترتیبات تصادفی تقویم، اختلاف ساعت غیرعادلانه نداشته باشند.
+    /// </summary>
+    private static void EnforcePeerOvertimeEqualization(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        List<UserConstraint> users,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup)
+    {
+        for (var pass = 0; pass < 32; pass++)
+        {
+            var progressed = false;
+
+            var stats = users
+                .Where(u => u.OvertimeConsent)
+                .Select(u =>
+                {
+                    var worked = CalculateHours(solution, u, lookup, constraints);
+                    var req = (double)u.ProductivityRequiredHours!.Value;
+                    var ot = worked - req;
+                    var max = ProjectPersonnelProductivityPriority.GetMaxAllowedSchedulingHours(u);
+                    return (User: u, Worked: worked, Required: req, Overtime: ot, MaxAllowed: max);
+                })
+                .ToList();
+
+            foreach (var specGroup in stats.GroupBy(x => x.User.SpecialtyId))
+            {
+                var members = specGroup.ToList();
+                if (members.Count < 2) continue;
+
+                var sortedMembers = members.OrderBy(m => m.User.ExperienceYears).ToList();
+
+                for (var i = 0; i < sortedMembers.Count; i++)
+                {
+                    for (var j = i + 1; j < sortedMembers.Count; j++)
+                    {
+                        var u1 = sortedMembers[i];
+                        var u2 = sortedMembers[j];
+
+                        // بررسی پرسنل با سابقه یکسان یا حداکثر ۱ سال اختلاف
+                        if (Math.Abs(u1.User.ExperienceYears - u2.User.ExperienceYears) > 1)
+                        {
+                            continue;
+                        }
+
+                        var (donorInfo, receiverInfo) = u1.Overtime > u2.Overtime ? (u1, u2) : (u2, u1);
+                        var otDiff = donorInfo.Overtime - receiverInfo.Overtime;
+
+                        // اگر اختلاف کمتر از ۷ ساعت باشد متعادل است
+                        if (otDiff < 7.0)
+                        {
+                            continue;
+                        }
+
+                        var donor = donorInfo.User;
+                        var receiver = receiverInfo.User;
+
+                        var donorAssignments = solution.GetUserAllAssignments(donor.UserId)
+                            .Where(a => !a.IsOnCall && !IsProtected(constraints, donor, a))
+                            .Where(a => a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening)
+                            .OrderBy(a => a.ShiftLabel == ShiftLabel.Morning ? 0 : 1)
+                            .ThenByDescending(a => a.Date)
+                            .ToList();
+
+                        foreach (var asg in donorAssignments)
+                        {
+                            var shiftEffectiveHours = ProductivityWorkedHoursCalculator.ResolveCreditedHours(
+                                lookup[asg.ShiftId], constraints.IsHoliday(asg.Date), donor.IncludedInProductivityPlan);
+
+                            var newDonorOt = donorInfo.Overtime - shiftEffectiveHours;
+                            var newReceiverOt = receiverInfo.Overtime + shiftEffectiveHours;
+                            var newDiff = Math.Abs(newDonorOt - newReceiverOt);
+
+                            if (newDiff >= otDiff - 0.01)
+                            {
+                                continue;
+                            }
+
+                            // گیرنده پس از دریافت شیفت نباید از دهنده بیشتر شود (مهار قطعی پینگ‌پنگ)
+                            if (newReceiverOt > newDonorOt + 0.5)
+                            {
+                                continue;
+                            }
+
+                            if (receiverInfo.Worked + shiftEffectiveHours > receiverInfo.MaxAllowed + 0.25)
+                            {
+                                continue;
+                            }
+
+                            if (!CanTakeShift(solution, constraints, lookup, receiver, asg))
+                            {
+                                continue;
+                            }
+
+                            if (!WouldPreserveManagerMix(solution, constraints, asg.ShiftId, asg.Date, donor.UserId, receiver.UserId))
+                            {
+                                continue;
+                            }
+
+                            LogAction?.Invoke($"[PeerEqualization] Transferred {asg.ShiftLabel} on {asg.Date:yyyy-MM-dd} from {donor.UserName} (OT={donorInfo.Overtime:F1}, Exp={donor.ExperienceYears}) to {receiver.UserName} (OT={receiverInfo.Overtime:F1}, Exp={receiver.ExperienceYears}), shiftEff={shiftEffectiveHours:F1}");
+
+                            solution.UnlockSkeletonAssignment(donor.UserId, asg.ShiftId, asg.Date);
+                            solution.RemoveAssignment(donor.UserId, asg.ShiftId, asg.Date, force: true);
+                            solution.AddAssignment(receiver.UserId, asg.ShiftId, asg.Date, asg.ShiftLabel, isOnCall: false);
+
+                            progressed = true;
+                            break;
+                        }
+
+                        if (progressed) break;
+                    }
+
+                    if (progressed) break;
+                }
+
+                if (progressed) break;
+            }
+
+            if (!progressed) break;
         }
     }
 

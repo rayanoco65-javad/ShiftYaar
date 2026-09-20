@@ -453,6 +453,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             score += CalculateFairWorkedHoursBalancePenalty(solution) * _constraints.SoftWeights.FairWorkedHoursBalanceWeight;
             score += CalculateProductivityShortfallPenalty(solution) * _constraints.SoftWeights.ProductivityShortfallWeight;
             score += CalculateProductivityOvertimePenalty(solution) * _constraints.SoftWeights.ProductivityOvertimeWeight;
+            score += CalculateOvertimeBalancePenalty(solution);
             score += CalculateFairNightShiftBalancePenalty(solution) * _constraints.SoftWeights.FairNightShiftBalanceWeight;
             score += CalculateMorningEveningBalancePenalty(solution) * _constraints.SoftWeights.MorningEveningBalanceWeight;
             score += CalculateFairMorningEveningPeerPenalty(solution) * _constraints.SoftWeights.FairMorningEveningPeerWeight;
@@ -708,6 +709,71 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 if (excess > 15)
                 {
                     penalty += (excess * 12) / seniorityFactor;
+                }
+            }
+
+            return penalty;
+        }
+
+        private double CalculateOvertimeBalancePenalty(ShiftSolution solution)
+        {
+            var consentingUsers = _constraints.UserConstraints
+                .Where(u => u.IsActive && u.ShiftType != ShiftTypes.FixedShift)
+                .Where(u => u.IncludedInProductivityPlan && u.ProductivityRequiredHours.HasValue && u.OvertimeConsent)
+                .ToList();
+
+            if (consentingUsers.Count < 2) return 0;
+
+            double penalty = 0;
+            var weightMultiplier = _constraints.SoftWeights.OvertimeDistributionWeight > 0
+                ? _constraints.SoftWeights.OvertimeDistributionWeight
+                : 1.0;
+
+            foreach (var group in consentingUsers.GroupBy(u => u.SpecialtyId))
+            {
+                var members = group.ToList();
+                if (members.Count < 2) continue;
+
+                var userHours = members.ToDictionary(
+                    u => u.UserId,
+                    u =>
+                    {
+                        var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                        var req = (double)u.ProductivityRequiredHours!.Value;
+                        var ot = Math.Max(0.0, worked - req);
+                        return (Worked: worked, Required: req, Overtime: ot);
+                    });
+
+                var totalOt = userHours.Values.Sum(x => x.Overtime);
+                if (totalOt <= 0) continue;
+
+                var weights = members.ToDictionary(
+                    u => u.UserId,
+                    u => _constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType != 2
+                        ? ShiftSeniorityDistributionGuard.ResolveOvertimeWeight(
+                            u.ExperienceYears,
+                            _constraints.OvertimePreferenceType,
+                            _constraints.OvertimeSeniorityDistributionSlope)
+                        : 1.0);
+
+                var totalWeight = weights.Values.Sum();
+                if (totalWeight <= 0) totalWeight = members.Count;
+
+                foreach (var u in members)
+                {
+                    var targetOt = totalOt * (weights[u.UserId] / totalWeight);
+                    var actualOt = userHours[u.UserId].Overtime;
+                    var delta = actualOt - targetOt;
+
+                    // جریمه مربعی انحراف از سهمیه هدف جهت برابرسازی و تعادل دقیق
+                    penalty += delta * delta * 5.0 * weightMultiplier;
+
+                    // جریمه جهشی اضافی برای انحراف بیش از یک شیفت (۷ ساعت)
+                    var absDelta = Math.Abs(delta);
+                    if (absDelta > 7.0)
+                    {
+                        penalty += (absDelta - 7.0) * (absDelta - 7.0) * 15.0 * weightMultiplier;
+                    }
                 }
             }
 
@@ -4660,32 +4726,44 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             if (receiver == null)
             {
                 // همه به حداقل موظفی رسیده‌اند — توازن اضافه کاری و اعمال OvertimeConsent
-                var donorOt = productivityUsers
+                var consenting = productivityUsers.Where(u => u.OvertimeConsent).ToList();
+                var totalOt = consenting.Sum(u => Math.Max(0.0, CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)) - (double)u.ProductivityRequiredHours!.Value));
+                var weights = consenting.ToDictionary(
+                    u => u.UserId,
+                    u => _constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType != 2
+                        ? ShiftSeniorityDistributionGuard.ResolveOvertimeWeight(u.ExperienceYears, _constraints.OvertimePreferenceType, _constraints.OvertimeSeniorityDistributionSlope)
+                        : 1.0);
+                var totalWeight = weights.Values.Sum();
+                if (totalWeight <= 0) totalWeight = consenting.Count;
+
+                var userStats = productivityUsers
                     .Select(u =>
                     {
                         var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
                         var req = (double)u.ProductivityRequiredHours!.Value;
                         var ot = worked - req;
+                        var targetOt = u.OvertimeConsent && totalOt > 0 && weights.ContainsKey(u.UserId)
+                            ? totalOt * (weights[u.UserId] / totalWeight)
+                            : 0.0;
+                        var delta = ot - targetOt;
                         return new
                         {
                             User = u,
                             Worked = worked,
                             Required = req,
                             Overtime = ot,
+                            TargetOvertime = targetOt,
+                            Delta = delta,
                             Consent = u.OvertimeConsent,
                             ExceedsMax = ot > (double)u.MaxMonthlyOvertimeHours
                         };
                     })
-                    .Where(x => (!x.Consent && x.Overtime > 2.0) || x.ExceedsMax || x.Overtime > 7.0)
+                    .ToList();
+
+                var donorOt = userStats
+                    .Where(x => (!x.Consent && x.Overtime > 2.0) || x.ExceedsMax || x.Delta > 3.5)
                     .OrderByDescending(x => !x.Consent && x.Overtime > 0 ? 2 : (x.ExceedsMax ? 1 : 0))
-                    .ThenByDescending(x =>
-                    {
-                        if (!_constraints.EnableOvertimeDistributionBySeniority || _constraints.OvertimePreferenceType == 2)
-                            return x.Overtime;
-                        if (_constraints.OvertimePreferenceType == 1)
-                            return x.User.ExperienceYears * 10.0 + x.Overtime;
-                        return -x.User.ExperienceYears * 10.0 + x.Overtime;
-                    })
+                    .ThenByDescending(x => x.Delta)
                     .FirstOrDefault();
 
                 if (donorOt == null)
@@ -4693,29 +4771,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     return;
                 }
 
-                var receiverOt = productivityUsers
-                    .Where(u => u.UserId != donorOt.User.UserId && u.OvertimeConsent)
-                    .Select(u =>
-                    {
-                        var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
-                        var req = (double)u.ProductivityRequiredHours!.Value;
-                        var ot = worked - req;
-                        return new
-                        {
-                            User = u,
-                            Overtime = ot,
-                            CanAccept = ot + 7.0 <= (double)u.MaxMonthlyOvertimeHours
-                        };
-                    })
-                    .Where(x => x.CanAccept && (donorOt.Overtime - x.Overtime) > 7.0)
-                    .OrderBy(x =>
-                    {
-                        if (!_constraints.EnableOvertimeDistributionBySeniority || _constraints.OvertimePreferenceType == 2)
-                            return x.Overtime;
-                        if (_constraints.OvertimePreferenceType == 1)
-                            return x.User.ExperienceYears * 10.0 + x.Overtime;
-                        return -x.User.ExperienceYears * 10.0 + x.Overtime;
-                    })
+                var receiverOt = userStats
+                    .Where(x => x.User.UserId != donorOt.User.UserId && x.Consent && x.User.SpecialtyId == donorOt.User.SpecialtyId)
+                    .Where(x => x.Overtime + 7.0 <= (double)x.User.MaxMonthlyOvertimeHours && (donorOt.Delta - x.Delta) > 7.0)
+                    .OrderBy(x => x.Delta)
                     .FirstOrDefault();
 
                 if (receiverOt == null)

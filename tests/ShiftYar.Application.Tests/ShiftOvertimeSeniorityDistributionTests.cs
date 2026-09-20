@@ -263,6 +263,43 @@ public class ShiftOvertimeSeniorityDistributionTests
             $"Steeper slope must produce much greater ratio; ratioSteep={ratioSteep:F2}, ratioMild={ratioMild:F2}");
     }
 
+    [Fact]
+    public void OvertimeBalanceGuard_EqualSeniorityStaff_BalancesOvertimeEqually()
+    {
+        // دو کاربر با سابقه یکسان (مثلاً هر دو ۲ سال سابقه) در صورت داشتن اضافه کار نامتوازن، باید به توازن برسند
+        var start = new DateTime(2026, 9, 1);
+        var peer1 = MakeUser(1, experienceYears: 2, requiredHours: 70, overtimeConsent: true);
+        var peer2 = MakeUser(2, experienceYears: 2, requiredHours: 70, overtimeConsent: true);
+
+        var constraints = BuildConstraints(start, [peer1, peer2], overtimeDistributionEnabled: true, overtimePreferenceType: 1);
+
+        var solution = new ShiftSolution();
+        // کاربر ۱ دارای ۱۶ شیفت (۱۱۲ ساعت = ۴۲ ساعت اضافه کار)
+        for (var i = 0; i < 32; i += 2)
+        {
+            solution.AddAssignment(peer1.UserId, 1, start.AddDays(i), ShiftLabel.Morning, false);
+        }
+        // کاربر ۲ دارای ۱۰ شیفت (۷۰ ساعت = ۰ ساعت اضافه کار)
+        for (var i = 1; i < 21; i += 2)
+        {
+            solution.AddAssignment(peer2.UserId, 1, start.AddDays(i), ShiftLabel.Morning, false);
+        }
+
+        OvertimeBalanceGuard.Enforce(solution, constraints);
+
+        var lookup = ProductivityWorkedHoursCalculator.BuildShiftInfoLookup(constraints.ShiftRequirements);
+        var hours1 = OvertimeBalanceGuard.CalculateHours(solution, peer1, lookup, constraints);
+        var hours2 = OvertimeBalanceGuard.CalculateHours(solution, peer2, lookup, constraints);
+
+        var ot1 = hours1 - (double)peer1.ProductivityRequiredHours!.Value;
+        var ot2 = hours2 - (double)peer2.ProductivityRequiredHours!.Value;
+
+        // اختلاف اضافه‌کاری بین دو کاربر هم‌سابقه نباید از یک شیفت (۷ ساعت) بیشتر باشد
+        Assert.True(
+            Math.Abs(ot1 - ot2) <= 7.0,
+            $"Expected balanced overtime between peer staff; got ot1={ot1:F1}, ot2={ot2:F1}, diff={Math.Abs(ot1 - ot2):F1}");
+    }
+
     private static ShiftConstraints BuildConstraints(
         DateTime start,
         List<UserConstraint> users,

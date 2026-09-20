@@ -1847,12 +1847,34 @@ public class DiagnoseDept2NightQuotasTests
 
             var ot16 = h16 - (double)u16.ProductivityRequiredHours!.Value;
             var ot25 = h25 - (double)u25.ProductivityRequiredHours!.Value;
+            _output.WriteLine($"\nRESULTS FOR ALL USERS:");
+            foreach (var u in constraints.UserConstraints.OrderBy(x => x.ExperienceYears).ThenBy(x => x.UserId))
+            {
+                var h = OvertimeBalanceGuard.CalculateHours(solution, u, lookup, constraints);
+                var req = (double)u.ProductivityRequiredHours!.Value;
+                var ot = h - req;
+                _output.WriteLine($"User {u.UserId,2} ({u.UserName,-20}, Exp={u.ExperienceYears,2}): Worked={h,5:F1}, Req={req,5:F1}, OT={ot,5:F1}");
+            }
 
-            _output.WriteLine($"\nRESULTS:");
-            _output.WriteLine($"U16 ({u16.UserName}, Exp={u16.ExperienceYears}): Worked={h16:F1}, Req={u16.ProductivityRequiredHours:F1}, OT={ot16:F1}");
-            _output.WriteLine($"U25 ({u25.UserName}, Exp={u25.ExperienceYears}): Worked={h25:F1}, Req={u25.ProductivityRequiredHours:F1}, OT={ot25:F1}");
+            var u29 = constraints.UserConstraints.First(x => x.UserId == 29);
+            var u30 = constraints.UserConstraints.First(x => x.UserId == 30);
+            _output.WriteLine($"\nChecking why U29 ({u29.UserName}) cannot take each shift of U30 ({u30.UserName}):");
+            var u30Asgs = solution.GetUserAllAssignments(30).Where(x => !x.IsOnCall).OrderBy(x => x.Date).ToList();
+            foreach (var a in u30Asgs)
+            {
+                var reasons = new List<string>();
+                if (u29.UnavailableDates.Any(d => d.Date == a.Date.Date)) reasons.Add("UnavailableDate");
+                if (u29.UnavailableShiftSlots.Any(s => s.Date.Date == a.Date.Date && s.ShiftLabel == a.ShiftLabel)) reasons.Add("UnavailableShiftSlot");
+                if (solution.HasAssignment(29, a.ShiftId, a.Date.Date)) reasons.Add("HasAssignment");
+                var existing = solution.GetUserAssignments(29, a.Date.Date).Select(x => x.ShiftLabel).ToList();
+                if (!DailyAssignmentRules.CanAddShift(existing, a.ShiftLabel, 1, true)) reasons.Add($"DailyMaxExceeded(existing={string.Join("+", existing)})");
+                if (AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(29), a.Date.Date, a.ShiftLabel, constraints)) reasons.Add("AdjacentConflict");
+                if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(solution, constraints, u29, a.Date.Date)) reasons.Add("MaxConsecutiveWorkday");
+                if (!DayShiftQuotaEligibility.CanAssignInCoverageFill(solution, constraints, u29, a.ShiftLabel, a.Date.Date)) reasons.Add("DayQuotaEligibility");
+                if (!OvertimeBalanceGuard.WouldPreserveManagerMix(solution, constraints, a.ShiftId, a.Date.Date, 30, 29)) reasons.Add("WouldViolateManagerMix");
 
-            _output.WriteLine($"\nChecking why U25 cannot take each shift of U16:");
+                _output.WriteLine($"  {a.Date:yyyy-MM-dd} {a.ShiftLabel}: {(reasons.Count == 0 ? "CAN TAKE!" : string.Join(", ", reasons))}");
+            }
             var u16Asgs = solution.GetUserAllAssignments(16).Where(x => !x.IsOnCall).OrderBy(x => x.Date).ToList();
             foreach (var a in u16Asgs)
             {
