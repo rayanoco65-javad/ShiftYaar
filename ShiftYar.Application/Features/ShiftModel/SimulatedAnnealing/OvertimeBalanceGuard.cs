@@ -83,7 +83,17 @@ public static class OvertimeBalanceGuard
                         MaxAllowed = ProjectPersonnelProductivityPriority.GetMaxAllowedSchedulingHours(u)
                     })
                     .Where(x => x.Worked + 8.0 <= x.MaxAllowed + 0.25)
-                    .OrderBy(x => x.Worked - x.Required)
+                    .OrderBy(x => x.Worked < x.Required ? 0 : 1)
+                    .ThenBy(x =>
+                    {
+                        if (!constraints.EnableOvertimeDistributionBySeniority || constraints.OvertimePreferenceType == 2)
+                            return x.Worked - x.Required;
+
+                        if (constraints.OvertimePreferenceType == 0)
+                            return -x.User.ExperienceYears;
+
+                        return x.User.ExperienceYears;
+                    })
                     .ToList();
 
                 if (candidates.Count == 0)
@@ -142,7 +152,7 @@ public static class OvertimeBalanceGuard
     }
 
     /// <summary>
-    /// متوازن‌سازی اضافه کاری میان پرسنلی که OvertimeConsent = true دارند و مهار سقف مجاز ۸۰ ساعت.
+    /// متوازن‌سازی اضافه کاری میان پرسنلی که OvertimeConsent = true دارند بر اساس سهمیه سابقه دپارتمان و مهار سقف مجاز ۸۰ ساعت.
     /// </summary>
     private static void EnforceConsentingOvertimeBalance(
         ShiftSolution solution,
@@ -154,7 +164,7 @@ public static class OvertimeBalanceGuard
         {
             var progressed = false;
 
-            var consentingStats = users
+            var rawStats = users
                 .Where(u => u.OvertimeConsent)
                 .Select(u =>
                 {
@@ -166,29 +176,39 @@ public static class OvertimeBalanceGuard
                 })
                 .ToList();
 
-            if (consentingStats.Count < 2)
+            if (rawStats.Count < 2)
             {
                 break;
             }
 
-            // مرتب‌سازی بر اساس اضافه‌کاری: بیشترین اضافه کاری (Donors) و کمترین اضافه کاری (Receivers)
+            var targetLookup = ComputeTargetOvertimeLookup(rawStats, constraints);
+
+            var consentingStats = rawStats
+                .Select(x => (x.User, x.Worked, x.Required, x.Overtime, x.MaxAllowed,
+                              TargetOvertime: targetLookup[x.User.UserId],
+                              Delta: x.Overtime - targetLookup[x.User.UserId]))
+                .ToList();
+
+            // مرتب‌سازی بر اساس انحراف از اضافه کاری هدف:
+            // Donors: بیشترین اضافه کاری مازاد بر سهمیه هدف (Delta > 0)
+            // Receivers: کمترین اضافه کاری نسبت به سهمیه هدف (Delta < 0)
             var donors = consentingStats
-                .OrderByDescending(x => x.Overtime)
+                .OrderByDescending(x => x.Delta)
                 .ToList();
 
             var receivers = consentingStats
-                .OrderBy(x => x.Overtime)
+                .OrderBy(x => x.Delta)
                 .ToList();
 
             var highestDonor = donors.First();
             var lowestReceiver = receivers.First();
 
-            LogAction?.Invoke($"Pass {pass}: HighestDonor={highestDonor.User.UserName} (OT={highestDonor.Overtime}), LowestReceiver={lowestReceiver.User.UserName} (OT={lowestReceiver.Overtime})");
+            LogAction?.Invoke($"Pass {pass}: HighestDonor={highestDonor.User.UserName} (OT={highestDonor.Overtime:F1}, Target={highestDonor.TargetOvertime:F1}, Delta={highestDonor.Delta:F1}), LowestReceiver={lowestReceiver.User.UserName} (OT={lowestReceiver.Overtime:F1}, Target={lowestReceiver.TargetOvertime:F1}, Delta={lowestReceiver.Delta:F1})");
 
-            // اگر اختلاف اضافه‌کاری دهنده و گیرنده کمتر از یک شیفت (حدود ۷ ساعت) باشد، وضعیت متعادل است
-            if (highestDonor.Overtime - lowestReceiver.Overtime < 7.0 && highestDonor.Worked <= highestDonor.MaxAllowed + 0.25)
+            // اگر اختلاف انحراف از هدف دهنده و گیرنده کمتر از یک شیفت (حدود ۷ ساعت) باشد، وضعیت متعادل است
+            if (highestDonor.Delta - lowestReceiver.Delta < 7.0 && highestDonor.Worked <= highestDonor.MaxAllowed + 0.25)
             {
-                LogAction?.Invoke("Break: Difference < 7.0 and worked <= max allowed");
+                LogAction?.Invoke("Break: Delta Difference < 7.0 and worked <= max allowed");
                 break;
             }
 
@@ -212,9 +232,8 @@ public static class OvertimeBalanceGuard
                         var shiftEffectiveHours = ProductivityWorkedHoursCalculator.ResolveCreditedHours(
                             lookup[asg.ShiftId], constraints.IsHoliday(asg.Date), donor.IncludedInProductivityPlan);
 
-                        // شرط کاهش شکاف و جلوگیری از معکوس شدن یا نوسان پینگ‌پونگی:
-                        // دهنده پس از کسر این شیفت باید اضافه‌کاری بیشتر یا مساوی گیرنده داشته باشد
-                        if (donorInfo.Overtime - shiftEffectiveHours < receiverInfo.Overtime + shiftEffectiveHours - 0.5)
+                        // شرط کاهش شکاف انحراف از هدف و جلوگیری از معکوس شدن یا نوسان پینگ‌پونگی:
+                        if (donorInfo.Delta - shiftEffectiveHours < receiverInfo.Delta + shiftEffectiveHours - 0.5)
                         {
                             continue;
                         }
@@ -235,7 +254,7 @@ public static class OvertimeBalanceGuard
                             continue;
                         }
 
-                        LogAction?.Invoke($"Transferred {asg.ShiftLabel} on {asg.Date:yyyy-MM-dd} from {donor.UserName} (OT={donorInfo.Overtime:F1}) to {receiver.UserName} (OT={receiverInfo.Overtime:F1}), shiftEff={shiftEffectiveHours:F1}");
+                        LogAction?.Invoke($"Transferred {asg.ShiftLabel} on {asg.Date:yyyy-MM-dd} from {donor.UserName} (OT={donorInfo.Overtime:F1}, Delta={donorInfo.Delta:F1}) to {receiver.UserName} (OT={receiverInfo.Overtime:F1}, Delta={receiverInfo.Delta:F1}), shiftEff={shiftEffectiveHours:F1}");
 
                         // انجام انتقال هوشمند شیفت
                         solution.UnlockSkeletonAssignment(donor.UserId, asg.ShiftId, asg.Date);
@@ -263,6 +282,50 @@ public static class OvertimeBalanceGuard
                 break;
             }
         }
+    }
+
+    private static Dictionary<int, double> ComputeTargetOvertimeLookup(
+        List<(UserConstraint User, double Worked, double Required, double Overtime, double MaxAllowed)> stats,
+        ShiftConstraints constraints)
+    {
+        var targetLookup = new Dictionary<int, double>();
+
+        foreach (var group in stats.GroupBy(x => x.User.SpecialtyId))
+        {
+            var members = group.ToList();
+            var totalOvertime = members.Sum(m => Math.Max(0.0, m.Overtime));
+
+            if (totalOvertime <= 0 || members.Count < 2)
+            {
+                foreach (var m in members)
+                {
+                    targetLookup[m.User.UserId] = 0.0;
+                }
+                continue;
+            }
+
+            var weights = members.ToDictionary(
+                m => m.User.UserId,
+                m => constraints.EnableOvertimeDistributionBySeniority && constraints.OvertimePreferenceType != 2
+                    ? ShiftSeniorityDistributionGuard.ResolveWeight(
+                        m.User.ExperienceYears,
+                        constraints.OvertimePreferenceType,
+                        constraints.SeniorityDistributionSlope)
+                    : 1.0);
+
+            var totalWeight = weights.Values.Sum();
+            if (totalWeight <= 0)
+            {
+                totalWeight = members.Count;
+            }
+
+            foreach (var m in members)
+            {
+                targetLookup[m.User.UserId] = totalOvertime * (weights[m.User.UserId] / totalWeight);
+            }
+        }
+
+        return targetLookup;
     }
 
     public static double CalculateHours(

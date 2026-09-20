@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using ShiftYar.Application.Common.Models.ResponseModel;
@@ -134,7 +134,10 @@ namespace ShiftYar.Application.Features.DepartmentModel.Services
             return ApiResponse<DepartmentSchedulingSettingsDtoGet>.Success(result, "تنظیمات با موفقیت ویرایش شد.");
         }
 
-        private bool ValidateWeights(DepartmentSchedulingSettingsDtoAdd dto, out string message)
+        public static bool ValidateSettings(DepartmentSchedulingSettingsDtoAdd dto, out string message) =>
+            ValidateWeights(dto, out message);
+
+        public static bool ValidateWeights(DepartmentSchedulingSettingsDtoAdd dto, out string message)
         {
             message = string.Empty;
             bool ok(double? v) => !v.HasValue || v.Value >= 0;
@@ -206,11 +209,19 @@ namespace ShiftYar.Application.Features.DepartmentModel.Services
             if (!ok(dto.NightShiftDistributionWeight)) { message = "وزن توزیع شیفت‌های شب بر اساس سابقه باید نامنفی باشد."; return false; }
             if (!ok(dto.SeniorityDistributionSlope)) { message = "شیب توزیع بر اساس سابقه باید نامنفی باشد."; return false; }
 
+            // اعتبارسنجی تنظیمات تمایل به اضافه کار بر اساس سابقه
+            if (dto.OvertimePreferenceType.HasValue && (dto.OvertimePreferenceType < 0 || dto.OvertimePreferenceType > 2))
+            {
+                message = "نوع تنظیمات اضافه کار باید بین 0 تا 2 باشد (0=علاقه‌مند به اضافه کار، 1=گریزان از اضافه کار، 2=خنثی).";
+                return false;
+            }
+            if (!ok(dto.OvertimeDistributionWeight)) { message = "وزن توزیع اضافه کار بر اساس سابقه باید نامنفی باشد."; return false; }
+
             return true;
         }
 
         /// <summary>
-        /// اعمال تنظیمات پیش‌فرض برای توزیع بر اساس سابقه (صبح/عصر/شب)
+        /// اعمال تنظیمات پیش‌فرض برای توزیع بر اساس سابقه (صبح/عصر/شب و اضافه کار)
         /// </summary>
         private void ApplyDefaultNightShiftDistributionSettings(DepartmentSchedulingSettingsDtoAdd dto)
         {
@@ -236,6 +247,13 @@ namespace ShiftYar.Application.Features.DepartmentModel.Services
                 dto.NightShiftDistributionWeight = 0.0;
             if (!dto.SeniorityDistributionSlope.HasValue)
                 dto.SeniorityDistributionSlope = 1.0;
+
+            if (!dto.EnableOvertimeDistributionBySeniority.HasValue)
+                dto.EnableOvertimeDistributionBySeniority = false;
+            if (!dto.OvertimePreferenceType.HasValue)
+                dto.OvertimePreferenceType = 2;
+            if (!dto.OvertimeDistributionWeight.HasValue)
+                dto.OvertimeDistributionWeight = 0.0;
         }
 
         private static void NormalizeMaxShiftsPerDay(DepartmentSchedulingSettingsDtoAdd dto)

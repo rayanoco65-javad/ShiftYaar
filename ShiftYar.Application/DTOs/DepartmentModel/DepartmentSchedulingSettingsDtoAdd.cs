@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
@@ -75,6 +75,12 @@ namespace ShiftYar.Application.DTOs.DepartmentModel
         public int? NightShiftDistributionType { get; set; }
         public double? NightShiftDistributionWeight { get; set; }
         public double? SeniorityDistributionSlope { get; set; }
+
+        // تنظیمات تمایل به اضافه کار و توزیع بر اساس سابقه
+        // نوع: 0=علاقه‌مند به اضافه کار (سابقه بیشتر)، 1=گریزان از اضافه کار (سابقه کمتر)، 2=خنثی
+        public bool? EnableOvertimeDistributionBySeniority { get; set; }
+        public int? OvertimePreferenceType { get; set; }
+        public double? OvertimeDistributionWeight { get; set; }
 
         /// <summary>امکان شیفت‌بندی ماه جاری (توسعه/تست)</summary>
         public bool? AllowCurrentMonthScheduling { get; set; }

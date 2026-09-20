@@ -1981,6 +1981,13 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     constraints.SeniorityDistributionSlope = deptSettingEarly.SeniorityDistributionSlope ?? 1.0;
                     constraints.SoftWeights.NightShiftDistributionBySeniorityWeight =
                         Math.Max(0.0, deptSettingEarly.NightShiftDistributionWeight ?? 0.0);
+
+                    constraints.EnableOvertimeDistributionBySeniority =
+                        deptSettingEarly.EnableOvertimeDistributionBySeniority ?? false;
+                    constraints.OvertimePreferenceType = deptSettingEarly.OvertimePreferenceType ?? 2;
+                    constraints.SoftWeights.OvertimeDistributionWeight =
+                        Math.Max(0.0, deptSettingEarly.OvertimeDistributionWeight ?? 1.0);
+
                     constraints.HardRules.EnforceProductivityHours = true;
 
                     constraints.SoftWeights.ShiftManagerRequirementWeight =
@@ -2878,6 +2885,18 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     {
                         constraints.SoftWeights.NightShiftDistributionBySeniorityWeight =
                             Math.Max(0.0, deptSetting.NightShiftDistributionWeight.Value);
+                    }
+
+                    constraints.EnableOvertimeDistributionBySeniority =
+                        deptSetting.EnableOvertimeDistributionBySeniority ?? constraints.EnableOvertimeDistributionBySeniority;
+                    if (deptSetting.OvertimePreferenceType.HasValue)
+                    {
+                        constraints.OvertimePreferenceType = deptSetting.OvertimePreferenceType.Value;
+                    }
+                    if (deptSetting.OvertimeDistributionWeight.HasValue)
+                    {
+                        constraints.SoftWeights.OvertimeDistributionWeight =
+                            Math.Max(0.0, deptSetting.OvertimeDistributionWeight.Value);
                     }
 
                     constraints.HardRules.EnforceProductivityHours = true;

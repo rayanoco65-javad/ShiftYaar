@@ -689,15 +689,25 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     continue;
                 }
 
-                penalty += excess * excess;
+                var seniorityFactor = 1.0;
+                if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType != 2)
+                {
+                    var weight = ShiftSeniorityDistributionGuard.ResolveWeight(
+                        user.ExperienceYears,
+                        _constraints.OvertimePreferenceType,
+                        _constraints.SeniorityDistributionSlope);
+                    seniorityFactor = Math.Max(0.2, weight);
+                }
+
+                penalty += (excess * excess) / seniorityFactor;
                 if (excess > 10)
                 {
-                    penalty += excess * 8;
+                    penalty += (excess * 8) / seniorityFactor;
                 }
 
                 if (excess > 15)
                 {
-                    penalty += excess * 12;
+                    penalty += (excess * 12) / seniorityFactor;
                 }
             }
 

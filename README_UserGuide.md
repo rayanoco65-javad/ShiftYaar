@@ -103,9 +103,19 @@
   "fairShiftCountBalanceWeight": 0.5,
   "extraShiftRotationWeight": 0.8,
   "shiftLabelBalanceWeight": 0.6,
-  "fairnessLookbackMonths": 2
+  "fairnessLookbackMonths": 2,
+  // Overtime Seniority Distribution
+  "enableOvertimeDistributionBySeniority": true,
+  "overtimePreferenceType": 0, // 0=OvertimeFriendly, 1=OvertimeAvoiding, 2=Neutral
+  "overtimeDistributionWeight": 1.0
 }
 ```
+- توزیع هوشمند اضافه‌کار بر اساس سابقه خدمت (سنوات):
+  - `overtimePreferenceType`:
+    - `0` (OvertimeFriendly): پرسنل با سابقه بیشتر، اضافه‌کار بیشتری دریافت می‌کنند.
+    - `1` (OvertimeAvoiding): پرسنل با سابقه کمتر، اضافه‌کار بیشتری دریافت می‌کنند تا با سابقه‌ها در سقف موظفی استراحت داشته باشند.
+    - `2` (Neutral): اضافه‌کار به طور مساوی و یکنواخت بین متقاضیان توزیع می‌شود.
+  - پرسنلی که رضایت به اضافه‌کار ندارند (`OvertimeConsent = false`)، تحت هر شرایطی از دریافت اضافه‌کار معاف شده و شیفت‌های مازاد به متقاضیان منتقل می‌شود.
 - منطق اولویت اعمال مقادیر عددی هنگام شیفت‌بندی: Per-user → Department → Default
   - اگر در بدنه درخواست `optimize` برای کاربر مقدار داده شود، همان اعمال می‌شود.
   - در غیر این صورت اگر در تنظیمات دپارتمان مقدار ثبت شده و `Enforce*` مربوط روشن باشد، مقدار دپارتمان اعمال می‌شود.

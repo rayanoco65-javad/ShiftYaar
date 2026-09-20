@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using ShiftYar.Application.Interfaces.Persistence;
@@ -59,7 +59,8 @@ namespace ShiftYar.Infrastructure
                             maxRetryDelay: TimeSpan.FromSeconds(10), // فاصله تلاش مجدد
                             errorNumbersToAdd: null // اگر شماره خطای خاصی مدنظر باشه
                         );
-                    }));
+                    })
+                .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning)));
         }
 
         private static void AddRepositories(this IServiceCollection services)

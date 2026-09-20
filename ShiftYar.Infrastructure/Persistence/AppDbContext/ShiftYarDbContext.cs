@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using ShiftYar.Domain.Entities.AddressModel;
 using ShiftYar.Domain.Entities.DepartmentModel;
 using ShiftYar.Domain.Entities.HospitalModel;
@@ -62,6 +62,12 @@ namespace ShiftYar.Infrastructure.Persistence.AppDbContext
         public DbSet<SmsTemplate> SmsTemplates { get; set; }
         public DbSet<AlgorithmSettings> AlgorithmSettings { get; set; }
         public DbSet<SchedulingJobRecord> SchedulingJobRecords { get; set; }
+
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        {
+            optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+            base.OnConfiguring(optionsBuilder);
+        }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -51,6 +51,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
 
         /// <summary>شیب مشترک وزن‌دهی سابقه برای صبح/عصر/شب.</summary>
         public double SeniorityDistributionSlope { get; set; } = 1.0;
+
+        /// <summary>فعال‌سازی توزیع نرم اضافه کار بر اساس سابقه و تمایل بخش.</summary>
+        public bool EnableOvertimeDistributionBySeniority { get; set; }
+
+        /// <summary>نوع ترجیح اضافه کار: ۰=علاقه‌مند (سابقه بیشتر)، ۱=گریزان (سابقه کمتر)، ۲=خنثی.</summary>
+        public int OvertimePreferenceType { get; set; } = 2;
 
         public GlobalConstraints GlobalConstraints { get; set; } = new GlobalConstraints();
         // قوانین قطعی (سراسری برای همه دپارتمان‌ها)
@@ -350,6 +356,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public double ProductivityOvertimeWeight { get; set; } = 6.0; // وزن جریمه مازاد ساعات موظفی
         public double ProductivityShortfallWeight { get; set; } = 8.0; // وزن جریمه کمبود ساعات موظفی
         public double ShiftManagerRequirementWeight { get; set; } = 2.0; // وزن الزام ترکیب مسئول شیفت
+        public double OvertimeDistributionWeight { get; set; } = 1.0; // وزن توزیع اضافه کار بر اساس سابقه
 
         public static SoftRuleWeights CreateDefault()
         {

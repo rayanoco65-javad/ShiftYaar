@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -68,6 +68,14 @@ namespace ShiftYar.Domain.Enums.ShiftModel
             NightFriendly = 0,  // شب‌دوست - باقیمانده شیفت‌های شب به پرسنل با سابقه بیشتر
             NightAvoiding = 1,   // شب‌گریز - باقیمانده شیفت‌های شب به پرسنل با سابقه کمتر
             Neutral = 2          // خنثی - بدون ترجیح خاص
+        }
+
+        // انواع تنظیمات تمایل به اضافه کار و توزیع بر اساس سابقه
+        public enum OvertimePreferenceType
+        {
+            OvertimeFriendly = 0, // علاقه‌مند به اضافه کار - سابقه بیشتر = اضافه کار بیشتر
+            OvertimeAvoiding = 1, // گریزان از اضافه کار - سابقه کمتر = اضافه کار بیشتر (محافظت از با‌سابقه‌ها)
+            Neutral = 2           // خنثی - توزیع مساوی اضافه کار
         }
     }
 }

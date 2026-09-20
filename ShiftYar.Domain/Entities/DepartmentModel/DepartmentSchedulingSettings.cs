@@ -1,4 +1,4 @@
-﻿using ShiftYar.Domain.Entities.BaseModel;
+using ShiftYar.Domain.Entities.BaseModel;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -79,6 +79,11 @@ namespace ShiftYar.Domain.Entities.DepartmentModel
         public int? NightShiftDistributionType { get; set; } // 0=سابقه بیشتر، 1=سابقه کمتر، 2=خنثی
         public double? NightShiftDistributionWeight { get; set; }
         public double? SeniorityDistributionSlope { get; set; } // شیب مشترک برای هر سه نوع (پیش‌فرض: 1.0)
+
+        // تنظیمات تمایل به اضافه کار و توزیع بر اساس سابقه
+        public bool? EnableOvertimeDistributionBySeniority { get; set; } // فعال‌سازی توزیع اضافه کار بر اساس سابقه
+        public int? OvertimePreferenceType { get; set; } // نوع تنظیمات اضافه کار: 0=علاقه‌مند، 1=گریزان، 2=خنثی
+        public double? OvertimeDistributionWeight { get; set; } // وزن توزیع اضافه کار بر اساس سابقه
 
         /// <summary>
         /// امکان شیفت‌بندی ماه جاری — فقط برای توسعه/تست.

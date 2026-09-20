@@ -1,4 +1,4 @@
-﻿I'll add a comprehensive Markdown guide file with step-by-step operations and explicit call sequences (controllers, services, methods) to the repository.
+I'll add a comprehensive Markdown guide file with step-by-step operations and explicit call sequences (controllers, services, methods) to the repository.
 
 [3 tools called]
 
@@ -73,7 +73,7 @@
 - قوانین قطعی (HardRules):
   - ForbidUnavailableDates: ممنوعیت اختصاص شیفت در تاریخ‌های غیرمجاز کاربر
   - ForbidDuplicateDailyAssignments: هر کاربر حداکثر یک شیفت در روز
-  - EnforceMaxShiftsPerDay: اعمال سقف روزانه
+  - EnforceMaxShiftsPerDay: اعمال سقف روزانه (در صورت مقدار ۱، سقف شیفت بر اساس شبانه‌روز تقویم هجری شمسی از ۰۰:۰۰ تا ۲۳:۵۹ با ممنوعیت کامل لانگ‌شیفت صبح+عصر اعمال می‌شود)
   - EnforceMinRestDays: حداقل فاصله استراحت
   - EnforceMaxConsecutiveShifts: حداکثر شیفت‌های متوالی
   - EnforceWeeklyMaxShifts: سقف هفتگی
@@ -115,7 +115,8 @@
 - فقط `Approved` در `LoadConstraintsAsync` اعمال می‌شوند.
 - OFF کل‌روز یا OFF صبح → علاوه بر همان روز/شیفت، **شب روز قبل** هم در `UnavailableShiftSlots` مسدود می‌شود.
 - حضور شیفت‌مشخص → انتساب اجباری (`ApprovedRequestGuard`).
-- تأیید حضور بیش از ظرفیت شیفت/تخصص در `ShiftRequestService` رد می‌شود.
+- تأیید حضور بیش از ظرفیت شیفت/تخصص در `ShiftRequestService` رد می‌شود (`ApprovedOnShiftCapacityValidator`).
+- تأیید عدم‌حضور (مرخصی روزانه) بیش از سقف مجاز روزانه در `ShiftRequestService` رد می‌شود (`ApprovedLeaveCapacityValidator`). سقف مجاز روزانه بر اساس تفاضل کل پرسنل فعال تخصص و حداقل پرسنل مورد نیاز (مجموع نیاز شیفت‌های امروز + استراحت اجباری شیفت شب روز قبل) تعیین می‌گردد.
 
 ## 5) اجرای شیفت‌بندی
 

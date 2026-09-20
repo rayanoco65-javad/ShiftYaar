@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ShiftYar.Application.Common.Models.ResponseModel;
 using ShiftYar.Application.DTOs.DepartmentModel;
@@ -125,6 +125,13 @@ namespace ShiftYar.Api.Controllers.DepartmentModel
             if (dto.SeniorityDistributionSlope.HasValue)
                 dtoAdd.SeniorityDistributionSlope = dto.SeniorityDistributionSlope;
 
+            if (dto.EnableOvertimeDistributionBySeniority.HasValue)
+                dtoAdd.EnableOvertimeDistributionBySeniority = dto.EnableOvertimeDistributionBySeniority;
+            if (dto.OvertimePreferenceType.HasValue)
+                dtoAdd.OvertimePreferenceType = dto.OvertimePreferenceType;
+            if (dto.OvertimeDistributionWeight.HasValue)
+                dtoAdd.OvertimeDistributionWeight = dto.OvertimeDistributionWeight;
+
             var result = await _service.UpdateSettingAsync(id, dtoAdd);
             if (!result.IsSuccess) return BadRequest(result);
             return Ok(result);
@@ -176,6 +183,9 @@ namespace ShiftYar.Api.Controllers.DepartmentModel
             NightShiftDistributionType = s.NightShiftDistributionType,
             NightShiftDistributionWeight = s.NightShiftDistributionWeight,
             SeniorityDistributionSlope = s.SeniorityDistributionSlope,
+            EnableOvertimeDistributionBySeniority = s.EnableOvertimeDistributionBySeniority,
+            OvertimePreferenceType = s.OvertimePreferenceType,
+            OvertimeDistributionWeight = s.OvertimeDistributionWeight,
             AllowCurrentMonthScheduling = s.AllowCurrentMonthScheduling,
             AllowMonthlyRescheduleWithAutoDelete = s.AllowMonthlyRescheduleWithAutoDelete,
             AllowEveningAfterNightShift = s.AllowEveningAfterNightShift,
@@ -195,7 +205,7 @@ namespace ShiftYar.Api.Controllers.DepartmentModel
     }
 
     /// <summary>
-    /// DTO تنظیمات توزیع صبح/عصر/شب بر اساس سابقه.
+    /// DTO تنظیمات توزیع صبح/عصر/شب و اضافه کار بر اساس سابقه.
     /// نوع: 0=اولویت سابقه بیشتر، 1=اولویت سابقه کمتر، 2=خنثی.
     /// </summary>
     public class ShiftSeniorityDistributionSettingsDto
@@ -213,5 +223,9 @@ namespace ShiftYar.Api.Controllers.DepartmentModel
         public double? NightShiftDistributionWeight { get; set; }
 
         public double? SeniorityDistributionSlope { get; set; }
+
+        public bool? EnableOvertimeDistributionBySeniority { get; set; }
+        public int? OvertimePreferenceType { get; set; }
+        public double? OvertimeDistributionWeight { get; set; }
     }
 }

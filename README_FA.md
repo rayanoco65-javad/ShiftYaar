@@ -88,6 +88,7 @@ Resolver مربوط: `ProductivityRequiredHoursResolver` — در `ShiftScheduli
 | `ShiftYar.Application/Features/ProductivityModel/README.md` | مستند انگلیسی کوتاه. |
 | `ShiftYar.Application/Common/Utilities/ProductivityRequiredHoursResolver.cs` | تعیین موظفی ماهانه (خودکار یا `MaxProductivityRequiredHours` دستی). |
 | `ShiftYar.Application/Common/Utilities/ApprovedOffNightBeforeRules.cs` | OFF تأییدشده صبح/کل‌روز → مسدود کردن شب روز قبل. |
+| `ShiftYar.Application/Common/Utilities/ApprovedLeaveCapacityValidator.cs` | اعتبارسنجی سقف مجاز مرخصی روزانه بر اساس تراز پرسنل و نیاز شیفت‌ها. |
 | `ShiftYar.Application/Features/ShiftModel/SimulatedAnnealing/ProjectPersonnelProductivityPriority.cs` | اولویت غیرطرحی/طرحی در پر کردن موظفی. |
 | `README_FA.md` | این مستند فارسی. |
 
