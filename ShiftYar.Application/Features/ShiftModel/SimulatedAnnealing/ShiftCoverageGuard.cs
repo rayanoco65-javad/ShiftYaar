@@ -55,7 +55,8 @@ public static class ShiftCoverageGuard
     private static void FillMissingCoverage(
         ShiftSolution solution,
         ShiftConstraints constraints,
-        bool reserveUnmetOnSlots)
+        bool reserveUnmetOnSlots,
+        bool allowEmergencyRelaxation = false)
     {
         var dates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
             .Select(i => constraints.StartDate.Date.AddDays(i))
@@ -69,7 +70,7 @@ public static class ShiftCoverageGuard
                 {
                     foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
                     {
-                        FillSpecialty(solution, constraints, shiftReq, date, specialtyReq, reserveUnmetOnSlots);
+                        FillSpecialty(solution, constraints, shiftReq, date, specialtyReq, reserveUnmetOnSlots, allowEmergencyRelaxation);
                     }
                 }
             }
@@ -203,7 +204,7 @@ public static class ShiftCoverageGuard
     {
         for (var pass = 0; pass < 5; pass++)
         {
-            FillMissingCoverage(solution, constraints, reserveUnmetOnSlots: false);
+            FillMissingCoverage(solution, constraints, reserveUnmetOnSlots: false, allowEmergencyRelaxation: false);
             if (GetUnderCapacityViolations(solution, constraints).Count == 0)
             {
                 return;
@@ -218,6 +219,22 @@ public static class ShiftCoverageGuard
         if (maxDaily >= 2)
         {
             EmergencyFillMissingCoverageWithDoubleShift(solution, constraints);
+        }
+
+        if (GetUnderCapacityViolations(solution, constraints).Count == 0)
+        {
+            return;
+        }
+
+        // فاز جبران اضطراری: در صورتی که به دلیل بن‌بست‌های ترکیبیاتی یا سقف روزهای متوالی
+        // هنوز کسری وجود داشته باشد، با ۱ روز انعطاف در سقف متوالی و سهمیه‌های مازاد جای خالی پر می‌شود.
+        for (var pass = 0; pass < 3; pass++)
+        {
+            FillMissingCoverage(solution, constraints, reserveUnmetOnSlots: false, allowEmergencyRelaxation: true);
+            if (GetUnderCapacityViolations(solution, constraints).Count == 0)
+            {
+                return;
+            }
         }
     }
 
@@ -619,7 +636,8 @@ public static class ShiftCoverageGuard
         ShiftRequirement shiftReq,
         DateTime date,
         SpecialtyRequirement specialtyReq,
-        bool reserveUnmetOnSlots)
+        bool reserveUnmetOnSlots,
+        bool allowEmergencyRelaxation = false)
     {
         var day = specialtyReq.ForDay(constraints.IsHoliday(date));
         var needed = day.RequiredTotalCount;
@@ -648,11 +666,11 @@ public static class ShiftCoverageGuard
         var candidates = constraints.UserConstraints
             .Where(u => u.IsActive && u.SpecialtyId == specialtyReq.SpecialtyId)
             .Where(u => ShiftEligibilityResolver.MayTakeLabelOnDate(u, shiftReq.ShiftLabel, date))
-            .Where(u => IsEligibleForCoverageFill(solution, constraints, u, shiftReq.ShiftLabel, date))
+            .Where(u => IsEligibleForCoverageFill(solution, constraints, u, shiftReq.ShiftLabel, date, allowEmergencyRelaxation))
             .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
             .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
             .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
-            .Where(u => CanAcceptShift(solution, constraints, u, date, shiftReq.ShiftLabel))
+            .Where(u => CanAcceptShift(solution, constraints, u, date, shiftReq.ShiftLabel, allowEmergencyRelaxation))
             .OrderBy(u => CoveragePriority(solution, constraints, u, date, shiftReq.ShiftLabel))
             .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
             .ToList();
@@ -665,7 +683,7 @@ public static class ShiftCoverageGuard
             }
 
             // ممکن است صبح/عصر با قوانین روزانه تداخل داشته باشد — دوباره چک
-            if (!CanAcceptShift(solution, constraints, user, date, shiftReq.ShiftLabel))
+            if (!CanAcceptShift(solution, constraints, user, date, shiftReq.ShiftLabel, allowEmergencyRelaxation))
             {
                 continue;
             }
@@ -676,7 +694,132 @@ public static class ShiftCoverageGuard
 
         if (missing > 0)
         {
-            TryFillByRelievingAdjacentWorkDay(solution, constraints, shiftReq, date, specialtyReq, ref missing);
+            TryFillBySameDayShiftSwap(solution, constraints, shiftReq, date, specialtyReq, ref missing, allowEmergencyRelaxation);
+        }
+
+        if (missing > 0)
+        {
+            TryFillByRelievingAdjacentWorkDay(solution, constraints, shiftReq, date, specialtyReq, ref missing, allowEmergencyRelaxation);
+        }
+    }
+
+    /// <summary>
+    /// جبران کسری از طریق جابجایی درون‌روزی:
+    /// اگر شیفت فعلی (مثلاً عصر) کسری دارد، بررسی می‌کند آیا فردی در شیفت دیگر همان روز (مثلاً صبح)
+    /// می‌تواند به این شیفت منتقل شود و جای او در شیفت قبلی با پرسنل آزاد دیگری پر شود.
+    /// </summary>
+    private static void TryFillBySameDayShiftSwap(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        ShiftRequirement shiftReq,
+        DateTime date,
+        SpecialtyRequirement specialtyReq,
+        ref int missing,
+        bool allowEmergencyRelaxation = false)
+    {
+        if (missing <= 0) return;
+
+        // فقط بین شیفت‌های روزانه (صبح و عصر) جابجایی انجام می‌شود؛ شیفت شب استراحت‌های ۱۲ ساعته متفاوتی دارد
+        if (shiftReq.ShiftLabel != ShiftLabel.Morning && shiftReq.ShiftLabel != ShiftLabel.Evening)
+        {
+            return;
+        }
+
+        var otherLabel = shiftReq.ShiftLabel == ShiftLabel.Evening ? ShiftLabel.Morning : ShiftLabel.Evening;
+        var otherShiftReq = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftLabel == otherLabel);
+        if (otherShiftReq == null) return;
+
+        var otherAssignments = solution.GetShiftAssignments(otherShiftReq.ShiftId, date)
+            .Where(a => !a.IsOnCall)
+            .Where(a => constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)?.SpecialtyId == specialtyReq.SpecialtyId)
+            .ToList();
+
+        foreach (var asg in otherAssignments)
+        {
+            if (missing <= 0) break;
+
+            var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == asg.UserId);
+            if (u == null) continue;
+
+            // پرسنل دارای درخواست تأییدشده یا حضور اجباری نباید جابجا شوند
+            if (ApprovedRequestGuard.IsApprovedRequiredSlot(u, asg.Date, asg.ShiftLabel, asg.ShiftId)
+                || u.RequiredPresenceDates.Any(d => d.Date == asg.Date.Date))
+            {
+                continue;
+            }
+
+            // بررسی صلاحیت کاربر u برای رفتن به shiftReq.ShiftLabel
+            if (!ShiftEligibilityResolver.MayTakeLabelOnDate(u, shiftReq.ShiftLabel, date)
+                || !IsEligibleForCoverageFill(solution, constraints, u, shiftReq.ShiftLabel, date, allowEmergencyRelaxation)
+                || u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
+            {
+                continue;
+            }
+
+            // بررسی دهنده (Donor) v برای پر کردن جای خالی u در otherLabel
+            var donors = constraints.UserConstraints
+                .Where(v => v.UserId != u.UserId && v.IsActive && v.SpecialtyId == specialtyReq.SpecialtyId)
+                .Where(v => ShiftEligibilityResolver.MayTakeLabelOnDate(v, otherLabel, date))
+                .Where(v => IsEligibleForCoverageFill(solution, constraints, v, otherLabel, date, allowEmergencyRelaxation))
+                .Where(v => !v.UnavailableDates.Any(d => d.Date == date.Date))
+                .Where(v => !v.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == otherLabel))
+                .Where(v => !solution.HasAssignment(v.UserId, otherShiftReq.ShiftId, date))
+                .ToList();
+
+            foreach (var v in donors)
+            {
+                // شبیه‌سازی جابجایی
+                var backup = solution.Clone();
+                var isSkel = solution.IsLockedSkeleton(u.UserId, asg.ShiftId, asg.Date);
+                if (isSkel)
+                {
+                    solution.UnlockSkeletonAssignment(u.UserId, asg.ShiftId, asg.Date);
+                }
+                solution.RemoveAssignment(u.UserId, asg.ShiftId, asg.Date, force: true);
+
+                // بررسی آیا v می‌تواند otherLabel را در date بپذیرد
+                if (!CanAcceptShift(solution, constraints, v, date, otherLabel, allowEmergencyRelaxation))
+                {
+                    RestoreFromBackup(solution, backup);
+                    continue;
+                }
+
+                // بررسی آیا u می‌تواند shiftReq.ShiftLabel را در date بپذیرد (با توجه به اینکه شیفت قبلی‌اش برداشته شده)
+                if (!CanAcceptShift(solution, constraints, u, date, shiftReq.ShiftLabel, allowEmergencyRelaxation))
+                {
+                    RestoreFromBackup(solution, backup);
+                    continue;
+                }
+
+                // اعمال v روی otherLabel
+                solution.AddAssignment(v.UserId, otherShiftReq.ShiftId, date, otherLabel, isOnCall: false, isSkeleton: isSkel);
+                if (isSkel)
+                {
+                    SkeletonAssignmentGuard.LockSlotManagerAssignments(solution, constraints, otherShiftReq, asg.Date);
+                }
+
+                // اعمال u روی shiftReq
+                solution.AddAssignment(u.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall: false);
+
+                // بررسی صحت ترکیب مسئول در هر دو شیفت در صورت الزام
+                if (ShiftManagerRules.RequiresAnyManager(otherShiftReq))
+                {
+                    var (reqTot, reqL1) = ShiftManagerRules.GetRequirement(otherShiftReq);
+                    var assignees = solution.GetShiftAssignments(otherShiftReq.ShiftId, date)
+                        .Where(a => !a.IsOnCall)
+                        .Select(a => constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId))
+                        .Where(x => x != null)
+                        .ToList();
+                    if (assignees.Count(ShiftManagerRules.IsLevel1) < reqL1 || assignees.Count(ShiftManagerRules.IsManager) < reqTot)
+                    {
+                        RestoreFromBackup(solution, backup);
+                        continue;
+                    }
+                }
+
+                missing--;
+                break; // جایگزینی موفق برای این اسلات، به سراغ بعدی
+            }
         }
     }
 
@@ -686,14 +829,15 @@ public static class ShiftCoverageGuard
         ShiftRequirement shiftReq,
         DateTime date,
         SpecialtyRequirement specialtyReq,
-        ref int missing)
+        ref int missing,
+        bool allowEmergencyRelaxation = false)
     {
         if (missing <= 0) return;
 
         var potentialUsers = constraints.UserConstraints
             .Where(u => u.IsActive && u.SpecialtyId == specialtyReq.SpecialtyId)
             .Where(u => ShiftEligibilityResolver.MayTakeLabelOnDate(u, shiftReq.ShiftLabel, date))
-            .Where(u => IsEligibleForCoverageFill(solution, constraints, u, shiftReq.ShiftLabel, date))
+            .Where(u => IsEligibleForCoverageFill(solution, constraints, u, shiftReq.ShiftLabel, date, allowEmergencyRelaxation))
             .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
             .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
             .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
@@ -731,11 +875,11 @@ public static class ShiftCoverageGuard
                     var donors = constraints.UserConstraints
                         .Where(v => v.UserId != u.UserId && v.IsActive && v.SpecialtyId == specialtyReq.SpecialtyId)
                         .Where(v => ShiftEligibilityResolver.MayTakeLabelOnDate(v, asg.ShiftLabel, asg.Date))
-                        .Where(v => IsEligibleForCoverageFill(solution, constraints, v, asg.ShiftLabel, asg.Date))
+                        .Where(v => IsEligibleForCoverageFill(solution, constraints, v, asg.ShiftLabel, asg.Date, allowEmergencyRelaxation))
                         .Where(v => !v.UnavailableDates.Any(d => d.Date == asg.Date.Date))
                         .Where(v => !v.UnavailableShiftSlots.Any(s => s.Date.Date == asg.Date.Date && s.ShiftLabel == asg.ShiftLabel))
                         .Where(v => !solution.HasAssignment(v.UserId, asg.ShiftId, asg.Date))
-                        .Where(v => CanAcceptShift(solution, constraints, v, asg.Date, asg.ShiftLabel))
+                        .Where(v => CanAcceptShift(solution, constraints, v, asg.Date, asg.ShiftLabel, allowEmergencyRelaxation))
                         .ToList();
 
                     foreach (var v in donors)
@@ -769,28 +913,33 @@ public static class ShiftCoverageGuard
                             SkeletonAssignmentGuard.LockSlotManagerAssignments(solution, constraints, targetShiftReq, asg.Date);
                         }
 
-                        if (CanAcceptShift(solution, constraints, u, date, shiftReq.ShiftLabel))
+                        if (CanAcceptShift(solution, constraints, u, date, shiftReq.ShiftLabel, allowEmergencyRelaxation))
                         {
                             solution.AddAssignment(u.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall: false);
                             missing--;
-                            return;
+                            break; // با موفقیت پر شد، حلقه donors پایان یابد
                         }
 
-                        solution.Assignments.Clear();
-                        foreach (var a in backup.Assignments.Values)
-                        {
-                            solution.AddAssignment(a.UserId, a.ShiftId, a.Date, a.ShiftLabel, a.IsOnCall, a.IsSkeleton);
-                        }
-                        solution.LockedSkeletonAssignments.Clear();
-                        foreach (var l in backup.LockedSkeletonAssignments)
-                        {
-                            solution.LockedSkeletonAssignments.Add(l);
-                        }
-                        solution.SyncSkeletonFlagsFromLockSet();
+                        RestoreFromBackup(solution, backup);
                     }
                 }
             }
         }
+    }
+
+    private static void RestoreFromBackup(ShiftSolution solution, ShiftSolution backup)
+    {
+        solution.Assignments.Clear();
+        foreach (var a in backup.Assignments.Values)
+        {
+            solution.AddAssignment(a.UserId, a.ShiftId, a.Date, a.ShiftLabel, a.IsOnCall, a.IsSkeleton);
+        }
+        solution.LockedSkeletonAssignments.Clear();
+        foreach (var l in backup.LockedSkeletonAssignments)
+        {
+            solution.LockedSkeletonAssignments.Add(l);
+        }
+        solution.SyncSkeletonFlagsFromLockSet();
     }
 
     private static int CoveragePriority(
@@ -951,7 +1100,8 @@ public static class ShiftCoverageGuard
         ShiftConstraints constraints,
         UserConstraint user,
         DateTime date,
-        ShiftLabel label)
+        ShiftLabel label,
+        bool allowConsecutiveRelaxation = false)
     {
         // بررسی مجوز نوع شیفت با آگاهی از تاریخ:
         // کاربر فقط در صورتی می‌تواند این نوع شیفت را بگیرد که یا مجوز کلی داشته باشد
@@ -989,10 +1139,17 @@ public static class ShiftCoverageGuard
             return false;
         }
 
-        if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(
-                solution, constraints, user, date))
+        if (constraints.HardRules.EnforceMaxConsecutiveShifts
+            && user.ShiftType != ShiftTypes.FixedShift
+            && !MaxConsecutiveWorkdayRules.IsApprovedOnWorkDay(user, date))
         {
-            return false;
+            var workDates = MaxConsecutiveWorkdayRules.GetCountableWorkDates(solution, user);
+            var projected = MaxConsecutiveWorkdayRules.ProjectedRunIfWorkDayAdded(workDates, date);
+            var maxAllowed = allowConsecutiveRelaxation ? user.MaxConsecutiveShifts + 1 : user.MaxConsecutiveShifts;
+            if (projected > maxAllowed)
+            {
+                return false;
+            }
         }
 
         if (label == ShiftLabel.Night && user.MinDaysBetweenNightShifts > 0)
@@ -1015,8 +1172,14 @@ public static class ShiftCoverageGuard
         ShiftConstraints constraints,
         UserConstraint user,
         ShiftLabel label,
-        DateTime date)
+        DateTime date,
+        bool allowQuotaRelaxation = false)
     {
+        if (allowQuotaRelaxation)
+        {
+            return true;
+        }
+
         return label switch
         {
             ShiftLabel.Night => NightQuotaEligibility.CanAssignInCoverageFill(

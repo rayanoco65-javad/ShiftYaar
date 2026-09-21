@@ -453,6 +453,95 @@ public class ShiftCoverageGuardTests
         Assert.Empty(violations);
     }
 
+    [Fact]
+    public void ForceFillAllMissingCoverage_FillsDeficitViaSameDaySwap()
+    {
+        var date = new DateTime(2026, 9, 9);
+        var u1 = MakeUser(1); // On Morning, can work Evening
+        var u2 = MakeUser(2); // Can only work Morning (e.g. rested after night on date-2)
+        var users = new List<UserConstraint> { u1, u2 };
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = date,
+            EndDate = date,
+            UserConstraints = users,
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning, required: 1),
+                Shift(2, ShiftLabel.Evening, required: 1)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 }
+        };
+
+        // User 2 cannot take Evening due to permissions
+        u2.AllowedShiftLabels = [ShiftLabel.Morning];
+
+        // Solution currently has u1 on Morning, Evening is EMPTY
+        var solution = new ShiftSolution();
+        solution.AddAssignment(u1.UserId, 1, date, ShiftLabel.Morning, isOnCall: false);
+
+        // Before: Evening has deficit
+        var beforeUnder = ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints);
+        Assert.Single(beforeUnder);
+
+        // Run ForceFillAllMissingCoverage
+        ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
+
+        // After: Evening and Morning are both filled (u1 moved to Evening, u2 took Morning)
+        var afterUnder = ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints);
+        Assert.Empty(afterUnder);
+
+        Assert.True(solution.HasAssignment(u1.UserId, 2, date)); // u1 on Evening
+        Assert.True(solution.HasAssignment(u2.UserId, 1, date)); // u2 on Morning
+    }
+
+    [Fact]
+    public void ForceFillAllMissingCoverage_FillsEmergencyDeficit_WhenConsecutiveRelaxationNeeded()
+    {
+        var start = new DateTime(2026, 9, 6);
+        var end = new DateTime(2026, 9, 9);
+        var u1 = MakeUser(1);
+        u1.MaxConsecutiveShifts = 3; // Worked 3 days already: 6, 7, 8
+        var users = new List<UserConstraint> { u1 };
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = end,
+            UserConstraints = users,
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning, required: 1)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceMaxConsecutiveShifts = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 }
+        };
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(u1.UserId, 1, new DateTime(2026, 9, 6), ShiftLabel.Morning, false);
+        solution.AddAssignment(u1.UserId, 1, new DateTime(2026, 9, 7), ShiftLabel.Morning, false);
+        solution.AddAssignment(u1.UserId, 1, new DateTime(2026, 9, 8), ShiftLabel.Morning, false);
+        // Date 2026-09-09 is empty and u1 is at 3 consecutive days
+
+        ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
+
+        var violations = ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints);
+        Assert.Empty(violations);
+        Assert.True(solution.HasAssignment(u1.UserId, 1, new DateTime(2026, 9, 9)));
+    }
+
     private static UserConstraint MakeUser(int id) => new()
     {
         UserId = id,

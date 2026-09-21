@@ -908,62 +908,90 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 MaxIterationsWithoutImprovement = saParamsFromDb.MaxIterationsWithoutImprovement
             };
 
-            var scheduler = new SimulatedAnnealingScheduler(constraints, parameters);
             EnsureNightQuotaRequestsFeasibleOrThrow(constraints);
             EnsureConflictingApprovedRequestsOrThrow(constraints);
-            var solution = await RunCpuBoundWithTimeoutAsync(
-                () => scheduler.Optimize(cancellationToken),
-                TimeSpan.FromMinutes(4),
-                cancellationToken);
-            var statistics = scheduler.GetStatistics();
 
-            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
-            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
-            ExactNightQuotaGuard.Enforce(solution, constraints);
+            const int maxAttempts = 3;
+            ShiftSolution? solution = null;
+            AlgorithmStatistics? statistics = null;
+            InvalidOperationException? lastCoverageException = null;
 
-            scheduler.PerformFinalManagerMixRepairSweep(solution);
-
-            if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
+            for (var attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
-                ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
-                ExactNightQuotaGuard.Enforce(solution, constraints);
+                try
+                {
+                    var scheduler = new SimulatedAnnealingScheduler(constraints, parameters);
+                    var candidateSolution = await RunCpuBoundWithTimeoutAsync(
+                        () => scheduler.Optimize(cancellationToken),
+                        TimeSpan.FromMinutes(4),
+                        cancellationToken);
+
+                    ExactNightQuotaGuard.ForceSatisfyAllDeficits(candidateSolution, constraints);
+                    ExactNightQuotaGuard.GlobalRebalanceNightQuotas(candidateSolution, constraints);
+                    ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
+
+                    scheduler.PerformFinalManagerMixRepairSweep(candidateSolution);
+
+                    if (!scheduler.AreExactNightQuotasSatisfied(candidateSolution, out _))
+                    {
+                        ExactNightQuotaGuard.ForceSatisfyAllDeficits(candidateSolution, constraints);
+                        ExactNightQuotaGuard.GlobalRebalanceNightQuotas(candidateSolution, constraints);
+                        ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
+                    }
+
+                    ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+                    ShiftCoverageGuard.FillRemainingAfterForceApply(candidateSolution, constraints);
+                    ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+                    MorningEveningBalanceGuard.Enforce(candidateSolution, constraints);
+                    OvertimeBalanceGuard.Enforce(candidateSolution, constraints);
+                    AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
+                    MaxConsecutiveWorkdayGuard.Enforce(candidateSolution, constraints);
+                    ExactNightQuotaGuard.ForceSatisfyAllDeficits(candidateSolution, constraints);
+                    ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
+                    ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
+                    ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+                    scheduler.PerformFinalManagerMixRepairSweep(candidateSolution, throwIfUnsatisfied: false);
+                    AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
+                    ExactNightQuotaGuard.ForceSatisfyAllDeficits(candidateSolution, constraints);
+                    ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
+                    ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+                    DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
+                    ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
+                    scheduler.RefreshSolutionViolations(candidateSolution);
+
+                    EnsureApprovedRequestsOrThrow(scheduler, candidateSolution, constraints);
+                    EnsureExactNightQuotasOrThrow(scheduler, candidateSolution);
+                    EnsureExactDayShiftQuotasOrThrow(scheduler, candidateSolution);
+                    EnsureHardDailyRulesOrThrow(candidateSolution, constraints);
+                    EnsureMaxConsecutiveWorkdaysOrThrow(candidateSolution, constraints);
+                    ShiftManagerMixGuard.EnsureOrThrow(candidateSolution, constraints);
+                    EnsureSpecialtyCapacityNotExceededOrThrow(candidateSolution, constraints);
+                    EnsureAllShiftCoverageSatisfiedOrThrow(candidateSolution, constraints);
+
+                    solution = candidateSolution;
+                    statistics = scheduler.GetStatistics();
+                    lastCoverageException = null;
+                    break;
+                }
+                catch (InvalidOperationException ex) when (ex.Message.Contains("تکمیل نفرات شیفت") && attempt < maxAttempts)
+                {
+                    _logger.LogWarning(
+                        "SA attempt {Attempt}/{MaxAttempts} for department {DepartmentId} had coverage deficit. Automatically retrying with new stochastic seed...",
+                        attempt, maxAttempts, request.DepartmentId);
+                    lastCoverageException = ex;
+                }
             }
 
-            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
-            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
-            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
-            MorningEveningBalanceGuard.Enforce(solution, constraints);
-            OvertimeBalanceGuard.Enforce(solution, constraints);
-            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
-            MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
-            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
-            ExactNightQuotaGuard.Enforce(solution, constraints);
-            ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
-            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
-            scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
-            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
-            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
-            ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
-            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
-            DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
-            ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
-            scheduler.RefreshSolutionViolations(solution);
+            if (lastCoverageException != null)
+            {
+                throw lastCoverageException;
+            }
 
-            EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
-            EnsureExactNightQuotasOrThrow(scheduler, solution);
-            EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
-            EnsureHardDailyRulesOrThrow(solution, constraints);
-            EnsureMaxConsecutiveWorkdaysOrThrow(solution, constraints);
-            ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
-            EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
-            EnsureAllShiftCoverageSatisfiedOrThrow(solution, constraints);
-
-            var result = await ConvertSolutionToResultAsync(solution, constraints);
+            var result = await ConvertSolutionToResultAsync(solution!, constraints);
             result.AlgorithmUsed = SchedulingAlgorithm.SimulatedAnnealing;
             result.AlgorithmStatus = "Completed";
-            result.TotalIterations = statistics.TotalIterations;
-            result.ExecutionTime = statistics.ExecutionTime;
+            result.TotalIterations = statistics?.TotalIterations ?? 0;
+            result.ExecutionTime = statistics?.ExecutionTime ?? TimeSpan.Zero;
 
             return result;
         }
@@ -3341,7 +3369,6 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 MaxIterationsWithoutImprovement = saParamsFromDb.MaxIterationsWithoutImprovement
             };
 
-            var scheduler = new SimulatedAnnealingScheduler(constraints, parameters);
             EnsureNightQuotaRequestsFeasibleOrThrow(constraints);
             EnsureConflictingApprovedRequestsOrThrow(constraints);
 
@@ -3349,77 +3376,96 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 ? TimeSpan.FromMinutes(6)
                 : TimeSpan.FromMinutes(3);
 
-            _logger.LogInformation("[Phase 2/4 Optimization] Department {DepartmentId}: Invoking SA Annealing loop with {MaxIterations} max iterations.", request.DepartmentId, parameters.MaxIterations);
+            const int maxAttempts = 3;
+            ShiftSolution? solution = null;
+            AlgorithmStatistics? statistics = null;
+            InvalidOperationException? lastCoverageException = null;
 
-            var solution = await RunCpuBoundWithTimeoutAsync(
-                () => scheduler.Optimize(cancellationToken), 
-                maxAllowedTime, 
-                cancellationToken);
-
-            var statistics = scheduler.GetStatistics();
-            _logger.LogInformation("[Phase 2/4 Done] Department {DepartmentId}: SA completed in {Elapsed:0.##}s — {Iterations} iterations, score={Score:0.##}.",
-                request.DepartmentId, statistics.ExecutionTime.TotalSeconds, statistics.TotalIterations, statistics.BestScore);
-
-            _logger.LogInformation("[Phase 3/4 Post-Validation Sweeps] Department {DepartmentId}: Executing mandatory constraint checks.", request.DepartmentId);
-
-            // Optimize() already runs ApplyMandatoryConstraints once at the end.
-            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: Repairing night quotas and manager mix...", request.DepartmentId);
-            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
-            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
-            ExactNightQuotaGuard.Enforce(solution, constraints);
-
-            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: PerformFinalManagerMixRepairSweep...", request.DepartmentId);
-            scheduler.PerformFinalManagerMixRepairSweep(solution);
-
-            if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
+            for (var attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
-                ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
-                ExactNightQuotaGuard.Enforce(solution, constraints);
+                try
+                {
+                    _logger.LogInformation("[Phase 2/4 Optimization] Department {DepartmentId}: Invoking SA attempt {Attempt}/{MaxAttempts} with {MaxIterations} max iterations.",
+                        request.DepartmentId, attempt, maxAttempts, parameters.MaxIterations);
+
+                    var scheduler = new SimulatedAnnealingScheduler(constraints, parameters);
+                    var candidateSolution = await RunCpuBoundWithTimeoutAsync(
+                        () => scheduler.Optimize(cancellationToken), 
+                        maxAllowedTime, 
+                        cancellationToken);
+
+                    var candidateStats = scheduler.GetStatistics();
+                    _logger.LogInformation("[Phase 2/4 Done] Department {DepartmentId}: SA attempt {Attempt} completed in {Elapsed:0.##}s — {Iterations} iterations, score={Score:0.##}.",
+                        request.DepartmentId, attempt, candidateStats.ExecutionTime.TotalSeconds, candidateStats.TotalIterations, candidateStats.BestScore);
+
+                    _logger.LogInformation("[Phase 3/4 Post-Validation Sweeps] Department {DepartmentId}: Executing mandatory constraint checks for attempt {Attempt}.", request.DepartmentId, attempt);
+
+                    ExactNightQuotaGuard.ForceSatisfyAllDeficits(candidateSolution, constraints);
+                    ExactNightQuotaGuard.GlobalRebalanceNightQuotas(candidateSolution, constraints);
+                    ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
+
+                    scheduler.PerformFinalManagerMixRepairSweep(candidateSolution);
+
+                    if (!scheduler.AreExactNightQuotasSatisfied(candidateSolution, out _))
+                    {
+                        ExactNightQuotaGuard.ForceSatisfyAllDeficits(candidateSolution, constraints);
+                        ExactNightQuotaGuard.GlobalRebalanceNightQuotas(candidateSolution, constraints);
+                        ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
+                    }
+
+                    ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+                    ShiftCoverageGuard.FillRemainingAfterForceApply(candidateSolution, constraints);
+                    ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+                    MorningEveningBalanceGuard.Enforce(candidateSolution, constraints);
+                    OvertimeBalanceGuard.Enforce(candidateSolution, constraints);
+                    AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
+                    MaxConsecutiveWorkdayGuard.Enforce(candidateSolution, constraints);
+                    ShiftCoverageGuard.FillRemainingAfterForceApply(candidateSolution, constraints);
+                    ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+                    ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
+                    scheduler.PerformFinalManagerMixRepairSweep(candidateSolution, throwIfUnsatisfied: false);
+                    AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
+                    MaxConsecutiveWorkdayGuard.Enforce(candidateSolution, constraints);
+                    ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
+                    ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+                    DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
+                    ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
+                    scheduler.RefreshSolutionViolations(candidateSolution);
+
+                    EnsureApprovedRequestsOrThrow(scheduler, candidateSolution, constraints);
+                    EnsureExactNightQuotasOrThrow(scheduler, candidateSolution);
+                    EnsureExactDayShiftQuotasOrThrow(scheduler, candidateSolution);
+                    EnsureHardDailyRulesOrThrow(candidateSolution, constraints);
+                    EnsureMaxConsecutiveWorkdaysOrThrow(candidateSolution, constraints);
+                    ShiftManagerMixGuard.EnsureOrThrow(candidateSolution, constraints);
+                    EnsureSpecialtyCapacityNotExceededOrThrow(candidateSolution, constraints);
+                    EnsureAllShiftCoverageSatisfiedOrThrow(candidateSolution, constraints);
+
+                    solution = candidateSolution;
+                    statistics = candidateStats;
+                    lastCoverageException = null;
+                    break;
+                }
+                catch (InvalidOperationException ex) when (ex.Message.Contains("تکمیل نفرات شیفت") && attempt < maxAttempts)
+                {
+                    _logger.LogWarning(
+                        "SA attempt {Attempt}/{MaxAttempts} for department {DepartmentId} had coverage deficit. Automatically retrying with new stochastic seed...",
+                        attempt, maxAttempts, request.DepartmentId);
+                    lastCoverageException = ex;
+                }
             }
 
-            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: StripExcessCoverage & Post-Processing...", request.DepartmentId);
-            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
-            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
-            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
-            MorningEveningBalanceGuard.Enforce(solution, constraints);
-            OvertimeBalanceGuard.Enforce(solution, constraints);
-            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
-            MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
-            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
-            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
-            ExactNightQuotaGuard.Enforce(solution, constraints);
-            scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
-            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
-            MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
-            ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
-            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
-            DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
-            ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
-            scheduler.RefreshSolutionViolations(solution);
-
-            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureApprovedRequests...", request.DepartmentId);
-            EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
-            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureExactNightQuotas...", request.DepartmentId);
-            EnsureExactNightQuotasOrThrow(scheduler, solution);
-            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureExactDayShiftQuotas...", request.DepartmentId);
-            EnsureExactDayShiftQuotasOrThrow(scheduler, solution);
-            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureHardDailyRules...", request.DepartmentId);
-            EnsureHardDailyRulesOrThrow(solution, constraints);
-            EnsureMaxConsecutiveWorkdaysOrThrow(solution, constraints);
-            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: ShiftManagerMixGuard.EnsureOrThrow...", request.DepartmentId);
-            ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
-            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureSpecialtyCapacityNotExceeded...", request.DepartmentId);
-            EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
-            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureAllShiftCoverageSatisfied...", request.DepartmentId);
-            EnsureAllShiftCoverageSatisfiedOrThrow(solution, constraints);
+            if (lastCoverageException != null)
+            {
+                throw lastCoverageException;
+            }
 
             _logger.LogInformation("[Phase 4/4 Result Conversion] Department {DepartmentId}: Converting solution to result DTO.", request.DepartmentId);
-            var result = await ConvertSolutionToResultAsync(solution, constraints);
+            var result = await ConvertSolutionToResultAsync(solution!, constraints);
             result.AlgorithmUsed = SchedulingAlgorithm.SimulatedAnnealing;
             result.AlgorithmStatus = "Completed";
-            result.TotalIterations = statistics.TotalIterations;
-            result.ExecutionTime = statistics.ExecutionTime;
+            result.TotalIterations = statistics?.TotalIterations ?? 0;
+            result.ExecutionTime = statistics?.ExecutionTime ?? TimeSpan.Zero;
 
             return result;
         }
