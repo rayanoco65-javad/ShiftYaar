@@ -1661,7 +1661,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
-            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
+            ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, _constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             ShiftEligibilityGuard.StripIneligibleAssignments(solution, _constraints);
@@ -1674,6 +1674,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             solution.Violations.Clear();
             solution.Violations.AddRange(ShiftManagerMixGuard.GetViolations(solution, _constraints));
             solution.Violations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, _constraints));
+            solution.Violations.AddRange(ShiftCoverageGuard.GetUnderCapacityViolations(solution, _constraints));
             solution.Violations.AddRange(ApprovedRequestGuard.GetUnmetViolations(solution, _constraints));
             solution.Violations.AddRange(ShiftEligibilityGuard.GetViolations(solution, _constraints));
             solution.Violations.AddRange(AdjacentShiftRestGuard.GetViolations(solution, _constraints));

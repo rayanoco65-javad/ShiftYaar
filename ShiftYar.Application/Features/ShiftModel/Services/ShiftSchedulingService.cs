@@ -501,6 +501,12 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     return ApiResponse<string>.Fail("No assignments to save");
                 }
 
+                if (result.Violations != null && result.Violations.Any(v => v.Contains("ظرفیت تکمیل نشده") || v.Contains("Under capacity")))
+                {
+                    var underCapacityViolations = result.Violations.Where(v => v.Contains("ظرفیت تکمیل نشده") || v.Contains("Under capacity")).ToList();
+                    return ApiResponse<string>.Fail("امکان ذخیره شیفت‌بندی ناقص وجود ندارد؛ ظرفیت شیفت‌ها در برخی روزها تکمیل نشده است:\n" + string.Join("\n", underCapacityViolations));
+                }
+
                 _logger.LogInformation("Saving optimized schedule with {Count} assignments", result.Assignments.Count);
 
                 var startDate = result.Assignments.Min(a => a.Date).Date;
@@ -2940,6 +2946,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             var freshViolations = new List<string>();
             freshViolations.AddRange(ShiftManagerMixGuard.GetViolations(solution, constraints));
             freshViolations.AddRange(ShiftCoverageGuard.GetOverCapacityViolations(solution, constraints));
+            freshViolations.AddRange(ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints));
             freshViolations.AddRange(ApprovedRequestGuard.GetUnmetViolations(solution, constraints));
             freshViolations.AddRange(ShiftEligibilityGuard.GetViolations(solution, constraints));
             freshViolations.AddRange(AdjacentShiftRestGuard.GetViolations(solution, constraints));
@@ -2951,7 +2958,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             var result = new ShiftSchedulingResultDto
             {
                 FinalScore = solution.Score,
-                Violations = solution.Violations
+                Violations = solution.Violations,
+                AlgorithmStatus = freshViolations.Any(v => v.Contains("ظرفیت تکمیل نشده") || v.Contains("Under capacity")) ? "Failed" : "Completed"
             };
 
             // تبدیل انتساب‌ها
@@ -3272,7 +3280,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
             MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
-            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
+            ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
             ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
@@ -3285,6 +3293,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             EnsureMaxConsecutiveWorkdaysOrThrow(solution, constraints);
             ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
+            EnsureAllShiftCoverageSatisfiedOrThrow(solution, constraints);
         }
 
 
@@ -3383,7 +3392,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
             MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
-            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
+            ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
             ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
@@ -3402,6 +3411,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
             _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureSpecialtyCapacityNotExceeded...", request.DepartmentId);
             EnsureSpecialtyCapacityNotExceededOrThrow(solution, constraints);
+            _logger.LogInformation("[Phase 3/4] Department {DepartmentId}: EnsureAllShiftCoverageSatisfied...", request.DepartmentId);
+            EnsureAllShiftCoverageSatisfiedOrThrow(solution, constraints);
 
             _logger.LogInformation("[Phase 4/4 Result Conversion] Department {DepartmentId}: Converting solution to result DTO.", request.DepartmentId);
             var result = await ConvertSolutionToResultAsync(solution, constraints);

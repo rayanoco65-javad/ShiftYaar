@@ -370,6 +370,89 @@ public class ShiftCoverageGuardTests
         Assert.True(eveningFilled >= days - 1, $"Evening coverage {eveningFilled}/{days}");
     }
 
+    [Fact]
+    public void GetUnderCapacityViolations_ReturnsDetailedPersianViolationsWhenShiftIncomplete()
+    {
+        var start = new DateTime(2026, 9, 8); // 17 Shahrivar 1405
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start,
+            UserConstraints = [MakeUser(1), MakeUser(2)],
+            ShiftRequirements =
+            [
+                new ShiftRequirement
+                {
+                    ShiftId = 10,
+                    ShiftLabel = ShiftLabel.Morning,
+                    SpecialtyRequirements =
+                    [
+                        new SpecialtyRequirement
+                        {
+                            SpecialtyId = 10,
+                            SpecialtyName = "پرستار",
+                            RequiredTotalCount = 4
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(1, 10, start, ShiftLabel.Morning, isOnCall: false);
+
+        var violations = ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints);
+
+        Assert.Single(violations);
+        var v = violations[0];
+        Assert.Contains("ظرفیت تکمیل نشده در تاریخ شمسی", v);
+        Assert.Contains("1405/06/17", v);
+        Assert.Contains("2026/09/08", v);
+        Assert.Contains("شیفت صبح", v);
+        Assert.Contains("پرستار", v);
+        Assert.Contains("1 نفر از 4 نفر تخصیص داده شده است", v);
+        Assert.Contains("3 نفر کسری", v);
+    }
+
+    [Fact]
+    public void GetUnderCapacityViolations_ReturnsEmptyWhenAllShiftsFullyFilled()
+    {
+        var start = new DateTime(2026, 9, 8);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start,
+            UserConstraints = [MakeUser(1), MakeUser(2), MakeUser(3), MakeUser(4)],
+            ShiftRequirements =
+            [
+                new ShiftRequirement
+                {
+                    ShiftId = 10,
+                    ShiftLabel = ShiftLabel.Morning,
+                    SpecialtyRequirements =
+                    [
+                        new SpecialtyRequirement
+                        {
+                            SpecialtyId = 10,
+                            SpecialtyName = "پرستار",
+                            RequiredTotalCount = 4
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var solution = new ShiftSolution();
+        for (int i = 1; i <= 4; i++)
+        {
+            solution.AddAssignment(i, 10, start, ShiftLabel.Morning, isOnCall: false);
+        }
+
+        var violations = ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints);
+
+        Assert.Empty(violations);
+    }
+
     private static UserConstraint MakeUser(int id) => new()
     {
         UserId = id,

@@ -157,11 +157,22 @@ public static class ShiftCoverageGuard
 
         foreach (var date in dates)
         {
+            var persianDate = DateConverter.ConvertToPersianDate(date);
+            var isHoliday = constraints.IsHoliday(date);
+
             foreach (var shiftReq in constraints.ShiftRequirements)
             {
+                var labelFa = shiftReq.ShiftLabel switch
+                {
+                    ShiftLabel.Morning => "صبح",
+                    ShiftLabel.Evening => "عصر",
+                    ShiftLabel.Night => "شب",
+                    _ => shiftReq.ShiftLabel.ToString()
+                };
+
                 foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
                 {
-                    var day = specialtyReq.ForDay(constraints.IsHoliday(date));
+                    var day = specialtyReq.ForDay(isHoliday);
                     if (day.RequiredTotalCount <= 0) continue;
 
                     var regular = GetSpecialtyAssignments(
@@ -169,9 +180,14 @@ public static class ShiftCoverageGuard
 
                     if (regular.Count < day.RequiredTotalCount)
                     {
+                        var missing = day.RequiredTotalCount - regular.Count;
+                        var specName = !string.IsNullOrWhiteSpace(specialtyReq.SpecialtyName)
+                            ? specialtyReq.SpecialtyName
+                            : $"تخصص {specialtyReq.SpecialtyId}";
+
                         violations.Add(
-                            $"ظرفیت تکمیل نشده در تاریخ {date:yyyy/MM/dd} شیفت {shiftReq.ShiftLabel} تخصص {specialtyReq.SpecialtyId}: " +
-                            $"{regular.Count} نفر از {day.RequiredTotalCount} نفر تخصیص داده شده است.");
+                            $"ظرفیت تکمیل نشده در تاریخ شمسی {persianDate} ({date:yyyy/MM/dd}) شیفت {labelFa} (شناسه {shiftReq.ShiftId}) {specName}: " +
+                            $"{regular.Count} نفر از {day.RequiredTotalCount} نفر تخصیص داده شده است ({missing} نفر کسری).");
                     }
                 }
             }
