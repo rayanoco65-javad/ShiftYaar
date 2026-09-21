@@ -503,7 +503,7 @@ public class ShiftCoverageGuardTests
     }
 
     [Fact]
-    public void ForceFillAllMissingCoverage_FillsEmergencyDeficit_WhenConsecutiveRelaxationNeeded()
+    public void ForceFillAllMissingCoverage_DoesNotViolate_MaxConsecutiveShifts_WhenEnforced()
     {
         var start = new DateTime(2026, 9, 6);
         var end = new DateTime(2026, 9, 9);
@@ -537,9 +537,49 @@ public class ShiftCoverageGuardTests
 
         ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
 
+        // Must NOT assign u1 to 4th consecutive day
+        Assert.False(solution.HasAssignment(u1.UserId, 1, new DateTime(2026, 9, 9)));
+        var violations = ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints);
+        Assert.Single(violations);
+    }
+
+    [Fact]
+    public void ForceFillAllMissingCoverage_FillsDeficit_WhenQuotaRelaxationNeeded()
+    {
+        var start = new DateTime(2026, 9, 6);
+        var end = new DateTime(2026, 9, 8);
+        var u1 = MakeUser(1);
+        u1.MaxConsecutiveShifts = 5;
+        u1.ExactMorningShiftCount = 1; // Quota is 1
+        var users = new List<UserConstraint> { u1 };
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = end,
+            UserConstraints = users,
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning, required: 1)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceMaxConsecutiveShifts = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 }
+        };
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(u1.UserId, 1, new DateTime(2026, 9, 6), ShiftLabel.Morning, false);
+        // u1 already has 1 morning shift (quota satisfied). Date 2026-09-08 is empty.
+
+        ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
+
         var violations = ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints);
         Assert.Empty(violations);
-        Assert.True(solution.HasAssignment(u1.UserId, 1, new DateTime(2026, 9, 9)));
+        Assert.True(solution.HasAssignment(u1.UserId, 1, new DateTime(2026, 9, 8)));
     }
 
     private static UserConstraint MakeUser(int id) => new()

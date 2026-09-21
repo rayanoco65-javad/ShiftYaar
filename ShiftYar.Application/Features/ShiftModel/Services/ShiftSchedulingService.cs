@@ -973,11 +973,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     lastCoverageException = null;
                     break;
                 }
-                catch (InvalidOperationException ex) when (ex.Message.Contains("تکمیل نفرات شیفت") && attempt < maxAttempts)
+                catch (InvalidOperationException ex) when (attempt < maxAttempts)
                 {
                     _logger.LogWarning(
-                        "SA attempt {Attempt}/{MaxAttempts} for department {DepartmentId} had coverage deficit. Automatically retrying with new stochastic seed...",
-                        attempt, maxAttempts, request.DepartmentId);
+                        "SA attempt {Attempt}/{MaxAttempts} for department {DepartmentId} failed validation ({Error}). Automatically retrying with new stochastic seed...",
+                        attempt, maxAttempts, request.DepartmentId, ex.Message);
                     lastCoverageException = ex;
                 }
             }
@@ -3446,11 +3446,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     lastCoverageException = null;
                     break;
                 }
-                catch (InvalidOperationException ex) when (ex.Message.Contains("تکمیل نفرات شیفت") && attempt < maxAttempts)
+                catch (InvalidOperationException ex) when (attempt < maxAttempts)
                 {
                     _logger.LogWarning(
-                        "SA attempt {Attempt}/{MaxAttempts} for department {DepartmentId} had coverage deficit. Automatically retrying with new stochastic seed...",
-                        attempt, maxAttempts, request.DepartmentId);
+                        "SA attempt {Attempt}/{MaxAttempts} for department {DepartmentId} failed validation ({Error}). Automatically retrying with new stochastic seed...",
+                        attempt, maxAttempts, request.DepartmentId, ex.Message);
                     lastCoverageException = ex;
                 }
             }

@@ -670,7 +670,7 @@ public static class ShiftCoverageGuard
             .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
             .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
             .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
-            .Where(u => CanAcceptShift(solution, constraints, u, date, shiftReq.ShiftLabel, allowEmergencyRelaxation))
+            .Where(u => CanAcceptShift(solution, constraints, u, date, shiftReq.ShiftLabel))
             .OrderBy(u => CoveragePriority(solution, constraints, u, date, shiftReq.ShiftLabel))
             .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
             .ToList();
@@ -683,7 +683,7 @@ public static class ShiftCoverageGuard
             }
 
             // ممکن است صبح/عصر با قوانین روزانه تداخل داشته باشد — دوباره چک
-            if (!CanAcceptShift(solution, constraints, user, date, shiftReq.ShiftLabel, allowEmergencyRelaxation))
+            if (!CanAcceptShift(solution, constraints, user, date, shiftReq.ShiftLabel))
             {
                 continue;
             }
@@ -778,14 +778,14 @@ public static class ShiftCoverageGuard
                 solution.RemoveAssignment(u.UserId, asg.ShiftId, asg.Date, force: true);
 
                 // بررسی آیا v می‌تواند otherLabel را در date بپذیرد
-                if (!CanAcceptShift(solution, constraints, v, date, otherLabel, allowEmergencyRelaxation))
+                if (!CanAcceptShift(solution, constraints, v, date, otherLabel))
                 {
                     RestoreFromBackup(solution, backup);
                     continue;
                 }
 
                 // بررسی آیا u می‌تواند shiftReq.ShiftLabel را در date بپذیرد (با توجه به اینکه شیفت قبلی‌اش برداشته شده)
-                if (!CanAcceptShift(solution, constraints, u, date, shiftReq.ShiftLabel, allowEmergencyRelaxation))
+                if (!CanAcceptShift(solution, constraints, u, date, shiftReq.ShiftLabel))
                 {
                     RestoreFromBackup(solution, backup);
                     continue;
@@ -879,7 +879,7 @@ public static class ShiftCoverageGuard
                         .Where(v => !v.UnavailableDates.Any(d => d.Date == asg.Date.Date))
                         .Where(v => !v.UnavailableShiftSlots.Any(s => s.Date.Date == asg.Date.Date && s.ShiftLabel == asg.ShiftLabel))
                         .Where(v => !solution.HasAssignment(v.UserId, asg.ShiftId, asg.Date))
-                        .Where(v => CanAcceptShift(solution, constraints, v, asg.Date, asg.ShiftLabel, allowEmergencyRelaxation))
+                        .Where(v => CanAcceptShift(solution, constraints, v, asg.Date, asg.ShiftLabel))
                         .ToList();
 
                     foreach (var v in donors)
@@ -913,7 +913,7 @@ public static class ShiftCoverageGuard
                             SkeletonAssignmentGuard.LockSlotManagerAssignments(solution, constraints, targetShiftReq, asg.Date);
                         }
 
-                        if (CanAcceptShift(solution, constraints, u, date, shiftReq.ShiftLabel, allowEmergencyRelaxation))
+                        if (CanAcceptShift(solution, constraints, u, date, shiftReq.ShiftLabel))
                         {
                             solution.AddAssignment(u.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall: false);
                             missing--;
@@ -1100,8 +1100,7 @@ public static class ShiftCoverageGuard
         ShiftConstraints constraints,
         UserConstraint user,
         DateTime date,
-        ShiftLabel label,
-        bool allowConsecutiveRelaxation = false)
+        ShiftLabel label)
     {
         // بررسی مجوز نوع شیفت با آگاهی از تاریخ:
         // کاربر فقط در صورتی می‌تواند این نوع شیفت را بگیرد که یا مجوز کلی داشته باشد
@@ -1145,8 +1144,7 @@ public static class ShiftCoverageGuard
         {
             var workDates = MaxConsecutiveWorkdayRules.GetCountableWorkDates(solution, user);
             var projected = MaxConsecutiveWorkdayRules.ProjectedRunIfWorkDayAdded(workDates, date);
-            var maxAllowed = allowConsecutiveRelaxation ? user.MaxConsecutiveShifts + 1 : user.MaxConsecutiveShifts;
-            if (projected > maxAllowed)
+            if (projected > user.MaxConsecutiveShifts)
             {
                 return false;
             }
