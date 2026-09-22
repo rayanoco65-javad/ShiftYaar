@@ -948,15 +948,25 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     MaxConsecutiveWorkdayGuard.Enforce(candidateSolution, constraints);
                     ExactNightQuotaGuard.ForceSatisfyAllDeficits(candidateSolution, constraints);
                     ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
-                    ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
-                    ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
-                    scheduler.PerformFinalManagerMixRepairSweep(candidateSolution, throwIfUnsatisfied: false);
-                    AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
-                    ExactNightQuotaGuard.ForceSatisfyAllDeficits(candidateSolution, constraints);
-                    ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
-                    ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
-                    DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
-                    ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
+                    for (var pass = 0; pass < 3; pass++)
+                    {
+                        DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
+                        ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
+                        AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
+                        MaxConsecutiveWorkdayGuard.Enforce(candidateSolution, constraints);
+                        scheduler.PerformFinalManagerMixRepairSweep(candidateSolution, throwIfUnsatisfied: false);
+                        ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
+                        ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+
+                        if (DailyDuplicateAssignmentGuard.GetViolations(candidateSolution, constraints).Count == 0
+                            && ShiftEligibilityGuard.GetViolations(candidateSolution, constraints).Count == 0
+                            && AdjacentShiftRestGuard.GetViolations(candidateSolution, constraints).Count == 0
+                            && MaxConsecutiveWorkdayRules.GetViolations(candidateSolution, constraints).Count == 0
+                            && ShiftCoverageGuard.GetUnderCapacityViolations(candidateSolution, constraints).Count == 0)
+                        {
+                            break;
+                        }
+                    }
                     scheduler.RefreshSolutionViolations(candidateSolution);
 
                     EnsureApprovedRequestsOrThrow(scheduler, candidateSolution, constraints);
@@ -3312,9 +3322,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
                 AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
                 MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
+                scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
                 ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
                 ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
-                scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
 
                 if (DailyDuplicateAssignmentGuard.GetViolations(solution, constraints).Count == 0
                     && ShiftEligibilityGuard.GetViolations(solution, constraints).Count == 0
@@ -3439,10 +3449,25 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     scheduler.PerformFinalManagerMixRepairSweep(candidateSolution, throwIfUnsatisfied: false);
                     AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
                     MaxConsecutiveWorkdayGuard.Enforce(candidateSolution, constraints);
-                    ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
-                    ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
-                    DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
-                    ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
+                    for (var pass = 0; pass < 3; pass++)
+                    {
+                        DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
+                        ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
+                        AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
+                        MaxConsecutiveWorkdayGuard.Enforce(candidateSolution, constraints);
+                        scheduler.PerformFinalManagerMixRepairSweep(candidateSolution, throwIfUnsatisfied: false);
+                        ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
+                        ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+
+                        if (DailyDuplicateAssignmentGuard.GetViolations(candidateSolution, constraints).Count == 0
+                            && ShiftEligibilityGuard.GetViolations(candidateSolution, constraints).Count == 0
+                            && AdjacentShiftRestGuard.GetViolations(candidateSolution, constraints).Count == 0
+                            && MaxConsecutiveWorkdayRules.GetViolations(candidateSolution, constraints).Count == 0
+                            && ShiftCoverageGuard.GetUnderCapacityViolations(candidateSolution, constraints).Count == 0)
+                        {
+                            break;
+                        }
+                    }
                     scheduler.RefreshSolutionViolations(candidateSolution);
 
                     EnsureApprovedRequestsOrThrow(scheduler, candidateSolution, constraints);

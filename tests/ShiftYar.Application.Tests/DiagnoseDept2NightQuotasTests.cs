@@ -2044,6 +2044,110 @@ public class DiagnoseDept2NightQuotasTests
             }
         }
     }
+
+    [Fact]
+    public void Test_DiagnoseDates09And20_StepByStep()
+    {
+        var path = @"C:\Users\Paria\.gemini\antigravity\brain\2e803de5-ca99-49b4-a5e7-a2d4d5605940\scratch\dept2_loaded_constraints.json";
+        if (!System.IO.File.Exists(path)) return;
+        var json = System.IO.File.ReadAllText(path);
+        var constraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(json)!;
+
+        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            MaxIterations = 4000,
+            MaxIterationsWithoutImprovement = 600
+        });
+
+        var solution = scheduler.Optimize();
+
+        var d09 = new DateTime(2026, 8, 31);
+        var d20 = new DateTime(2026, 9, 11);
+
+        void CheckDates(string step)
+        {
+            _output.WriteLine($"\n=== {step} ===");
+            foreach (var dt in new[] { d09, d20 })
+            {
+                var fa = DateConverter.ConvertToPersianDate(dt);
+                var isHol = constraints.IsHoliday(dt);
+                var dayAsgs = solution.Assignments.Values.Where(a => a.Date.Date == dt.Date && !a.IsOnCall).ToList();
+                var m = dayAsgs.Count(a => a.ShiftLabel == ShiftLabel.Morning);
+                var e = dayAsgs.Count(a => a.ShiftLabel == ShiftLabel.Evening);
+                var n = dayAsgs.Count(a => a.ShiftLabel == ShiftLabel.Night);
+                _output.WriteLine($"Date {fa} ({dt:yyyy-MM-dd}, Hol={isHol}): Total={dayAsgs.Count} (M={m}, E={e}, N={n})");
+                foreach (var a in dayAsgs)
+                {
+                    var u = constraints.UserConstraints.First(x => x.UserId == a.UserId);
+                    _output.WriteLine($"   {a.ShiftLabel}: User {u.UserId} ({u.UserName}, L={u.ShiftManagerLevel})");
+                }
+            }
+            var under = ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints);
+            _output.WriteLine($"Total UnderCapacity Violations: {under.Count}");
+            foreach (var u in under) _output.WriteLine($"   {u}");
+
+            var dups = DailyDuplicateAssignmentGuard.GetViolations(solution, constraints);
+            _output.WriteLine($"Total Daily Duplicate Violations: {dups.Count}");
+            foreach (var d in dups) _output.WriteLine($"   {d}");
+        }
+
+        CheckDates("1. Immediately After Optimize");
+
+        ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+        ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+        CheckDates("2. After NightQuota Force+Rebalance+Enforce");
+
+        scheduler.PerformFinalManagerMixRepairSweep(solution);
+        CheckDates("3. After PerformFinalManagerMixRepairSweep 1");
+
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+        ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+        CheckDates("4. After FillRemainingAfterForceApply");
+
+        MorningEveningBalanceGuard.Enforce(solution, constraints);
+        CheckDates("5. After MorningEveningBalanceGuard");
+
+        OvertimeBalanceGuard.Enforce(solution, constraints);
+        CheckDates("6. After OvertimeBalanceGuard");
+
+        AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+        CheckDates("7. After AdjacentShiftRestGuard");
+
+        MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
+        CheckDates("8. After MaxConsecutiveWorkdayGuard 1");
+
+        ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+        CheckDates("9. After FillRemainingAfterForceApply 2");
+
+        ExactNightQuotaGuard.Enforce(solution, constraints);
+        CheckDates("10. After ExactNightQuotaGuard");
+
+        scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
+        CheckDates("11. After PerformFinalManagerMixRepairSweep 2");
+
+        AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+        CheckDates("12. After AdjacentShiftRestGuard 2");
+
+        MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
+        CheckDates("13. After MaxConsecutiveWorkdayGuard 2");
+
+        ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+        CheckDates("14. After ForceFillAllMissingCoverage");
+
+        var dupsBefore = DailyDuplicateAssignmentGuard.GetViolations(solution, constraints);
+        _output.WriteLine($"Daily Duplicate Violations before StripDuplicates ({dupsBefore.Count}):");
+        foreach (var v in dupsBefore) _output.WriteLine($"   {v}");
+
+        DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
+        CheckDates("15. After DailyDuplicateAssignmentGuard.StripDuplicates");
+
+        ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
+        CheckDates("16. After ShiftEligibilityGuard.StripIneligibleAssignments");
+    }
 }
 
 

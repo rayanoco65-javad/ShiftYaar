@@ -324,8 +324,8 @@ public static class MorningEveningBalanceGuard
         var mWasSkeleton = solution.IsLockedSkeleton(mHeavyUser.UserId, morningAssignment.ShiftId, morningAssignment.Date) || morningAssignment.IsSkeleton;
         var eWasSkeleton = solution.IsLockedSkeleton(eHeavyUser.UserId, eveningAssignment.ShiftId, eveningAssignment.Date) || eveningAssignment.IsSkeleton;
 
-        solution.RemoveAssignment(mHeavyUser.UserId, morningAssignment.ShiftId, morningAssignment.Date);
-        solution.RemoveAssignment(eHeavyUser.UserId, eveningAssignment.ShiftId, eveningAssignment.Date);
+        solution.RemoveAssignment(mHeavyUser.UserId, morningAssignment.ShiftId, morningAssignment.Date, force: true);
+        solution.RemoveAssignment(eHeavyUser.UserId, eveningAssignment.ShiftId, eveningAssignment.Date, force: true);
         solution.AddAssignment(
             eHeavyUser.UserId,
             morningAssignment.ShiftId,
@@ -358,20 +358,22 @@ public static class MorningEveningBalanceGuard
             beforeViolation,
             () =>
             {
-                solution.RemoveAssignment(eHeavyUser.UserId, morningAssignment.ShiftId, morningAssignment.Date);
-                solution.RemoveAssignment(mHeavyUser.UserId, eveningAssignment.ShiftId, eveningAssignment.Date);
+                solution.RemoveAssignment(eHeavyUser.UserId, morningAssignment.ShiftId, morningAssignment.Date, force: true);
+                solution.RemoveAssignment(mHeavyUser.UserId, eveningAssignment.ShiftId, eveningAssignment.Date, force: true);
                 solution.AddAssignment(
                     mHeavyUser.UserId,
                     morningAssignment.ShiftId,
                     morningAssignment.Date,
                     ShiftLabel.Morning,
-                    isOnCall: false);
+                    isOnCall: false,
+                    isSkeleton: mWasSkeleton);
                 solution.AddAssignment(
                     eHeavyUser.UserId,
                     eveningAssignment.ShiftId,
                     eveningAssignment.Date,
                     ShiftLabel.Evening,
-                    isOnCall: false);
+                    isOnCall: false,
+                    isSkeleton: eWasSkeleton);
             });
     }
 
@@ -435,8 +437,8 @@ public static class MorningEveningBalanceGuard
         var mWasSkeleton = solution.IsLockedSkeleton(mHeavyUser.UserId, morningAssignment.ShiftId, morningAssignment.Date) || morningAssignment.IsSkeleton;
         var eWasSkeleton = solution.IsLockedSkeleton(eHeavyUser.UserId, eveningAssignment.ShiftId, eveningAssignment.Date) || eveningAssignment.IsSkeleton;
 
-        solution.RemoveAssignment(mHeavyUser.UserId, morningAssignment.ShiftId, morningAssignment.Date);
-        solution.RemoveAssignment(eHeavyUser.UserId, eveningAssignment.ShiftId, eveningAssignment.Date);
+        solution.RemoveAssignment(mHeavyUser.UserId, morningAssignment.ShiftId, morningAssignment.Date, force: true);
+        solution.RemoveAssignment(eHeavyUser.UserId, eveningAssignment.ShiftId, eveningAssignment.Date, force: true);
         solution.AddAssignment(
             eHeavyUser.UserId,
             morningAssignment.ShiftId,
@@ -469,20 +471,22 @@ public static class MorningEveningBalanceGuard
             beforeViolation,
             () =>
             {
-                solution.RemoveAssignment(eHeavyUser.UserId, morningAssignment.ShiftId, morningAssignment.Date);
-                solution.RemoveAssignment(mHeavyUser.UserId, eveningAssignment.ShiftId, eveningAssignment.Date);
+                solution.RemoveAssignment(eHeavyUser.UserId, morningAssignment.ShiftId, morningAssignment.Date, force: true);
+                solution.RemoveAssignment(mHeavyUser.UserId, eveningAssignment.ShiftId, eveningAssignment.Date, force: true);
                 solution.AddAssignment(
                     mHeavyUser.UserId,
                     morningAssignment.ShiftId,
                     morningAssignment.Date,
                     ShiftLabel.Morning,
-                    isOnCall: false);
+                    isOnCall: false,
+                    isSkeleton: mWasSkeleton);
                 solution.AddAssignment(
                     eHeavyUser.UserId,
                     eveningAssignment.ShiftId,
                     eveningAssignment.Date,
                     ShiftLabel.Evening,
-                    isOnCall: false);
+                    isOnCall: false,
+                    isSkeleton: eWasSkeleton);
             });
     }
 
