@@ -86,8 +86,25 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: false);
                 AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSolution, _constraints);
             }
-            ShiftCoverageGuard.ForceFillAllMissingCoverage(bestSolution, _constraints);
-            ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
+            for (var pass = 0; pass < 3; pass++)
+            {
+                DailyDuplicateAssignmentGuard.StripDuplicates(bestSolution, _constraints);
+                ShiftEligibilityGuard.StripIneligibleAssignments(bestSolution, _constraints);
+                AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSolution, _constraints);
+                MaxConsecutiveWorkdayGuard.Enforce(bestSolution, _constraints);
+                ShiftCoverageGuard.ForceFillAllMissingCoverage(bestSolution, _constraints);
+                ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
+                PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: false);
+
+                if (DailyDuplicateAssignmentGuard.GetViolations(bestSolution, _constraints).Count == 0
+                    && ShiftEligibilityGuard.GetViolations(bestSolution, _constraints).Count == 0
+                    && AdjacentShiftRestGuard.GetViolations(bestSolution, _constraints).Count == 0
+                    && MaxConsecutiveWorkdayRules.GetViolations(bestSolution, _constraints).Count == 0
+                    && ShiftCoverageGuard.GetUnderCapacityViolations(bestSolution, _constraints).Count == 0)
+                {
+                    break;
+                }
+            }
             RefreshSolutionViolations(bestSolution);
             stopwatch.Stop();
             _statistics.ExecutionTime = stopwatch.Elapsed;
@@ -1660,11 +1677,25 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftCoverageGuard.FillRemainingAfterForceApply(solution, _constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
-            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
-            ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, _constraints);
-            ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
-            DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
-            ShiftEligibilityGuard.StripIneligibleAssignments(solution, _constraints);
+            for (var pass = 0; pass < 3; pass++)
+            {
+                DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
+                ShiftEligibilityGuard.StripIneligibleAssignments(solution, _constraints);
+                AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+                MaxConsecutiveWorkdayGuard.Enforce(solution, _constraints, RepairManagerMix);
+                ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, _constraints);
+                ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
+                PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
+
+                if (DailyDuplicateAssignmentGuard.GetViolations(solution, _constraints).Count == 0
+                    && ShiftEligibilityGuard.GetViolations(solution, _constraints).Count == 0
+                    && AdjacentShiftRestGuard.GetViolations(solution, _constraints).Count == 0
+                    && MaxConsecutiveWorkdayRules.GetViolations(solution, _constraints).Count == 0
+                    && ShiftCoverageGuard.GetUnderCapacityViolations(solution, _constraints).Count == 0)
+                {
+                    break;
+                }
+            }
             solution.Score = CalculateSolutionScore(solution);
             RefreshSolutionViolations(solution);
         }

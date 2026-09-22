@@ -3306,12 +3306,25 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
             ExactNightQuotaGuard.Enforce(solution, constraints);
             scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
-            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
-            MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
-            ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
-            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
-            DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
-            ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
+            for (var pass = 0; pass < 3; pass++)
+            {
+                DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
+                ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
+                AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+                MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
+                ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
+                ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+                scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
+
+                if (DailyDuplicateAssignmentGuard.GetViolations(solution, constraints).Count == 0
+                    && ShiftEligibilityGuard.GetViolations(solution, constraints).Count == 0
+                    && AdjacentShiftRestGuard.GetViolations(solution, constraints).Count == 0
+                    && MaxConsecutiveWorkdayRules.GetViolations(solution, constraints).Count == 0
+                    && ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints).Count == 0)
+                {
+                    break;
+                }
+            }
             scheduler.RefreshSolutionViolations(solution);
 
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);

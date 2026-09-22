@@ -675,11 +675,36 @@ public static class ShiftCoverageGuard
             .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
             .ToList();
 
+        var requiresManager = ShiftManagerRules.RequiresAnyManager(shiftReq);
+        var (reqTot, reqL1) = requiresManager ? ShiftManagerRules.GetRequirement(shiftReq) : (0, 0);
+
         foreach (var user in candidates)
         {
             if (missing <= 0)
             {
                 break;
+            }
+
+            // در صورتی که شیفت به مسئول نیاز دارد و اسلات‌های باقیمانده بحرانی هستند، ابتدا فقط افراد واجد صلاحیت مدیریتی اختصاص یابند
+            if (requiresManager)
+            {
+                var currentAssignees = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                    .Where(a => !a.IsOnCall)
+                    .Select(a => constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId))
+                    .Where(x => x != null)
+                    .Cast<UserConstraint>()
+                    .ToList();
+                var missL1 = Math.Max(0, reqL1 - currentAssignees.Count(ShiftManagerRules.IsLevel1));
+                var missTot = Math.Max(0, reqTot - currentAssignees.Count(ShiftManagerRules.IsManager));
+
+                if (missing <= missL1 && !ShiftManagerRules.IsLevel1(user))
+                {
+                    continue;
+                }
+                if (missing <= missTot && !ShiftManagerRules.IsManager(user))
+                {
+                    continue;
+                }
             }
 
             // ممکن است صبح/عصر با قوانین روزانه تداخل داشته باشد — دوباره چک
@@ -700,6 +725,21 @@ public static class ShiftCoverageGuard
         if (missing > 0)
         {
             TryFillByRelievingAdjacentWorkDay(solution, constraints, shiftReq, date, specialtyReq, ref missing, allowEmergencyRelaxation);
+        }
+
+        // فاز تکمیلی: در صورتی که علی‌رغم جستجو در روزهای مجاور، پرسنل مدیریتی در دسترس نبود،
+        // جهت جلوگیری از خالی ماندن ظرفیت فیزیکی شیفت، از هر پرسنل واجد صلاحیت عمومی استفاده شود
+        if (missing > 0)
+        {
+            foreach (var user in candidates)
+            {
+                if (missing <= 0) break;
+                if (!solution.HasAssignment(user.UserId, shiftReq.ShiftId, date) && CanAcceptShift(solution, constraints, user, date, shiftReq.ShiftLabel))
+                {
+                    solution.AddAssignment(user.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall: false);
+                    missing--;
+                }
+            }
         }
     }
 
@@ -764,6 +804,7 @@ public static class ShiftCoverageGuard
                 .Where(v => !v.UnavailableDates.Any(d => d.Date == date.Date))
                 .Where(v => !v.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == otherLabel))
                 .Where(v => !solution.HasAssignment(v.UserId, otherShiftReq.ShiftId, date))
+                .OrderBy(v => solution.GetUserAllAssignments(v.UserId).Count)
                 .ToList();
 
             foreach (var v in donors)
@@ -804,13 +845,13 @@ public static class ShiftCoverageGuard
                 // بررسی صحت ترکیب مسئول در هر دو شیفت در صورت الزام
                 if (ShiftManagerRules.RequiresAnyManager(otherShiftReq))
                 {
-                    var (reqTot, reqL1) = ShiftManagerRules.GetRequirement(otherShiftReq);
+                    var (reqTotOther, reqL1Other) = ShiftManagerRules.GetRequirement(otherShiftReq);
                     var assignees = solution.GetShiftAssignments(otherShiftReq.ShiftId, date)
                         .Where(a => !a.IsOnCall)
                         .Select(a => constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId))
                         .Where(x => x != null)
                         .ToList();
-                    if (assignees.Count(ShiftManagerRules.IsLevel1) < reqL1 || assignees.Count(ShiftManagerRules.IsManager) < reqTot)
+                    if (assignees.Count(ShiftManagerRules.IsLevel1) < reqL1Other || assignees.Count(ShiftManagerRules.IsManager) < reqTotOther)
                     {
                         RestoreFromBackup(solution, backup);
                         continue;
@@ -834,6 +875,10 @@ public static class ShiftCoverageGuard
     {
         if (missing <= 0) return;
 
+        var requiresManager = ShiftManagerRules.RequiresAnyManager(shiftReq);
+        var (reqTotal, reqL1) = requiresManager ? ShiftManagerRules.GetRequirement(shiftReq) : (0, 0);
+        var missingCount = missing;
+
         var potentialUsers = constraints.UserConstraints
             .Where(u => u.IsActive && u.SpecialtyId == specialtyReq.SpecialtyId)
             .Where(u => ShiftEligibilityResolver.MayTakeLabelOnDate(u, shiftReq.ShiftLabel, date))
@@ -851,18 +896,67 @@ public static class ShiftCoverageGuard
                     return false;
                 return true;
             })
+            .OrderBy(u =>
+            {
+                if (requiresManager)
+                {
+                    var currentAssignees = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                        .Where(a => !a.IsOnCall)
+                        .Select(a => constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId))
+                        .Where(x => x != null)
+                        .Cast<UserConstraint>()
+                        .ToList();
+                    var missL1 = Math.Max(0, reqL1 - currentAssignees.Count(ShiftManagerRules.IsLevel1));
+                    var missTot = Math.Max(0, reqTotal - currentAssignees.Count(ShiftManagerRules.IsManager));
+
+                    if (missingCount <= missL1 && ShiftManagerRules.IsLevel1(u)) return -30000;
+                    if (missingCount <= missTot && ShiftManagerRules.IsManager(u)) return -15000;
+                }
+                return CoveragePriority(solution, constraints, u, date, shiftReq.ShiftLabel);
+            })
+            .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
             .ToList();
 
         foreach (var u in potentialUsers)
         {
             if (missing <= 0) break;
 
-            var adjacentDates = new[] { date.AddDays(-1), date.AddDays(1), date.AddDays(-2), date.AddDays(2) };
-            foreach (var adjDate in adjacentDates)
+            var maxOffset = Math.Max(3, u.MaxConsecutiveShifts);
+            var candidateDates = new List<DateTime>();
+            var userWorkDates = MaxConsecutiveWorkdayRules.GetCountableWorkDates(solution, u);
+
+            // اولویت ۱: روزهایی از توالی متوالی قبل از تاریخ هدف که کاربر واقعاً در آن‌ها شیفت دارد
+            for (var offset = 1; offset <= maxOffset; offset++)
             {
+                var p = date.AddDays(-offset);
+                if (userWorkDates.Contains(p)) candidateDates.Add(p);
+            }
+
+            // اولویت ۲: روزهایی از توالی متوالی بعد از تاریخ هدف که کاربر واقعاً در آن‌ها شیفت دارد
+            for (var offset = 1; offset <= maxOffset; offset++)
+            {
+                var n = date.AddDays(offset);
+                if (userWorkDates.Contains(n)) candidateDates.Add(n);
+            }
+
+            // اولویت ۳: سایر روزهای مجاور تا سقف بازه
+            for (var offset = 1; offset <= maxOffset; offset++)
+            {
+                var p = date.AddDays(-offset);
+                if (!candidateDates.Contains(p)) candidateDates.Add(p);
+                var n = date.AddDays(offset);
+                if (!candidateDates.Contains(n)) candidateDates.Add(n);
+            }
+
+            foreach (var adjDate in candidateDates)
+            {
+                if (missing <= 0) break;
+
                 var uAsgs = solution.GetUserAssignments(u.UserId, adjDate).Where(a => !a.IsOnCall).ToList();
                 foreach (var asg in uAsgs)
                 {
+                    if (missing <= 0) break;
+
                     if (ApprovedRequestGuard.IsApprovedRequiredSlot(u, asg.Date, asg.ShiftLabel, asg.ShiftId)
                         || u.RequiredPresenceDates.Any(d => d.Date == asg.Date.Date))
                     {
@@ -880,21 +974,22 @@ public static class ShiftCoverageGuard
                         .Where(v => !v.UnavailableShiftSlots.Any(s => s.Date.Date == asg.Date.Date && s.ShiftLabel == asg.ShiftLabel))
                         .Where(v => !solution.HasAssignment(v.UserId, asg.ShiftId, asg.Date))
                         .Where(v => CanAcceptShift(solution, constraints, v, asg.Date, asg.ShiftLabel))
+                        .OrderBy(v => solution.GetUserAllAssignments(v.UserId).Count)
                         .ToList();
 
                     foreach (var v in donors)
                     {
                         if (ShiftManagerRules.RequiresAnyManager(targetShiftReq))
                         {
-                            var (reqTotal, reqL1) = ShiftManagerRules.GetRequirement(targetShiftReq);
+                            var (targetReqTotal, targetReqL1) = ShiftManagerRules.GetRequirement(targetShiftReq);
                             var currentAssignees = solution.GetShiftAssignments(asg.ShiftId, asg.Date)
                                 .Where(a => !a.IsOnCall && a.UserId != u.UserId)
                                 .Select(a => constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId))
                                 .Where(x => x != null)
                                 .ToList();
                             currentAssignees.Add(v);
-                            if (currentAssignees.Count(ShiftManagerRules.IsLevel1) < reqL1
-                                || currentAssignees.Count(ShiftManagerRules.IsManager) < reqTotal)
+                            if (currentAssignees.Count(ShiftManagerRules.IsLevel1) < targetReqL1
+                                || currentAssignees.Count(ShiftManagerRules.IsManager) < targetReqTotal)
                             {
                                 continue;
                             }
@@ -915,6 +1010,30 @@ public static class ShiftCoverageGuard
 
                         if (CanAcceptShift(solution, constraints, u, date, shiftReq.ShiftLabel))
                         {
+                            // بررسی الزامات مسئول شیفت بر روی تاریخ هدف در صورت نیاز
+                            if (requiresManager)
+                            {
+                                var currentAssigneesOnTarget = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                                    .Where(a => !a.IsOnCall)
+                                    .Select(a => constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId))
+                                    .Where(x => x != null)
+                                    .Cast<UserConstraint>()
+                                    .ToList();
+                                var missL1 = Math.Max(0, reqL1 - currentAssigneesOnTarget.Count(ShiftManagerRules.IsLevel1));
+                                var missTot = Math.Max(0, reqTotal - currentAssigneesOnTarget.Count(ShiftManagerRules.IsManager));
+
+                                if (missing <= missL1 && !ShiftManagerRules.IsLevel1(u))
+                                {
+                                    RestoreFromBackup(solution, backup);
+                                    continue;
+                                }
+                                if (missing <= missTot && !ShiftManagerRules.IsManager(u))
+                                {
+                                    RestoreFromBackup(solution, backup);
+                                    continue;
+                                }
+                            }
+
                             solution.AddAssignment(u.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall: false);
                             missing--;
                             break; // با موفقیت پر شد، حلقه donors پایان یابد
