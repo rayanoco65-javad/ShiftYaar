@@ -734,12 +734,18 @@ public static class ShiftCoverageGuard
             foreach (var user in candidates)
             {
                 if (missing <= 0) break;
-                if (!solution.HasAssignment(user.UserId, shiftReq.ShiftId, date) && CanAcceptShift(solution, constraints, user, date, shiftReq.ShiftLabel))
+                if (!solution.HasAssignment(user.UserId, shiftReq.ShiftId, date) && CanAcceptShift(solution, constraints, user, date, shiftReq.ShiftLabel, allowSoftRuleRelaxation: allowEmergencyRelaxation))
                 {
                     solution.AddAssignment(user.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall: false);
                     missing--;
                 }
             }
+        }
+
+        if (missing > 0)
+        {
+            // فاز نهایی تسکین اضطراری: تلاش مجدد با جابجایی روزهای مجاور در حالت اضطراری (بدون قفل نقش مدیریتی جهت تضمین ۱۰۰٪ ظرفیت فیزیکی)
+            TryFillByRelievingAdjacentWorkDay(solution, constraints, shiftReq, date, specialtyReq, ref missing, allowEmergencyRelaxation: true);
         }
     }
 
@@ -921,7 +927,9 @@ public static class ShiftCoverageGuard
         {
             if (missing <= 0) break;
 
-            var maxOffset = Math.Max(3, u.MaxConsecutiveShifts);
+            var maxOffset = allowEmergencyRelaxation
+                ? Math.Max(6, u.MaxConsecutiveShifts + 3)
+                : Math.Max(3, u.MaxConsecutiveShifts);
             var candidateDates = new List<DateTime>();
             var userWorkDates = MaxConsecutiveWorkdayRules.GetCountableWorkDates(solution, u);
 
@@ -1022,15 +1030,18 @@ public static class ShiftCoverageGuard
                                 var missL1 = Math.Max(0, reqL1 - currentAssigneesOnTarget.Count(ShiftManagerRules.IsLevel1));
                                 var missTot = Math.Max(0, reqTotal - currentAssigneesOnTarget.Count(ShiftManagerRules.IsManager));
 
-                                if (missing <= missL1 && !ShiftManagerRules.IsLevel1(u))
+                                if (!allowEmergencyRelaxation)
                                 {
-                                    RestoreFromBackup(solution, backup);
-                                    continue;
-                                }
-                                if (missing <= missTot && !ShiftManagerRules.IsManager(u))
-                                {
-                                    RestoreFromBackup(solution, backup);
-                                    continue;
+                                    if (missing <= missL1 && !ShiftManagerRules.IsLevel1(u))
+                                    {
+                                        RestoreFromBackup(solution, backup);
+                                        continue;
+                                    }
+                                    if (missing <= missTot && !ShiftManagerRules.IsManager(u))
+                                    {
+                                        RestoreFromBackup(solution, backup);
+                                        continue;
+                                    }
                                 }
                             }
 
@@ -1219,7 +1230,8 @@ public static class ShiftCoverageGuard
         ShiftConstraints constraints,
         UserConstraint user,
         DateTime date,
-        ShiftLabel label)
+        ShiftLabel label,
+        bool allowSoftRuleRelaxation = false)
     {
         // بررسی مجوز نوع شیفت با آگاهی از تاریخ:
         // کاربر فقط در صورتی می‌تواند این نوع شیفت را بگیرد که یا مجوز کلی داشته باشد
@@ -1269,7 +1281,7 @@ public static class ShiftCoverageGuard
             }
         }
 
-        if (label == ShiftLabel.Night && user.MinDaysBetweenNightShifts > 0)
+        if (label == ShiftLabel.Night && user.MinDaysBetweenNightShifts > 0 && !allowSoftRuleRelaxation)
         {
             foreach (var n in solution.GetUserAllAssignments(user.UserId)
                          .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall))

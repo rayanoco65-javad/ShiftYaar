@@ -92,9 +92,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 ShiftEligibilityGuard.StripIneligibleAssignments(bestSolution, _constraints);
                 AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSolution, _constraints);
                 MaxConsecutiveWorkdayGuard.Enforce(bestSolution, _constraints);
+                PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: false);
                 ShiftCoverageGuard.ForceFillAllMissingCoverage(bestSolution, _constraints);
                 ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
-                PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: false);
 
                 if (DailyDuplicateAssignmentGuard.GetViolations(bestSolution, _constraints).Count == 0
                     && ShiftEligibilityGuard.GetViolations(bestSolution, _constraints).Count == 0
@@ -104,6 +104,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 {
                     break;
                 }
+            }
+            if (ShiftCoverageGuard.GetUnderCapacityViolations(bestSolution, _constraints).Count > 0)
+            {
+                ShiftCoverageGuard.ForceFillAllMissingCoverage(bestSolution, _constraints);
+                ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
             }
             RefreshSolutionViolations(bestSolution);
             stopwatch.Stop();
@@ -147,17 +152,30 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             ExactNightQuotaGuard.OptimizeSpread(bestSolution, _constraints);
-            OvertimeBalanceGuard.Enforce(bestSolution, _constraints);
-            PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: false);
-            AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSolution, _constraints);
-            if (!AllExactNightQuotasMet(bestSolution))
+            for (var pass = 0; pass < 3; pass++)
             {
-                RestoreDeficitNightQuotas(bestSolution);
-                PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: false);
+                DailyDuplicateAssignmentGuard.StripDuplicates(bestSolution, _constraints);
+                ShiftEligibilityGuard.StripIneligibleAssignments(bestSolution, _constraints);
                 AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSolution, _constraints);
+                MaxConsecutiveWorkdayGuard.Enforce(bestSolution, _constraints);
+                PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: false);
+                ShiftCoverageGuard.ForceFillAllMissingCoverage(bestSolution, _constraints);
+                ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
+
+                if (DailyDuplicateAssignmentGuard.GetViolations(bestSolution, _constraints).Count == 0
+                    && ShiftEligibilityGuard.GetViolations(bestSolution, _constraints).Count == 0
+                    && AdjacentShiftRestGuard.GetViolations(bestSolution, _constraints).Count == 0
+                    && MaxConsecutiveWorkdayRules.GetViolations(bestSolution, _constraints).Count == 0
+                    && ShiftCoverageGuard.GetUnderCapacityViolations(bestSolution, _constraints).Count == 0)
+                {
+                    break;
+                }
             }
-            ShiftCoverageGuard.ForceFillAllMissingCoverage(bestSolution, _constraints);
-            ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
+            if (ShiftCoverageGuard.GetUnderCapacityViolations(bestSolution, _constraints).Count > 0)
+            {
+                ShiftCoverageGuard.ForceFillAllMissingCoverage(bestSolution, _constraints);
+                ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
+            }
             RefreshSolutionViolations(bestSolution);
             stopwatch.Stop();
             _statistics.ExecutionTime = stopwatch.Elapsed;
@@ -1695,6 +1713,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 {
                     break;
                 }
+            }
+            if (ShiftCoverageGuard.GetUnderCapacityViolations(solution, _constraints).Count > 0)
+            {
+                ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, _constraints);
+                ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             }
             solution.Score = CalculateSolutionScore(solution);
             RefreshSolutionViolations(solution);

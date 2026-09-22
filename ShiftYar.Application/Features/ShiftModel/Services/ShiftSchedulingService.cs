@@ -967,6 +967,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                             break;
                         }
                     }
+                    if (ShiftCoverageGuard.GetUnderCapacityViolations(candidateSolution, constraints).Count > 0)
+                    {
+                        ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
+                        ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+                    }
                     scheduler.RefreshSolutionViolations(candidateSolution);
 
                     EnsureApprovedRequestsOrThrow(scheduler, candidateSolution, constraints);
@@ -3335,6 +3340,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     break;
                 }
             }
+            if (ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints).Count > 0)
+            {
+                ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
+                ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            }
             scheduler.RefreshSolutionViolations(solution);
 
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
@@ -3467,6 +3477,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         {
                             break;
                         }
+                    }
+                    if (ShiftCoverageGuard.GetUnderCapacityViolations(candidateSolution, constraints).Count > 0)
+                    {
+                        ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
+                        ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
                     }
                     scheduler.RefreshSolutionViolations(candidateSolution);
 

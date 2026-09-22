@@ -285,6 +285,109 @@ public class DiagnoseDept2NightQuotasTests
     }
 
     [Fact]
+    public async Task Test_LiveService_OptimizeShiftScheduleInternalAsync()
+    {
+        var connStr = "Data Source=chogolisa.liara.cloud,34729;Initial Catalog=ShiftYarDb2;User Id=sa;Password=DwOr8efLcjXBVQ10jGYx5dhy;MultipleActiveResultSets=true;TrustServerCertificate=true";
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string>
+        {
+            ["ConnectionStrings:DefaultConnection"] = connStr
+        }).Build();
+        services.AddSingleton<IConfiguration>(config);
+        services.AddLogging(builder => builder.AddConsole());
+        services.AddInfrastructure(config);
+        services.AddApplication();
+        services.AddHttpContextAccessor();
+        services.AddSingleton<ISchedulingJobStore, SchedulingJobStore>();
+        var sp = services.BuildServiceProvider();
+        var service = (ShiftYar.Application.Features.ShiftModel.Services.ShiftSchedulingService)sp.GetRequiredService<IShiftSchedulingService>();
+
+        var internalRequest = new ShiftSchedulingRequestInternalDto
+        {
+            DepartmentId = 2,
+            StartDate = new DateTime(2026, 8, 23),
+            EndDate = new DateTime(2026, 9, 22),
+            Algorithm = SchedulingAlgorithm.SimulatedAnnealing
+        };
+
+        var response = await service.OptimizeShiftScheduleInternalAsync(internalRequest);
+        _output.WriteLine($"IsSuccess: {response.IsSuccess}, Message: {response.Message}");
+        if (!response.IsSuccess)
+        {
+            _output.WriteLine($"FAILURE REASON: {response.Message}");
+        }
+        else
+        {
+            _output.WriteLine($"Violations count: {response.Data?.Violations?.Count ?? 0}");
+            foreach (var v in response.Data?.Violations ?? new List<string>())
+            {
+                _output.WriteLine($"Violation: {v}");
+            }
+        }
+        Assert.True(response.IsSuccess, response.Message);
+    }
+
+    [Fact]
+    public async Task Test_CheckCurrentSavedAssignmentsInLiaraDb()
+    {
+        var connStr = "Data Source=chogolisa.liara.cloud,34729;Initial Catalog=ShiftYarDb2;User Id=sa;Password=DwOr8efLcjXBVQ10jGYx5dhy;MultipleActiveResultSets=true;TrustServerCertificate=true";
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string>
+        {
+            ["ConnectionStrings:DefaultConnection"] = connStr
+        }).Build();
+        services.AddSingleton<IConfiguration>(config);
+        services.AddLogging(builder => builder.AddConsole());
+        services.AddInfrastructure(config);
+        services.AddApplication();
+        services.AddHttpContextAccessor();
+        services.AddSingleton<ISchedulingJobStore, SchedulingJobStore>();
+        var sp = services.BuildServiceProvider();
+        var service = sp.GetRequiredService<IShiftSchedulingService>();
+
+        var filter = new ShiftYar.Application.Features.ShiftModel.Filters.ShiftScheduleFilter
+        {
+            DepartmentId = 2,
+            PageNumber = 1,
+            PageSize = 2000
+        };
+
+        var response = await service.GetFilteredShiftSchedulesAsync(filter);
+        _output.WriteLine($"Total assignments in DB for Dept 2: {response.Data?.TotalCount ?? 0}");
+
+        var start = new DateTime(2026, 8, 23);
+        var end = new DateTime(2026, 9, 22);
+
+        _output.WriteLine("\n=== CHECKING ALL DAYS IN SHAHRIVAR 1405 ===");
+        var deficitsFound = 0;
+        for (var d = start; d <= end; d = d.AddDays(1))
+        {
+            var pDate = DateConverter.ConvertToPersianDate(d);
+            var dayItems = response.Data?.Items?.Where(x => x.Date?.Date == d.Date).ToList() ?? new List<ShiftScheduleDtoGet>();
+            var m = dayItems.Count(x => x.ShiftId == 4);
+            var e = dayItems.Count(x => x.ShiftId == 5);
+            var n = dayItems.Count(x => x.ShiftId == 6);
+            var isHol = dayItems.FirstOrDefault()?.IsHoliday ?? (d.DayOfWeek == DayOfWeek.Friday);
+            var reqM = isHol ? 3 : 4;
+            var reqE = 3;
+            var reqN = 4;
+            var reqTot = reqM + reqE + reqN;
+
+            var status = (m >= reqM && e >= reqE && n >= reqN) ? "OK" : "DEFICIT";
+            if (status == "DEFICIT") deficitsFound++;
+            _output.WriteLine($"Date {pDate} ({d:yyyy-MM-dd}, Hol={isHol}): Total={dayItems.Count}/{reqTot} (M={m}/{reqM}, E={e}/{reqE}, N={n}/{reqN}) => {status}");
+            if (status == "DEFICIT")
+            {
+                foreach (var item in dayItems)
+                {
+                    _output.WriteLine($"   {item.ShiftTitle}: {item.UserFullName} (UserId={item.UserId})");
+                }
+            }
+        }
+        _output.WriteLine($"\nTotal Days with Deficit: {deficitsFound}");
+    }
+
+    [Fact]
     public void Test_DiagnoseUser25Deficit()
     {
         var path = @"C:\Users\Paria\.gemini\antigravity\brain\2e803de5-ca99-49b4-a5e7-a2d4d5605940\scratch\dept2_loaded_constraints.json";
@@ -2147,6 +2250,115 @@ public class DiagnoseDept2NightQuotasTests
 
         ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
         CheckDates("16. After ShiftEligibilityGuard.StripIneligibleAssignments");
+    }
+
+    [Fact]
+    public void Test_ReproduceTargetDatesAcrossSeeds()
+    {
+        var path = @"C:\Users\Paria\.gemini\antigravity\brain\2e803de5-ca99-49b4-a5e7-a2d4d5605940\scratch\dept2_loaded_constraints.json";
+        if (!System.IO.File.Exists(path)) return;
+        var json = System.IO.File.ReadAllText(path);
+
+        var targetDates = new[]
+        {
+            new DateTime(2026, 9, 5),  // 14 Shahrivar
+            new DateTime(2026, 9, 8),  // 17 Shahrivar
+            new DateTime(2026, 9, 15), // 24 Shahrivar
+            new DateTime(2026, 9, 22)  // 31 Shahrivar
+        };
+
+        for (int run = 1; run <= 10; run++)
+        {
+            _output.WriteLine($"--- Starting Run #{run} ---");
+            var constraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(json)!;
+            var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+            {
+                InitialTemperature = 1000.0,
+                FinalTemperature = 0.1,
+                CoolingRate = 0.997,
+                MaxIterations = 5000,
+                MaxIterationsWithoutImprovement = 500
+            });
+
+            _output.WriteLine($"Run #{run}: Optimizing...");
+            var solution = scheduler.Optimize();
+            _output.WriteLine($"Run #{run}: Optimize finished. Score={solution.Score}");
+
+            var underImmediatelyAfterOptimize = ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints);
+            _output.WriteLine($"Run #{run}: Immediately after Optimize(): UnderCapacity = {underImmediatelyAfterOptimize.Count}");
+            foreach (var u in underImmediatelyAfterOptimize)
+            {
+                _output.WriteLine($"   AFTER OPTIMIZE DEFICIT: {u}");
+            }
+
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+            ExactNightQuotaGuard.Enforce(solution, constraints);
+            scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
+            if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
+            {
+                ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+                ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+                ExactNightQuotaGuard.Enforce(solution, constraints);
+            }
+
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            MorningEveningBalanceGuard.Enforce(solution, constraints);
+            OvertimeBalanceGuard.Enforce(solution, constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
+            ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            ExactNightQuotaGuard.Enforce(solution, constraints);
+            scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
+
+            for (var pass = 0; pass < 3; pass++)
+            {
+                DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
+                ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
+                AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+                MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
+                scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
+                ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
+                ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+
+                if (DailyDuplicateAssignmentGuard.GetViolations(solution, constraints).Count == 0
+                    && ShiftEligibilityGuard.GetViolations(solution, constraints).Count == 0
+                    && AdjacentShiftRestGuard.GetViolations(solution, constraints).Count == 0
+                    && MaxConsecutiveWorkdayRules.GetViolations(solution, constraints).Count == 0
+                    && ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints).Count == 0)
+                {
+                    break;
+                }
+            }
+
+            var under = ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints);
+            _output.WriteLine($"Run #{run}: UnderCapacity violations = {under.Count}");
+            foreach (var u in under)
+            {
+                _output.WriteLine($"   RUN {run} FAIL: {u}");
+            }
+
+            foreach (var td in targetDates)
+            {
+                var fa = DateConverter.ConvertToPersianDate(td);
+                var dayAsgs = solution.Assignments.Values.Where(a => a.Date.Date == td.Date && !a.IsOnCall).ToList();
+                var m = dayAsgs.Count(a => a.ShiftLabel == ShiftLabel.Morning);
+                var e = dayAsgs.Count(a => a.ShiftLabel == ShiftLabel.Evening);
+                var n = dayAsgs.Count(a => a.ShiftLabel == ShiftLabel.Night);
+                if (m < 4 || e < 3 || n < 4)
+                {
+                    _output.WriteLine($"   RUN {run} TARGET DEFICIT on {fa} ({td:yyyy-MM-dd}): M={m}/4, E={e}/3, N={n}/4");
+                }
+            }
+
+            Assert.Equal(0, underImmediatelyAfterOptimize.Count);
+            Assert.Equal(0, under.Count);
+        }
     }
 }
 
