@@ -1,4 +1,4 @@
-﻿using Google.OrTools.Sat;
+using Google.OrTools.Sat;
 using ShiftYar.Application.Features.ShiftModel.OrTools.Models;
 using System;
 using System.Collections.Generic;
@@ -721,7 +721,6 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools
             solver.StringParameters = $"max_time_in_seconds:{_parameters.MaxTimeInSeconds}," +
                                     $"num_search_workers:{_parameters.NumSearchWorkers}," +
                                     $"log_search_progress:{_parameters.LogSearchProgress.ToString().ToLower()}," +
-                                    $"max_solutions:{_parameters.MaxSolutions}," +
                                     $"relative_gap_limit:{_parameters.RelativeGapLimit}";
 
             if (_parameters.LogSearchProgress)

@@ -582,6 +582,29 @@ public class ShiftCoverageGuardTests
         Assert.True(solution.HasAssignment(u1.UserId, 1, new DateTime(2026, 9, 8)));
     }
 
+    [Fact]
+    public void UnderCapacityViolations_AreFormattedWithPersianDatesAndDeficits()
+    {
+        var start = new DateTime(2026, 8, 25);
+        var end = new DateTime(2026, 8, 25);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = end,
+            UserConstraints = [MakeUser(1)],
+            ShiftRequirements = [Shift(4, ShiftLabel.Morning, required: 4)],
+            HardRules = new HardRuleSet(),
+            GlobalConstraints = new GlobalConstraints()
+        };
+
+        var solution = new ShiftSolution();
+        // Zero assignments for a required shift of 4
+        var violations = ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints);
+
+        Assert.NotEmpty(violations);
+        Assert.Contains(violations, v => v.Contains("ظرفیت تکمیل نشده") && v.Contains("1405/06/03") && v.Contains("4 نفر کسری"));
+    }
+
     private static UserConstraint MakeUser(int id) => new()
     {
         UserId = id,

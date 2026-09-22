@@ -981,7 +981,7 @@ public static class ShiftCoverageGuard
                         .Where(v => !v.UnavailableDates.Any(d => d.Date == asg.Date.Date))
                         .Where(v => !v.UnavailableShiftSlots.Any(s => s.Date.Date == asg.Date.Date && s.ShiftLabel == asg.ShiftLabel))
                         .Where(v => !solution.HasAssignment(v.UserId, asg.ShiftId, asg.Date))
-                        .Where(v => CanAcceptShift(solution, constraints, v, asg.Date, asg.ShiftLabel))
+                        .Where(v => CanAcceptShift(solution, constraints, v, asg.Date, asg.ShiftLabel, allowSoftRuleRelaxation: allowEmergencyRelaxation))
                         .OrderBy(v => solution.GetUserAllAssignments(v.UserId).Count)
                         .ToList();
 
@@ -1016,7 +1016,7 @@ public static class ShiftCoverageGuard
                             SkeletonAssignmentGuard.LockSlotManagerAssignments(solution, constraints, targetShiftReq, asg.Date);
                         }
 
-                        if (CanAcceptShift(solution, constraints, u, date, shiftReq.ShiftLabel))
+                        if (CanAcceptShift(solution, constraints, u, date, shiftReq.ShiftLabel, allowSoftRuleRelaxation: allowEmergencyRelaxation))
                         {
                             // بررسی الزامات مسئول شیفت بر روی تاریخ هدف در صورت نیاز
                             if (requiresManager)

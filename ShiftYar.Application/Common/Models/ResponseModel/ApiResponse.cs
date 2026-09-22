@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -17,5 +17,8 @@ namespace ShiftYar.Application.Common.Models.ResponseModel
 
         public static ApiResponse<T> Fail(string message)
             => new ApiResponse<T> { IsSuccess = false, Message = message };
+
+        public static ApiResponse<T> Fail(string message, T? data)
+            => new ApiResponse<T> { IsSuccess = false, Message = message, Data = data };
     }
 }

@@ -154,6 +154,19 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 _logger.LogInformation("Shift scheduling optimization completed. Final score: {Score}, Algorithm: {Algorithm}",
                     result.FinalScore, result.AlgorithmUsed);
 
+                var underCapacityViolations = result.Violations?
+                    .Where(v => v.Contains("ظرفیت تکمیل نشده") || v.Contains("Under capacity"))
+                    .ToList() ?? new List<string>();
+
+                if (underCapacityViolations.Count > 0 || result.AlgorithmStatus == "Failed")
+                {
+                    var errorMsg = underCapacityViolations.Count > 0
+                        ? "امکان تکمیل شیفت‌بندی وجود ندارد؛ ظرفیت شیفت‌ها در روزهای زیر تکمیل نشده است:\n" + string.Join("\n", underCapacityViolations)
+                        : (result.Violations?.FirstOrDefault() ?? "الگوریتم بهینه‌سازی موفق به تکمیل کلیهٔ ظرفیت‌های درخواستی نشد.");
+                    _logger.LogWarning("Optimization finished with incomplete shift coverage for DepartmentId={DepartmentId}: {Error}", request.DepartmentId, errorMsg);
+                    return ApiResponse<ShiftSchedulingResultDto>.Fail(errorMsg, result);
+                }
+
                 return ApiResponse<ShiftSchedulingResultDto>.Success(result);
             }
             catch (Exception ex)
@@ -200,6 +213,19 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                 _logger.LogInformation("Shift scheduling optimization completed. Final score: {Score}, Algorithm: {Algorithm}",
                     result.FinalScore, result.AlgorithmUsed);
+
+                var underCapacityViolations = result.Violations?
+                    .Where(v => v.Contains("ظرفیت تکمیل نشده") || v.Contains("Under capacity"))
+                    .ToList() ?? new List<string>();
+
+                if (underCapacityViolations.Count > 0 || result.AlgorithmStatus == "Failed")
+                {
+                    var errorMsg = underCapacityViolations.Count > 0
+                        ? "امکان تکمیل شیفت‌بندی وجود ندارد؛ ظرفیت شیفت‌ها در روزهای زیر تکمیل نشده است:\n" + string.Join("\n", underCapacityViolations)
+                        : (result.Violations?.FirstOrDefault() ?? "الگوریتم بهینه‌سازی موفق به تکمیل کلیهٔ ظرفیت‌های درخواستی نشد.");
+                    _logger.LogWarning("Optimization finished with incomplete shift coverage for DepartmentId={DepartmentId}: {Error}", request.DepartmentId, errorMsg);
+                    return ApiResponse<ShiftSchedulingResultDto>.Fail(errorMsg, result);
+                }
 
                 return ApiResponse<ShiftSchedulingResultDto>.Success(result);
             }
@@ -266,6 +292,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 if (!optimizationResult.IsSuccess)
                 {
                     return ApiResponse<object>.Fail(optimizationResult.Message ?? "Optimization failed");
+                }
+
+                if (optimizationResult.Data?.Violations != null &&
+                    optimizationResult.Data.Violations.Any(v => v.Contains("ظرفیت تکمیل نشده") || v.Contains("Under capacity")))
+                {
+                    var underCapacityViolations = optimizationResult.Data.Violations
+                        .Where(v => v.Contains("ظرفیت تکمیل نشده") || v.Contains("Under capacity"))
+                        .ToList();
+                    return ApiResponse<object>.Fail("امکان ذخیره شیفت‌بندی ناقص وجود ندارد؛ ظرفیت شیفت‌ها در روزهای زیر تکمیل نشده است:\n" + string.Join("\n", underCapacityViolations));
                 }
 
                 await ReportJobProgressAsync(backgroundJobId, "Saving optimized schedule...");
@@ -3301,7 +3336,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
             ExactNightQuotaGuard.Enforce(solution, constraints);
 
-            scheduler.PerformFinalManagerMixRepairSweep(solution);
+            scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
 
             if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
             {
