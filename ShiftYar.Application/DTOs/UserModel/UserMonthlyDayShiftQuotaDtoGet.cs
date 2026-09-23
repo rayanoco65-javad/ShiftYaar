@@ -1,3 +1,5 @@
+using static ShiftYar.Domain.Enums.ShiftModel.ShiftEnums;
+
 namespace ShiftYar.Application.DTOs.UserModel
 {
     public class UserMonthlyDayShiftQuotaDtoGet
@@ -18,5 +20,8 @@ namespace ShiftYar.Application.DTOs.UserModel
         public bool? EveningFallbackParticipation { get; set; }
         public int? ExactHolidayEveningShiftCount { get; set; }
         public bool? EveningHolidayFallbackParticipation { get; set; }
+
+        public bool IsWeeklyAlternatingActive { get; set; }
+        public ShiftLabel? FirstWeekShiftLabel { get; set; }
     }
 }

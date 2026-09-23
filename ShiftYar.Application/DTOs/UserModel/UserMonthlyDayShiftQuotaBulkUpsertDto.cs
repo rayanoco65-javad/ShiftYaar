@@ -45,5 +45,9 @@ namespace ShiftYar.Application.DTOs.UserModel
         public int? ExactHolidayEveningShiftCount { get; set; }
 
         public bool? EveningHolidayFallbackParticipation { get; set; }
+
+        public bool? IsWeeklyAlternatingActive { get; set; }
+
+        public ShiftYar.Domain.Enums.ShiftModel.ShiftEnums.ShiftLabel? FirstWeekShiftLabel { get; set; }
     }
 }

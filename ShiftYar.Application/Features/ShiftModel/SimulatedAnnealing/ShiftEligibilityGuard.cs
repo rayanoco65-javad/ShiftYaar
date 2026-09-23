@@ -55,8 +55,20 @@ public static class ShiftEligibilityGuard
 
             if (!IsAssignmentEligible(solution, constraints, assignment))
             {
-                violations.Add(
-                    $"نوع شیفت نقض شد: کاربر {user.UserId} ({user.UserName}) نوع شیفتش اجازهٔ {assignment.ShiftLabel} در {assignment.Date:yyyy-MM-dd} را نمی‌دهد.");
+                if (user.IsWeeklyAlternatingActive && user.FirstWeekShiftLabel.HasValue
+                    && (assignment.ShiftLabel == ShiftLabel.Morning || assignment.ShiftLabel == ShiftLabel.Evening))
+                {
+                    var refStart = constraints.StartDate != default ? constraints.StartDate : ShiftModel.Services.WeeklyAlternatingShiftService.GetPersianMonthStart(assignment.Date);
+                    var weekNum = ShiftModel.Services.WeeklyAlternatingShiftService.GetWeekNumber(assignment.Date, refStart);
+                    var allowed = ShiftModel.Services.WeeklyAlternatingShiftService.GetAllowedDayShift(weekNum, user.FirstWeekShiftLabel.Value);
+                    violations.Add(
+                        $"تناوب هفتگی نقض شد: کاربر {user.UserId} ({user.UserName}) در هفته {weekNum} شیفت متضاد {assignment.ShiftLabel} در تاریخ {assignment.Date:yyyy-MM-dd} دارد (شیفت مجاز: {allowed}).");
+                }
+                else
+                {
+                    violations.Add(
+                        $"نوع شیفت نقض شد: کاربر {user.UserId} ({user.UserName}) نوع شیفتش اجازهٔ {assignment.ShiftLabel} در {assignment.Date:yyyy-MM-dd} را نمی‌دهد.");
+                }
             }
         }
 
@@ -94,6 +106,7 @@ public static class ShiftEligibilityGuard
             assignment.ShiftLabel,
             maxPerDay,
             constraints.HardRules.ForbidDuplicateDailyAssignments,
-            assignment.Date);
+            assignment.Date,
+            constraints.StartDate);
     }
 }

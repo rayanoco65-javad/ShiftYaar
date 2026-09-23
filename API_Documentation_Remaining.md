@@ -25,6 +25,7 @@
 17. [کنترلر نقش-مجوز (RolePermissionController)](#17-کنترلر-نقش-مجوز-rolepermissioncontroller)
 18. [کنترلر تنظیمات الگوریتم (AlgorithmSettingsController)](#18-کنترلر-تنظیمات-الگوریتم-algorithmsettingscontroller)
 19. [کنترلر تقویم (CalendarSeederController)](#19-کنترلر-تقویم-calendarseedercontroller)
+20. [کنترلر سهمیه روزانه و تناوب هفتگی (UserMonthlyDayShiftQuotaController)](#20-کنترلر-سهمیه-روزانه-و-تناوب-هفتگی-usermonthlydayshiftquotacontroller)
 
 ---
 
@@ -1260,11 +1261,100 @@ POST /SeedYear?year=1404
 - این اکشن تمام روزهای سال شمسی را با نگاشت به تاریخ میلادی ایجاد می‌کند
 - تعطیلات رسمی ایران به صورت خودکار در تقویم ثبت می‌شوند
 - قبل از استفاده از سیستم شیفت‌بندی، باید تقویم سال مورد نظر ایجاد شده باشد
+
+---
+
+## 20. کنترلر سهمیه روزانه و تناوب هفتگی (UserMonthlyDayShiftQuotaController)
+
+### توضیح نقش کنترلر
+این کنترلر وظیفه مدیریت سهمیه شیفت‌های روزانه (صبح و عصر)، وضعیت مشارکت در توزیع مازاد و فعال‌سازی **قانون تخصیص متناوب هفتگی شیفت‌های روزانه با تعیین شیفت آغازین** را برای هر پرسنل در یک ماه شمسی بر عهده دارد.
+
+### اکشن‌های POST
+
+#### 20.1. UpsertUserMonthlyDayShiftQuota
+- **نوع اکشن:** POST
+- **آدرس Endpoint:** `/UpsertUserMonthlyDayShiftQuota`
+- **توضیح:** ایجاد یا ویرایش سهمیه شیفت روزانه و ترجیحات تناوب هفتگی برای یک کاربر مشخص در ماه شمسی.
+- **ورودی‌ها:** مدل `UserMonthlyDayShiftQuotaDtoAdd`
+- **خروجی:** مدل `ApiResponse<UserMonthlyDayShiftQuotaDtoGet>`
+- **Authentication/Authorization:** نیاز به توکن JWT معتبر (`[Authorize]`)
+
+##### مدل ورودی: UserMonthlyDayShiftQuotaDtoAdd
+
+| فیلد | نوع داده | ضروری | توضیح | محدودیت/اعتبارسنجی |
+|------|---------|-------|-------|---------------------|
+| `userId` | `int` | بله | شناسه کاربر | کاربر باید فعال و موجود باشد |
+| `departmentId` | `int` | بله | شناسه دپارتمان | کاربر باید به این دپارتمان متصل باشد |
+| `persianYear` | `int` | بله | سال شمسی | سال معتبر ۴ رقمی |
+| `persianMonth` | `int` | بله | ماه شمسی | ۱ تا ۱۲ |
+| `exactMorningShiftCount` | `int?` | خیر | تعداد قطعی شیفت صبح روزهای عادی | $\ge 0$ و $\le$ تعداد روزهای ماه |
+| `morningFallbackParticipation` | `bool?` | خیر | وضعیت مشارکت در توزیع مازاد صبح | `null` یا `true` = مشارکت، `false` = عدم مشارکت |
+| `exactHolidayMorningShiftCount` | `int?` | خیر | تعداد قطعی شیفت صبح روزهای تعطیل | $\ge 0$ و $\le$ تعداد تعطیلات ماه |
+| `morningHolidayFallbackParticipation` | `bool?` | خیر | مشارکت در مازاد صبح تعطیلات | `null` یا `true` = مشارکت، `false` = عدم مشارکت |
+| `exactEveningShiftCount` | `int?` | خیر | تعداد قطعی شیفت عصر روزهای عادی | $\ge 0$ و $\le$ تعداد روزهای ماه |
+| `eveningFallbackParticipation` | `bool?` | خیر | وضعیت مشارکت در توزیع مازاد عصر | `null` یا `true` = مشارکت، `false` = عدم مشارکت |
+| `exactHolidayEveningShiftCount` | `int?` | خیر | تعداد قطعی شیفت عصر روزهای تعطیل | $\ge 0$ و $\le$ تعداد تعطیلات ماه |
+| `eveningHolidayFallbackParticipation` | `bool?` | خیر | مشارکت در مازاد عصر تعطیلات | `null` یا `true` = مشارکت، `false` = عدم مشارکت |
+| `isWeeklyAlternatingActive` | `bool` | خیر | فعال‌سازی قانون تناوب هفتگی شیفت‌های روزانه | پیش‌فرض `false` |
+| `firstWeekShiftLabel` | `int?` | مشروط | شیفت آغازین هفته اول ماه شمسی | در صورت فعال بودن تناوب، الزامی است و منحصراً باید `0` (صبح) یا `1` (عصر) باشد |
+
+##### قوانین و منطق کسب‌وکار (Business Rules):
+1. **قانون تناوب هفتگی:**
+   - تقویم هفته‌ها بر اساس استاندارد تقویم ایران از **شنبه تا جمعه** محاسبه می‌شود (هفته‌های ناقص ابتدا یا انتهای ماه شمسی به عنوان هفته‌های تقویمی مستقل مدیریت می‌شوند).
+   - در هفته‌های فرد (۱، ۳، ۵): صرفاً شیفت اولیه تعیین‌شده (`firstWeekShiftLabel`) مجاز است.
+   - در هفته‌های زوج (۲، ۴): صرفاً شیفت متضاد روزانه (صبح ↔ عصر) مجاز است.
+2. **استثنای کامل شیفت شب و روزهای آف/مرخصی:** شیفت‌های شب و روزهای مرخصی/تعطیلی هیچ تداخلی با این قانون نداشته و طبق روال عادی بدون محدودیت تخصیص می‌یابند.
+3. **استثنای قطعی درخواست‌های شیفت تأییدشده (Approved Shift Requests):** درخواست‌های شیفت تأییدشده بر قانون تناوب اولویت مطلق دارند. اگر کاربری در هفته‌ای که سهمیه عصر دارد، یک درخواست شیفت صبح تأییدشده داشته باشد، شیفت صبح در برنامه اعمال می‌شود.
+4. **اعتبارسنجی دسترسی:** برای فعال‌سازی تناوب، پرسنل باید دسترسی هر دو شیفت صبح و عصر را داشته باشد.
+
+##### مثال درخواست:
+```json
+POST /UpsertUserMonthlyDayShiftQuota
+Content-Type: application/json
+
+{
+  "userId": 15,
+  "departmentId": 2,
+  "persianYear": 1404,
+  "persianMonth": 7,
+  "exactMorningShiftCount": 8,
+  "morningFallbackParticipation": true,
+  "exactHolidayMorningShiftCount": 1,
+  "morningHolidayFallbackParticipation": null,
+  "exactEveningShiftCount": 6,
+  "eveningFallbackParticipation": false,
+  "exactHolidayEveningShiftCount": 1,
+  "eveningHolidayFallbackParticipation": null,
+  "isWeeklyAlternatingActive": true,
+  "firstWeekShiftLabel": 0
+}
+```
+
+---
+
+#### 20.2. UpsertDepartmentMonthlyDayShiftQuotas
+- **نوع اکشن:** POST
+- **آدرس Endpoint:** `/UpsertDepartmentMonthlyDayShiftQuotas`
+- **توضیح:** ثبت و ویرایش گروهی (Bulk) سهمیه شیفت روزانه و ترجیحات تناوب هفتگی برای چندین پرسنل یک دپارتمان.
+- **ورودی‌ها:** مدل `UserMonthlyDayShiftQuotaBulkUpsertDto`
+- **خروجی:** لیست `ApiResponse<List<UserMonthlyDayShiftQuotaDtoGet>>`
+- **Authentication/Authorization:** نیاز به توکن JWT معتبر (`[Authorize]`)
+
+##### مدل ورودی: UserMonthlyDayShiftQuotaBulkUpsertDto
+
+| فیلد | نوع داده | ضروری | توضیح |
+|------|---------|-------|-------|
+| `departmentId` | `int` | بله | شناسه دپارتمان |
+| `persianYear` | `int` | بله | سال شمسی |
+| `persianMonth` | `int` | بله | ماه شمسی |
+| `items` | `List<UserMonthlyDayShiftQuotaItemDto>` | بله | لیست تنظیمات سهمیه و تناوب هفتگی پرسنل |
+
 ---
 
 **تاریخ ایجاد مستندات:** 2024  
 **نسخه API:** v1  
 **پروژه:** ShiftYar
+
 
 
 

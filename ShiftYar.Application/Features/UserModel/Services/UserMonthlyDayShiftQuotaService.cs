@@ -4,6 +4,7 @@ using ShiftYar.Application.Common.Filters;
 using ShiftYar.Application.Common.Models.ResponseModel;
 using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.DTOs.UserModel;
+using ShiftYar.Application.Features.ShiftModel.Services;
 using ShiftYar.Application.Features.UserModel.Filters;
 using ShiftYar.Application.Features.UserModel.Services;
 using ShiftYar.Application.Interfaces.Persistence;
@@ -146,6 +147,12 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 return ApiResponse<UserMonthlyDayShiftQuotaDtoGet>.Fail(permissionError);
             }
 
+            var alternatingError = ValidateWeeklyAlternatingPreference(user, dto.IsWeeklyAlternatingActive, dto.FirstWeekShiftLabel);
+            if (alternatingError != null)
+            {
+                return ApiResponse<UserMonthlyDayShiftQuotaDtoGet>.Fail(alternatingError);
+            }
+
             if (DayShiftQuotaPermissionValidator.HasAnyConfiguredValue(
                     values.ExactMorningShiftCount, values.MorningFallbackParticipation,
                     values.ExactHolidayMorningShiftCount, values.MorningHolidayFallbackParticipation,
@@ -209,11 +216,18 @@ namespace ShiftYar.Application.Features.UserModel.Services
                         $"کاربر {item.UserId}: {permissionError}");
                 }
 
+                var alternatingError = ValidateWeeklyAlternatingPreference(deptUserById[item.UserId], item.IsWeeklyAlternatingActive, item.FirstWeekShiftLabel);
+                if (alternatingError != null)
+                {
+                    return ApiResponse<List<UserMonthlyDayShiftQuotaDtoGet>>.Fail(
+                        $"کاربر {item.UserId}: {alternatingError}");
+                }
+
                 if (DayShiftQuotaPermissionValidator.HasAnyConfiguredValue(
-                        values.ExactMorningShiftCount, values.MorningFallbackParticipation,
-                        values.ExactHolidayMorningShiftCount, values.MorningHolidayFallbackParticipation,
-                        values.ExactEveningShiftCount, values.EveningFallbackParticipation,
-                        values.ExactHolidayEveningShiftCount, values.EveningHolidayFallbackParticipation))
+                    values.ExactMorningShiftCount, values.MorningFallbackParticipation,
+                    values.ExactHolidayMorningShiftCount, values.MorningHolidayFallbackParticipation,
+                    values.ExactEveningShiftCount, values.EveningFallbackParticipation,
+                    values.ExactHolidayEveningShiftCount, values.EveningHolidayFallbackParticipation))
                 {
                     var userLimitError = ValidateUserLimits(values, monthLimits, dto.PersianYear, dto.PersianMonth);
                     if (userLimitError != null)
@@ -250,7 +264,9 @@ namespace ShiftYar.Application.Features.UserModel.Services
                         ExactEveningShiftCount = values.ExactEveningShiftCount,
                         EveningFallbackParticipation = values.EveningFallbackParticipation,
                         ExactHolidayEveningShiftCount = values.ExactHolidayEveningShiftCount,
-                        EveningHolidayFallbackParticipation = values.EveningHolidayFallbackParticipation
+                        EveningHolidayFallbackParticipation = values.EveningHolidayFallbackParticipation,
+                        IsWeeklyAlternatingActive = item.IsWeeklyAlternatingActive,
+                        FirstWeekShiftLabel = item.FirstWeekShiftLabel
                     },
                     deptUserById[item.UserId],
                     values);
@@ -454,7 +470,8 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 values.ExactMorningShiftCount, values.MorningFallbackParticipation,
                 values.ExactHolidayMorningShiftCount, values.MorningHolidayFallbackParticipation,
                 values.ExactEveningShiftCount, values.EveningFallbackParticipation,
-                values.ExactHolidayEveningShiftCount, values.EveningHolidayFallbackParticipation);
+                values.ExactHolidayEveningShiftCount, values.EveningHolidayFallbackParticipation)
+                || dto.IsWeeklyAlternatingActive == true;
 
             if (entity == null)
             {
@@ -478,7 +495,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
                     CreateDate = now,
                     TheUserId = actorId
                 };
-                ApplyValues(entity, values);
+                ApplyValues(entity, values, dto.IsWeeklyAlternatingActive, dto.FirstWeekShiftLabel);
                 await _repository.AddAsync(entity);
             }
             else
@@ -497,7 +514,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
                         "سهمیه صبح/عصر ماهانه حذف شد.");
                 }
 
-                ApplyValues(entity, values);
+                ApplyValues(entity, values, dto.IsWeeklyAlternatingActive, dto.FirstWeekShiftLabel);
                 entity.UpdateDate = now;
                 entity.TheUserId = actorId;
                 _repository.Update(entity);
@@ -569,7 +586,11 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 null);
         }
 
-        private static void ApplyValues(UserMonthlyDayShiftQuota entity, DayShiftQuotaValues values)
+        private static void ApplyValues(
+            UserMonthlyDayShiftQuota entity,
+            DayShiftQuotaValues values,
+            bool? isWeeklyAlternatingActive,
+            ShiftLabel? firstWeekShiftLabel)
         {
             entity.ExactMorningShiftCount = values.ExactMorningShiftCount;
             entity.MorningFallbackParticipation = values.MorningFallbackParticipation;
@@ -579,6 +600,8 @@ namespace ShiftYar.Application.Features.UserModel.Services
             entity.EveningFallbackParticipation = values.EveningFallbackParticipation;
             entity.ExactHolidayEveningShiftCount = values.ExactHolidayEveningShiftCount;
             entity.EveningHolidayFallbackParticipation = values.EveningHolidayFallbackParticipation;
+            entity.IsWeeklyAlternatingActive = isWeeklyAlternatingActive ?? false;
+            entity.FirstWeekShiftLabel = entity.IsWeeklyAlternatingActive ? firstWeekShiftLabel : null;
         }
 
         private static UserMonthlyDayShiftQuotaDtoGet MapToDto(UserMonthlyDayShiftQuota entity) => new()
@@ -596,8 +619,54 @@ namespace ShiftYar.Application.Features.UserModel.Services
             ExactEveningShiftCount = entity.ExactEveningShiftCount,
             EveningFallbackParticipation = entity.EveningFallbackParticipation,
             ExactHolidayEveningShiftCount = entity.ExactHolidayEveningShiftCount,
-            EveningHolidayFallbackParticipation = entity.EveningHolidayFallbackParticipation
+            EveningHolidayFallbackParticipation = entity.EveningHolidayFallbackParticipation,
+            IsWeeklyAlternatingActive = entity.IsWeeklyAlternatingActive,
+            FirstWeekShiftLabel = entity.FirstWeekShiftLabel
         };
+
+        public static string? ValidateWeeklyAlternatingPreference(
+            User user,
+            bool? isWeeklyAlternatingActive,
+            ShiftLabel? firstWeekShiftLabel)
+        {
+            if (isWeeklyAlternatingActive != true)
+            {
+                return null;
+            }
+
+            if (!firstWeekShiftLabel.HasValue)
+            {
+                return "در صورت فعال بودن تناوب هفتگی، تعیین شیفت آغازین هفته اول (صبح یا عصر) الزامی است.";
+            }
+
+            if (!WeeklyAlternatingShiftService.IsDayShift(firstWeekShiftLabel.Value))
+            {
+                return "شیفت آغازین در تناوب هفتگی تنها می‌تواند صبح یا عصر باشد.";
+            }
+
+            if (user.AllowedShiftPermissions.HasValue)
+            {
+                var perms = user.AllowedShiftPermissions.Value;
+                if (!perms.HasFlag(UserShiftPermission.Morning) || !perms.HasFlag(UserShiftPermission.Evening))
+                {
+                    return "برای فعال‌سازی تناوب هفتگی، کاربر باید دسترسی هر دو شیفت صبح و عصر را داشته باشد.";
+                }
+            }
+            else
+            {
+                var allowed = ShiftEligibilityResolver.GetAllowedLabels(
+                    user.ShiftType ?? ShiftTypes.RotatingShift,
+                    user.ShiftSubType ?? ShiftSubTypes.TwoShifts,
+                    user.TwoShiftRotationPattern);
+
+                if (!allowed.Contains(ShiftLabel.Morning) || !allowed.Contains(ShiftLabel.Evening))
+                {
+                    return "برای فعال‌سازی تناوب هفتگی، نوع شیفت کاربر باید شامل هر دو شیفت صبح و عصر باشد.";
+                }
+            }
+
+            return null;
+        }
 
         private static bool IsValidMonth(int year, int month, out string error)
         {

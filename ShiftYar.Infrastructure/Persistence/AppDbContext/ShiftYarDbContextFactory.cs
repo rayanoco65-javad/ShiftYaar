@@ -30,7 +30,14 @@ namespace ShiftYar.Infrastructure.Persistence.AppDbContext
             var optionsBuilder = new DbContextOptionsBuilder<ShiftYarDbContext>();
             optionsBuilder.UseSqlServer(
                 connectionString,
-                sql => sql.CommandTimeout(600)); // 10 minutes for design-time migrations
+                sql =>
+                {
+                    sql.CommandTimeout(600); // 10 minutes for design-time migrations
+                    sql.EnableRetryOnFailure(
+                        maxRetryCount: 5,
+                        maxRetryDelay: TimeSpan.FromSeconds(10),
+                        errorNumbersToAdd: null);
+                });
 
             return new ShiftYarDbContext(optionsBuilder.Options);
         }

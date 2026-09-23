@@ -1,4 +1,5 @@
 using ShiftYar.Domain.Entities.BaseModel;
+using ShiftYar.Domain.Enums.ShiftModel;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
@@ -29,5 +30,11 @@ namespace ShiftYar.Domain.Entities.UserModel
         public bool? EveningFallbackParticipation { get; set; }
         public int? ExactHolidayEveningShiftCount { get; set; }
         public bool? EveningHolidayFallbackParticipation { get; set; }
+
+        /// <summary>وضعیت فعال بودن تخصیص شیفت‌های متناوب هفتگی (صبح و عصر) در ماه جاری</summary>
+        public bool IsWeeklyAlternatingActive { get; set; } = false;
+
+        /// <summary>شیفت انتخابی برای هفته اول ماه: صبح (0) یا عصر (1)</summary>
+        public ShiftEnums.ShiftLabel? FirstWeekShiftLabel { get; set; }
     }
 }

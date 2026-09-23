@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using static ShiftYar.Domain.Enums.ShiftModel.ShiftEnums;
 
 namespace ShiftYar.Application.DTOs.UserModel
 {
@@ -34,5 +35,9 @@ namespace ShiftYar.Application.DTOs.UserModel
         public int? ExactHolidayEveningShiftCount { get; set; }
 
         public bool? EveningHolidayFallbackParticipation { get; set; }
+
+        public bool? IsWeeklyAlternatingActive { get; set; }
+
+        public ShiftLabel? FirstWeekShiftLabel { get; set; }
     }
 }

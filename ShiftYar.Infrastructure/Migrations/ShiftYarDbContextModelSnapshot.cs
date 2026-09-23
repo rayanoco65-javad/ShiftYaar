@@ -1370,6 +1370,12 @@ namespace ShiftYar.Infrastructure.Migrations
                     b.Property<bool?>("MorningHolidayFallbackParticipation")
                         .HasColumnType("bit");
 
+                    b.Property<int?>("FirstWeekShiftLabel")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsWeeklyAlternatingActive")
+                        .HasColumnType("bit");
+
                     b.Property<int>("PersianMonth")
                         .HasColumnType("int");
 

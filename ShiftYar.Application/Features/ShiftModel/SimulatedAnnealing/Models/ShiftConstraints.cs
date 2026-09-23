@@ -129,6 +129,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public int? MorningNightHolidayCount { get; set; }
         public bool? MorningNightHolidayFallback { get; set; }
 
+        /// <summary>وضعیت فعال بودن تخصیص شیفت‌های متناوب هفتگی (صبح و عصر)</summary>
+        public bool IsWeeklyAlternatingActive { get; set; }
+        /// <summary>شیفت انتخابی هفته اول ماه: صبح (Morning) یا عصر (Evening)</summary>
+        public ShiftLabel? FirstWeekShiftLabel { get; set; }
+
         public bool CanBeShiftManager { get; set; }
         /// <summary>null = مسئول نیست؛ 1 = سطح ۱؛ 2 = سطح ۲</summary>
         public byte? ShiftManagerLevel { get; set; }

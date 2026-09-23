@@ -7,6 +7,7 @@ using ShiftYar.Application.DTOs.ShiftModel;
 using ShiftYar.Application.DTOs.ShiftModel.ShiftRequestModel;
 using ShiftYar.Application.Features.DepartmentModel.Filters;
 using ShiftYar.Application.Features.ShiftModel.Filters;
+using ShiftYar.Application.Features.ShiftModel.Services;
 using ShiftYar.Application.Features.ShiftRequestModel.Filters;
 using ShiftYar.Application.Features.UserModel.Services;
 using ShiftYar.Application.Interfaces.Persistence;
@@ -472,6 +473,7 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 return nightQuotaError;
             }
 
+
             var leaveCapacityError = await ValidateDailyLeaveCapacityAsync(entity);
             if (leaveCapacityError != null)
             {
@@ -799,6 +801,5 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
             // شب تعطیل/آخرهفته: ExactHoliday فقط حداقل شیفت‌بندی است، نه سقف تأیید درخواست
             return null;
         }
-
     }
 }

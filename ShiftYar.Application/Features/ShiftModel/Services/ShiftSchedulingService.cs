@@ -2219,6 +2219,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         ExactHolidayEveningShiftCount = dayShiftQuota?.ExactHolidayEveningShiftCount,
                         EveningFallbackParticipation = dayShiftQuota?.EveningFallbackParticipation,
                         EveningHolidayFallbackParticipation = dayShiftQuota?.EveningHolidayFallbackParticipation,
+                        IsWeeklyAlternatingActive = dayShiftQuota?.IsWeeklyAlternatingActive ?? false,
+                        FirstWeekShiftLabel = dayShiftQuota?.FirstWeekShiftLabel,
                         MorningEveningShiftCount = comboShiftQuota?.MorningEveningShiftCount,
                         MorningEveningFallbackParticipation = comboShiftQuota?.MorningEveningFallbackParticipation,
                         MorningEveningHolidayCount = comboShiftQuota?.MorningEveningHolidayCount,

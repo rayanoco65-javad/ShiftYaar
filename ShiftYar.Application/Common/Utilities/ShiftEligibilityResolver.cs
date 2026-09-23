@@ -1,3 +1,4 @@
+using ShiftYar.Application.Features.ShiftModel.Services;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
 using System;
 using System.Collections.Generic;
@@ -200,13 +201,25 @@ public static class ShiftEligibilityResolver
     /// بررسی می‌کند آیا کاربر می‌تواند این نوع شیفت را روی یک تاریخ خاص بگیرد:
     /// یا مجوز ذاتی دارد، یا درخواست تأییدشده‌ای دقیقاً برای همان تاریخ دارد.
     /// </summary>
-    public static bool MayTakeLabelOnDate(UserConstraint user, ShiftLabel label, DateTime date)
+    public static bool MayTakeLabelOnDate(UserConstraint user, ShiftLabel label, DateTime date, DateTime? rangeStartDate = null)
     {
         // درخواست تأییدشده دقیقاً برای همین تاریخ
         if (user.RequiredShiftSlots.Any(s => s.ShiftLabel == label && s.Date.Date == date.Date)
             || user.RequiredPresenceDates.Any(d => d.Date == date.Date))
         {
             return true;
+        }
+
+        // بررسی قانون تناوب هفتگی شیفت‌های روزانه (صبح و عصر)
+        if (user.IsWeeklyAlternatingActive && user.FirstWeekShiftLabel.HasValue &&
+            (label == ShiftLabel.Morning || label == ShiftLabel.Evening))
+        {
+            var refStart = rangeStartDate ?? WeeklyAlternatingShiftService.GetPersianMonthStart(date);
+            var allowed = WeeklyAlternatingShiftService.GetAllowedDayShiftForDate(date, refStart, user.FirstWeekShiftLabel.Value);
+            if (label != allowed)
+            {
+                return false;
+            }
         }
 
         return HasInherentPermission(user, label);
@@ -235,7 +248,8 @@ public static class ShiftEligibilityResolver
         ShiftLabel newLabel,
         int maxShiftsPerDay,
         bool forbidDuplicateLabels = true,
-        DateTime? date = null)
+        DateTime? date = null,
+        DateTime? rangeStartDate = null)
     {
         // درخواست شیفت تأییدشده صریح بر مجوزهای اولیه اولویت دارد
         // اگر تاریخ داده شده، فقط درخواست‌های همان روز را در نظر می‌گیریم
@@ -247,6 +261,18 @@ public static class ShiftEligibilityResolver
         {
             return DailyAssignmentRules.CanAddShift(
                 existingOnDay, newLabel, maxShiftsPerDay, forbidDuplicateLabels);
+        }
+
+        // بررسی قانون تناوب هفتگی شیفت‌های روزانه (صبح و عصر)
+        if (user.IsWeeklyAlternatingActive && user.FirstWeekShiftLabel.HasValue && date.HasValue &&
+            (newLabel == ShiftLabel.Morning || newLabel == ShiftLabel.Evening))
+        {
+            var refStart = rangeStartDate ?? WeeklyAlternatingShiftService.GetPersianMonthStart(date.Value);
+            var allowed = WeeklyAlternatingShiftService.GetAllowedDayShiftForDate(date.Value, refStart, user.FirstWeekShiftLabel.Value);
+            if (newLabel != allowed)
+            {
+                return false;
+            }
         }
 
         if (!UsesPermissionModel(user))
