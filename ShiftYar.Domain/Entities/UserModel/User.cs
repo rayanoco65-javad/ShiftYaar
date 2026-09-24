@@ -1,4 +1,4 @@
-﻿using ShiftYar.Domain.Entities.BaseModel;
+using ShiftYar.Domain.Entities.BaseModel;
 using ShiftYar.Domain.Entities.DepartmentModel;
 using ShiftYar.Domain.Entities.SecurityModel;
 using ShiftYar.Domain.Entities.ShiftModel;
@@ -41,6 +41,44 @@ namespace ShiftYar.Domain.Entities.UserModel
         public bool? IncludedProductivityPlan { get; set; }  //آیا مشمول طرح بهره وری هست؟ (برای محاسبه درست ساعت شیفت شب و تعطیلات) ر
         
         public decimal? HardshipPercent { get; set; }   //درصد صعوبت (سختی) کار (۰–۱۰۰) برای کاهش ساعت موظفی هفتگی
+
+        /// <summary>
+        /// درصد سختی کار (۰–۱۰۰). سازگار با HardshipPercent.
+        /// </summary>
+        [NotMapped]
+        public decimal? HardshipPercentage
+        {
+            get => HardshipPercent;
+            set => HardshipPercent = value;
+        }
+
+        /// <summary>
+        /// امتیاز سختی کار قانون مدیریت خدمات کشوری (اختیاری/Nullable - حالت انحصاری متقابل با درصد).
+        /// </summary>
+        public decimal? HardshipScore { get; set; }
+
+        /// <summary>
+        /// نام مستعار امتیاز سختی کار (HardshipPoints).
+        /// </summary>
+        [NotMapped]
+        public decimal? HardshipPoints
+        {
+            get => HardshipScore;
+            set => HardshipScore = value;
+        }
+
+        /// <summary>پست سازمانی پرسنل</summary>
+        public string? Position { get; set; }
+
+        /// <summary>عنوان شغلی پرسنل</summary>
+        public string? JobTitle { get; set; }
+
+        /// <summary>آیا سوپروایزر است (ماده ۴ دستورالعمل بهره‌وری: ۲ ساعت کسر خودکار صعوبت)</summary>
+        public bool? IsSupervisor { get; set; }
+
+        /// <summary>آیا سرپرستار است (ماده ۴ دستورالعمل بهره‌وری: ۲ ساعت کسر خودکار صعوبت)</summary>
+        public bool? IsHeadNurse { get; set; }
+
         public bool? OvertimeConsent { get; set; }  //رضایت پرسنل به اضافه‌کاری (حداکثر ۸۰ ساعت در ماه) ر
 
 
@@ -119,6 +157,11 @@ namespace ShiftYar.Domain.Entities.UserModel
             this.TwoShiftRotationPattern = null;
             this.MaxProductivityRequiredHours = null;
             this.AllowedShiftPermissions = null;
+            this.HardshipScore = null;
+            this.Position = null;
+            this.JobTitle = null;
+            this.IsSupervisor = null;
+            this.IsHeadNurse = null;
         }
     }
 }

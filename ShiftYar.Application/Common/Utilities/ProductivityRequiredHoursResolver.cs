@@ -22,7 +22,7 @@ public static class ProductivityRequiredHoursResolver
     {
         if (HasManualOverride(user))
         {
-            var manualHours = user.MaxProductivityRequiredHours!.Value;
+            var manualHours = Math.Round(user.MaxProductivityRequiredHours!.Value, MidpointRounding.AwayFromZero);
             userConstraint.IncludedInProductivityPlan = true;
             userConstraint.ProductivityRequiredHours = manualHours;
 
@@ -65,6 +65,6 @@ public static class ProductivityRequiredHoursResolver
 
         userConstraint.IncludedInProductivityPlan = calculatedSnapshot.Breakdown?.IsIncludedInProductivityPlan ?? (user.IncludedProductivityPlan != false);
         userConstraint.ProductivitySnapshot = calculatedSnapshot;
-        userConstraint.ProductivityRequiredHours = calculatedSnapshot.FinalMonthlyRequiredHours;
+        userConstraint.ProductivityRequiredHours = Math.Round(calculatedSnapshot.FinalMonthlyRequiredHours, MidpointRounding.AwayFromZero);
     }
 }

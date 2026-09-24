@@ -100,6 +100,7 @@ namespace ShiftYar.Infrastructure.Persistence.AppDbContext
             modelBuilder.Entity<User>(entity =>
             {
                 entity.Property(u => u.HardshipPercent).HasPrecision(18, 2);
+                entity.Property(u => u.HardshipScore).HasPrecision(18, 2);
                 entity.Property(u => u.MaxProductivityRequiredHours).HasPrecision(18, 2);
                 entity.Property(u => u.AllowedShiftPermissions).HasConversion<int?>();
             });

@@ -14,6 +14,14 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
         public DateTime? DateOfEmployment { get; init; }
         public int? YearsOfServiceOverride { get; init; }
         public decimal HardshipPercent { get; init; }
+        public decimal? HardshipPercentage => HardshipPercent;
+        public decimal? HardshipScore { get; init; }
+        public decimal? HardshipPoints => HardshipScore;
+        public string? Position { get; init; }
+        public string? JobTitle { get; init; }
+        public string? Role { get; init; }
+        public bool? IsSupervisor { get; init; }
+        public bool? IsHeadNurse { get; init; }
         public bool HasUncommonRotatingShifts { get; init; }
         public ShiftPatternType ShiftPattern { get; init; } = ShiftPatternType.FixedDay;
 
@@ -43,6 +51,33 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
             }
 
             return (int)Math.Floor(totalMonths / 12m);
+        }
+
+        /// <summary>
+        /// Resolves fractional years of service (e.g. 4 years 1 month = 4.0833 years) based on start date.
+        /// </summary>
+        public decimal ResolveYearsOfServiceDecimal(DateTime referenceDate)
+        {
+            if (YearsOfServiceOverride.HasValue && YearsOfServiceOverride.Value >= 0)
+            {
+                return YearsOfServiceOverride.Value;
+            }
+
+            if (!DateOfEmployment.HasValue)
+            {
+                return 0m;
+            }
+
+            var employment = NormalizeEmploymentDate(DateOfEmployment.Value);
+            var totalMonths = (referenceDate.Year - employment.Year) * 12
+                              + (referenceDate.Month - employment.Month);
+
+            if (totalMonths < 0)
+            {
+                return 0m;
+            }
+
+            return Math.Round(totalMonths / 12.0m, 4);
         }
 
         /// <summary>
@@ -101,6 +136,11 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
                 StaffFullName = user.FullName,
                 DateOfEmployment = NormalizeEmploymentDate(user.DateOfEmployment),
                 HardshipPercent = user.HardshipPercent ?? 0m,
+                HardshipScore = user.HardshipScore,
+                Position = user.Position,
+                JobTitle = user.JobTitle,
+                IsSupervisor = user.IsSupervisor,
+                IsHeadNurse = user.IsHeadNurse,
                 HasUncommonRotatingShifts = hasUncommonRotatingShifts || pattern == ShiftPatternType.ThreeShiftRotating || pattern == ShiftPatternType.TwoShiftRotating,
                 ShiftPattern = pattern,
                 YearsOfServiceOverride = yearsOfServiceOverride

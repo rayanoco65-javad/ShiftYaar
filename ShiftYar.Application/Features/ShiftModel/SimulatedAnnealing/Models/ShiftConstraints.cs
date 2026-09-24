@@ -151,6 +151,21 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public decimal? ProductivityRequiredHours { get; set; }
         public WorkingHoursCalculationResultDto? ProductivitySnapshot { get; set; }
         public decimal HardshipPercent { get; set; }
+        public decimal? HardshipPercentage
+        {
+            get => HardshipPercent;
+            set => HardshipPercent = value ?? 0m;
+        }
+        public decimal? HardshipScore { get; set; }
+        public decimal? HardshipPoints
+        {
+            get => HardshipScore;
+            set => HardshipScore = value;
+        }
+        public string? Position { get; set; }
+        public string? JobTitle { get; set; }
+        public bool? IsSupervisor { get; set; }
+        public bool? IsHeadNurse { get; set; }
         public bool OvertimeConsent { get; set; }
         /// <summary>پرسنل طرحی؛ در پر کردن موظفی بعد از غیرطرحی اولویت دارد.</summary>
         public bool? IsProjectPersonnel { get; set; }

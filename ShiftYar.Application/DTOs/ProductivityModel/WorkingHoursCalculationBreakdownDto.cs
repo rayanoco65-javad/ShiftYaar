@@ -23,6 +23,10 @@ namespace ShiftYar.Application.DTOs.ProductivityModel
         public int NetRequiredHoursRounded => (int)System.Math.Round(NetRequiredHours, System.MidpointRounding.AwayFromZero);
         public decimal SeniorityReductionPerWeek { get; set; }
         public decimal HardshipReductionPerWeek { get; set; }
+        /// <summary>امتیاز سختی کار قانون مدیریت خدمات کشوری (در صورت استفاده).</summary>
+        public decimal? HardshipScore { get; set; }
+        /// <summary>آیا رده مدیریت بالینی (ماده ۴: سوپروایزر، سرپرستار، مترون) تشخیص داده شده است.</summary>
+        public bool IsClinicalManager { get; set; }
         public ShiftPatternType ShiftPattern { get; set; } = ShiftPatternType.FixedDay;
         public decimal ShiftPatternReductionPerWeek { get; set; }
         public decimal RotatingShiftReductionPerWeek { get; set; }

@@ -8,8 +8,13 @@ This feature contains the productivity rules mandated by the *Regulation of Prod
 - **Working days:** `WorkingDays = TotalDays − (FridaysCount + OfficialHolidaysCount)` (Thursdays are standard working days in 24/7 healthcare facilities)
 - **Gross monthly base hours:** `BaseMonthlyHours = WorkingDays × (22 / 3)`
 - **Standard month cap (optional):** When `CapBaseHoursToStandardMonth = true`, working days are capped at 24 and base hours at 176.0 (4 weeks × 44h).
-- **Weekly reduction caps:** Seniority (0h for <5y, 1h for 5-12y, 2h for 13-17y, up to 3h for 18+y) + Hardship (2h for special sections, 0h for general) + Rotating shift (1h for 3-shift rotating with ≥10y seniority) → max 8h weekly.
-- **Monthly reduction formula:** `MonthlyReductions = (TotalDays / 7) × WeeklyReduction` (in 31-day months, 1h weekly maps to 5h monthly reduction).
+- **Weekly reduction caps (Ministry of Health Executive Directive):**
+  - **Seniority:** 0–4 years = 1.0h/week (new recruits / طرحی included; never 0), 4y 1m – 8y = 2.0h, 8y 1m – 12y = 3.0h, 12y 1m – 16y = 4.0h, >16y = 5.0h.
+  - **Hardship (max 2.0h/week):** Dual support for percentage (8–25%: 0.5h, 26–50%: 1.0h, 51–75%: 1.5h, 76–100%: 2.0h) or Civil Service Management Law points (0–375: 0.5h, 376–750: 1.0h, 751–1000: 1.5h, >1000: 2.0h) with strict Mutually Exclusive (XOR) validation.
+  - **Article 4 Clinical Management Exception:** Supervisors, Head Nurses, Metrons, and Directors automatically receive 2.0h hardship reduction regardless of recorded percentage or points.
+  - **Rotating shift:** 1.0h/week for all rotating/unconventional shift personnel (10-year seniority condition completely removed). Fixed day = 0.0h.
+  - **Total weekly reduction cap:** `min(8.0, Seniority + Hardship + RotatingShift)`.
+- **Monthly reduction formula:** `MonthlyReductions = (TotalDays / 7) × WeeklyReduction` (in standard 31-day months, 1h weekly maps to 5h monthly reduction).
 
 The final monthly duty hours obligation is computed as:
 

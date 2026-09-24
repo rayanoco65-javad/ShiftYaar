@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using ShiftYar.Application.Common.Constants;
@@ -137,6 +137,12 @@ namespace ShiftYar.Application.Features.UserModel.Services
                     return ApiResponse<UserDtoAdd>.Fail(productivityHoursError);
                 }
 
+                var hardshipError = HardshipRulesValidator.Validate(dto.HardshipPercent, dto.HardshipScore);
+                if (hardshipError != null)
+                {
+                    return ApiResponse<UserDtoAdd>.Fail(hardshipError);
+                }
+
                 var permissionsError = ValidateAndNormalizeShiftPermissions(dto);
                 if (permissionsError != null)
                 {
@@ -249,6 +255,12 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 if (productivityHoursError != null)
                 {
                     return ApiResponse<UserDtoAdd>.Fail(productivityHoursError);
+                }
+
+                var hardshipError = HardshipRulesValidator.Validate(dto.HardshipPercent, dto.HardshipScore);
+                if (hardshipError != null)
+                {
+                    return ApiResponse<UserDtoAdd>.Fail(hardshipError);
                 }
 
                 var permissionsError = ValidateAndNormalizeShiftPermissions(dto);

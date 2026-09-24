@@ -1,4 +1,4 @@
-﻿using ShiftYar.Domain.Entities.UserModel;
+using ShiftYar.Domain.Entities.UserModel;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -41,6 +41,28 @@ namespace ShiftYar.Application.DTOs.UserModel
         public byte? ShiftManagerLevel { get; set; }
         public bool? IncludedProductivityPlan { get; set; }
         public decimal? HardshipPercent { get; set; }
+        /// <summary>درصد سختی کار (۰–۱۰۰).</summary>
+        public decimal? HardshipPercentage
+        {
+            get => HardshipPercent;
+            set => HardshipPercent = value;
+        }
+        /// <summary>امتیاز سختی کار قانون مدیریت خدمات کشوری (اختیاری/Nullable - انحصاری متقابل با درصد).</summary>
+        public decimal? HardshipScore { get; set; }
+        /// <summary>نام مستعار امتیاز سختی کار.</summary>
+        public decimal? HardshipPoints
+        {
+            get => HardshipScore;
+            set => HardshipScore = value;
+        }
+        /// <summary>پست سازمانی پرسنل</summary>
+        public string? Position { get; set; }
+        /// <summary>عنوان شغلی پرسنل</summary>
+        public string? JobTitle { get; set; }
+        /// <summary>آیا سوپروایزر است (ماده ۴ دستورالعمل بهره‌وری)</summary>
+        public bool? IsSupervisor { get; set; }
+        /// <summary>آیا سرپرستار است (ماده ۴ دستورالعمل بهره‌وری)</summary>
+        public bool? IsHeadNurse { get; set; }
         public bool? OvertimeConsent { get; set; }
         /// <summary>حداکثر ساعت موظفی دستی (ساعت). null = محاسبه خودکار.</summary>
         public decimal? MaxProductivityRequiredHours { get; set; }

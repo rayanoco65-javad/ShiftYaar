@@ -61,10 +61,10 @@ public class ShiftSchedulingProductivitySnapshotTests
     }
 
     [Fact]
-    public void CalculateProductivitySnapshot_FereshtehSaki_Calculates163Hours()
+    public void CalculateProductivitySnapshot_FereshtehSaki_Calculates145Hours()
     {
-        // فرشته ساکی: ۲۲ سال سابقه (۳ ساعت کسر سابقه) + ثابت صبح (۰ ساعت کسر نوبت‌کاری) = ۳ ساعت تخفیف هفتگی
-        // ساعت موظفی بیمارستان: ۱۶۳ ساعت (مبنای ۱۷۶ منهای ۱۳.۲۹ = ۱۶۲.۷۱)
+        // فرشته ساکی: ۲۲ سال سابقه (۵ ساعت کسر سابقه) + صعوبت ۱۰۰٪ (۲ ساعت) + ثابت صبح (۰ ساعت کسر نوبت‌کاری) = ۷ ساعت تخفیف هفتگی
+        // ساعت موظفی: ۱۴۵ ساعت (مبنای ۱۷۶ منهای ۳۱ = ۱۴۵)
         var constraints = CreateShahrivar1405Constraints();
         var user = new User
         {
@@ -92,19 +92,19 @@ public class ShiftSchedulingProductivitySnapshotTests
         Assert.True(snapshot.Breakdown?.IsCappedToStandardMonth);
         Assert.Equal(24, snapshot.Breakdown?.WorkingDays);
         Assert.Equal(176.00m, snapshot.BaseMonthlyHours);
-        Assert.Equal(3.0m, snapshot.Breakdown?.TotalWeeklyReduction);
-        Assert.Equal(162.71m, snapshot.FinalMonthlyRequiredHours);
-        Assert.Equal(163, snapshot.FinalMonthlyRequiredHoursRounded);
+        Assert.Equal(7.0m, snapshot.Breakdown?.TotalWeeklyReduction);
+        Assert.Equal(145m, snapshot.FinalMonthlyRequiredHours);
+        Assert.Equal(145, snapshot.FinalMonthlyRequiredHoursRounded);
 
         ProductivityRequiredHoursResolver.ApplyToUserConstraint(user, userConstraint, snapshot);
-        Assert.Equal(162.71m, userConstraint.ProductivityRequiredHours);
+        Assert.Equal(145m, userConstraint.ProductivityRequiredHours);
     }
 
     [Fact]
-    public void CalculateProductivitySnapshot_FatemehRezaei_Calculates167Hours()
+    public void CalculateProductivitySnapshot_FatemehRezaei_Calculates149Hours()
     {
-        // فاطمه رضایی: ۱۱ سال سابقه (۱ ساعت کسر سابقه) + ۳ شیفت گردشی (۱ ساعت کسر نوبت‌کاری) = ۲ ساعت تخفیف هفتگی
-        // ساعت موظفی بیمارستان: ۱۶۷ ساعت (مبنای ۱۷۶ منهای ۸.۸۶ = ۱۶۷.۱۴)
+        // فاطمه رضایی: ۱۱ سال سابقه (۳ ساعت کسر سابقه) + صعوبت ۱۰۰٪ (۲ ساعت) + ۳ شیفت گردشی (۱ ساعت کسر نوبت‌کاری) = ۶ ساعت تخفیف هفتگی
+        // ساعت موظفی: ۱۴۹ ساعت (مبنای ۱۷۶ منهای ۲۶.۵۷ = ۱۴۹.۴۳ -> گرد شده: ۱۴۹)
         var constraints = CreateShahrivar1405Constraints();
         var user = new User
         {
@@ -131,19 +131,19 @@ public class ShiftSchedulingProductivitySnapshotTests
         Assert.NotNull(snapshot);
         Assert.True(snapshot.Breakdown?.IsCappedToStandardMonth);
         Assert.Equal(176.00m, snapshot.BaseMonthlyHours);
-        Assert.Equal(2.0m, snapshot.Breakdown?.TotalWeeklyReduction);
-        Assert.Equal(167.14m, snapshot.FinalMonthlyRequiredHours);
-        Assert.Equal(167, snapshot.FinalMonthlyRequiredHoursRounded);
+        Assert.Equal(6.0m, snapshot.Breakdown?.TotalWeeklyReduction);
+        Assert.Equal(149m, snapshot.FinalMonthlyRequiredHours);
+        Assert.Equal(149, snapshot.FinalMonthlyRequiredHoursRounded);
 
         ProductivityRequiredHoursResolver.ApplyToUserConstraint(user, userConstraint, snapshot);
-        Assert.Equal(167.14m, userConstraint.ProductivityRequiredHours);
+        Assert.Equal(149m, userConstraint.ProductivityRequiredHours);
     }
 
     [Fact]
-    public void CalculateProductivitySnapshot_BaharBahari_Calculates158Hours()
+    public void CalculateProductivitySnapshot_BaharBahari_Calculates141Hours()
     {
-        // بهار بهاری: ۱۸ سال سابقه (۳ ساعت کسر سابقه) + ۳ شیفت گردشی (۱ ساعت کسر نوبت‌کاری) = ۴ ساعت تخفیف هفتگی
-        // ساعت موظفی بیمارستان: ۱۵۸ ساعت (مبنای ۱۷۶ منهای ۱۷.۷۱ = ۱۵۸.۲۹)
+        // بهار بهاری: ۱۸ سال سابقه (۵ ساعت کسر سابقه) + صعوبت ۱۰۰٪ (۲ ساعت) + ۳ شیفت گردشی (۱ ساعت کسر نوبت‌کاری) = سقف ۸ ساعت تخفیف هفتگی
+        // ساعت موظفی: ۱۴۱ ساعت (مبنای ۱۷۶ منهای ۳۵.۴۳ = ۱۴۰.۵۷ -> گرد شده: ۱۴۱)
         var constraints = CreateShahrivar1405Constraints();
         var user = new User
         {
@@ -170,18 +170,19 @@ public class ShiftSchedulingProductivitySnapshotTests
         Assert.NotNull(snapshot);
         Assert.True(snapshot.Breakdown?.IsCappedToStandardMonth);
         Assert.Equal(176.00m, snapshot.BaseMonthlyHours);
-        Assert.Equal(4.0m, snapshot.Breakdown?.TotalWeeklyReduction);
-        Assert.Equal(158.29m, snapshot.FinalMonthlyRequiredHours);
-        Assert.Equal(158, snapshot.FinalMonthlyRequiredHoursRounded);
+        Assert.Equal(8.0m, snapshot.Breakdown?.TotalWeeklyReduction);
+        Assert.Equal(141m, snapshot.FinalMonthlyRequiredHours);
+        Assert.Equal(141, snapshot.FinalMonthlyRequiredHoursRounded);
 
         ProductivityRequiredHoursResolver.ApplyToUserConstraint(user, userConstraint, snapshot);
-        Assert.Equal(158.29m, userConstraint.ProductivityRequiredHours);
+        Assert.Equal(141m, userConstraint.ProductivityRequiredHours);
     }
 
     [Fact]
-    public void CalculateProductivitySnapshot_JuniorNurseUnder5Years_Calculates176Hours()
+    public void CalculateProductivitySnapshot_JuniorNurseUnder5Years_Calculates158Hours()
     {
-        // پرسنل زیر ۵ سال سابقه خدمت (بدو خدمت/طرحی): تخفیف هفتگی ۰ -> موظفی پایه ۱۷۶ ساعت
+        // پرسنل زیر ۵ سال سابقه خدمت (۰ تا ۴ سال): ۱ ساعت کسر سنوات + ۲ ساعت صعوبت + ۱ ساعت نوبت‌کاری = ۴ ساعت تخفیف هفتگی
+        // ساعت موظفی: ۱۵۸ ساعت (مبنای ۱۷۶ منهای ۱۷.۷۱ = ۱۵۸.۲۹ -> گرد شده: ۱۵۸)
         var constraints = CreateShahrivar1405Constraints();
         var user = new User
         {
@@ -207,6 +208,43 @@ public class ShiftSchedulingProductivitySnapshotTests
 
         Assert.NotNull(snapshot);
         Assert.True(snapshot.Breakdown?.IsIncludedInProductivityPlan);
+        Assert.Equal(4.0m, snapshot.Breakdown?.TotalWeeklyReduction);
+        Assert.Equal(176.00m, snapshot.BaseMonthlyHours);
+        Assert.Equal(158.00m, snapshot.FinalMonthlyRequiredHours);
+        Assert.Equal(158, snapshot.FinalMonthlyRequiredHoursRounded);
+
+        ProductivityRequiredHoursResolver.ApplyToUserConstraint(user, userConstraint, snapshot);
+        Assert.Equal(158.00m, userConstraint.ProductivityRequiredHours);
+    }
+
+    [Fact]
+    public void CalculateProductivitySnapshot_NonClinicalPersonnel_Calculates176Hours()
+    {
+        // پرسنل غیرمشمول قانون ارتقای بهره‌وری (عادی): تخفیف هفتگی ۰ -> موظفی پایه ۱۷۶ ساعت
+        var constraints = CreateShahrivar1405Constraints();
+        var user = new User
+        {
+            Id = 99,
+            FullName = "کارمند اداری",
+            IncludedProductivityPlan = false,
+            ShiftType = ShiftTypes.FixedShift,
+            ShiftSubType = ShiftSubTypes.FixedMorning,
+            HardshipPercent = 0m
+        };
+        var userConstraint = new UserConstraint
+        {
+            UserId = 99,
+            UserName = "کارمند اداری",
+            ShiftType = ShiftTypes.FixedShift,
+            ShiftSubType = ShiftSubTypes.FixedMorning,
+            ExperienceYears = 10,
+            HardshipPercent = 0m
+        };
+
+        var snapshot = _service.CalculateProductivitySnapshot(user, userConstraint, constraints, deptSetting: null, nightShiftDurationHours: 12.0);
+
+        Assert.NotNull(snapshot);
+        Assert.False(snapshot.Breakdown?.IsIncludedInProductivityPlan);
         Assert.Equal(0.0m, snapshot.Breakdown?.TotalWeeklyReduction);
         Assert.Equal(176.00m, snapshot.BaseMonthlyHours);
         Assert.Equal(176.00m, snapshot.FinalMonthlyRequiredHours);
@@ -217,26 +255,26 @@ public class ShiftSchedulingProductivitySnapshotTests
     }
 
     [Theory]
-    [InlineData("مهدی رستمی", 1, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
-    [InlineData("محمد یوسفی", 1, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
-    [InlineData("مهدی دریکوند", 1, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
-    [InlineData("سیده زهرا باقری", 1, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
-    [InlineData("فائزه سبزواری", 2, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
-    [InlineData("سیده فاطمه کاظمی", 2, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
-    [InlineData("فاطمه دبستانیان", 2, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
-    [InlineData("شکیبا موسیوند", 3, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
-    [InlineData("مریم کرمی", 4, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
-    [InlineData("مریم امیدی منش", 4, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 176)]
-    [InlineData("فاطمه رازانی", 5, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 171)]
-    [InlineData("حدیث کاظمی", 10, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 167)]
-    [InlineData("عاطفه رحیمی منفرد", 10, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 167)]
-    [InlineData("فاطمه رضایی", 11, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 167)]
-    [InlineData("خدیجه متقی", 11, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 167)]
-    [InlineData("فاطمه سلیمی", 13, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 163)]
-    [InlineData("فرشته ساکی", 22, ShiftTypes.FixedShift, ShiftSubTypes.FixedMorning, 163)]
-    [InlineData("صبا حاتمی فیضی", 24, ShiftTypes.FixedShift, ShiftSubTypes.FixedMorning, 163)]
-    [InlineData("زهرا درخشانی الوار", 25, ShiftTypes.RotatingShift, ShiftSubTypes.TwoShifts, 163)]
-    [InlineData("بهاره بهاری پور", 18, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 158)]
+    [InlineData("مهدی رستمی", 1, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 158)]
+    [InlineData("محمد یوسفی", 1, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 158)]
+    [InlineData("مهدی دریکوند", 1, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 158)]
+    [InlineData("سیده زهرا باقری", 1, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 158)]
+    [InlineData("فائزه سبزواری", 2, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 158)]
+    [InlineData("سیده فاطمه کاظمی", 2, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 158)]
+    [InlineData("فاطمه دبستانیان", 2, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 158)]
+    [InlineData("شکیبا موسیوند", 3, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 158)]
+    [InlineData("مریم کرمی", 4, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 158)]
+    [InlineData("مریم امیدی منش", 4, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 158)]
+    [InlineData("فاطمه رازانی", 5, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 154)]
+    [InlineData("حدیث کاظمی", 10, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 149)]
+    [InlineData("عاطفه رحیمی منفرد", 10, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 149)]
+    [InlineData("فاطمه رضایی", 11, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 149)]
+    [InlineData("خدیجه متقی", 11, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 149)]
+    [InlineData("فاطمه سلیمی", 13, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 145)]
+    [InlineData("فرشته ساکی", 22, ShiftTypes.FixedShift, ShiftSubTypes.FixedMorning, 145)]
+    [InlineData("صبا حاتمی فیضی", 24, ShiftTypes.FixedShift, ShiftSubTypes.FixedMorning, 145)]
+    [InlineData("زهرا درخشانی الوار", 25, ShiftTypes.RotatingShift, ShiftSubTypes.TwoShifts, 141)]
+    [InlineData("بهاره بهاری پور", 18, ShiftTypes.RotatingShift, ShiftSubTypes.ThreeShifts, 141)]
     public void CalculateProductivitySnapshot_AllHospitalStaff_MatchExactHospitalDutyHours(
         string fullName,
         int experienceYears,

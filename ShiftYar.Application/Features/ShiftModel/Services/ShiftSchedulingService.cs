@@ -1304,6 +1304,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 shiftPattern = ShiftPatternType.FixedDay;
             }
 
+            var isClinicalManager = ClinicalManagementRoleDetector.IsClinicalManager(user);
             var staffInfo = new StaffEmploymentInfoDto
             {
                 StaffId = user.Id ?? 0,
@@ -1311,7 +1312,12 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 DateOfEmployment = employmentDate,
                 ClinicalExperienceYears = userConstraint.ExperienceYears,
                 IsIncludedInProductivityPlan = isIncluded,
-                HardshipPercent = user.HardshipPercent ?? 0m,
+                HardshipPercent = user.HardshipPercent ?? userConstraint.HardshipPercent,
+                HardshipScore = user.HardshipScore ?? userConstraint.HardshipScore,
+                Position = user.Position ?? userConstraint.Position,
+                JobTitle = user.JobTitle ?? userConstraint.JobTitle,
+                IsSupervisor = user.IsSupervisor ?? userConstraint.IsSupervisor ?? (isClinicalManager ? true : (bool?)null),
+                IsHeadNurse = user.IsHeadNurse ?? userConstraint.IsHeadNurse,
                 HasUncommonRotatingShifts = shiftPattern == ShiftPatternType.ThreeShiftRotating || shiftPattern == ShiftPatternType.TwoShiftRotating,
                 ShiftPattern = shiftPattern
             };
@@ -1817,7 +1823,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
             var requiredByUser = constraints.UserConstraints
                 .Where(u => u.ProductivityRequiredHours.HasValue)
-                .ToDictionary(u => u.UserId, u => (double)u.ProductivityRequiredHours.Value);
+                .ToDictionary(u => u.UserId, u => Math.Round((double)u.ProductivityRequiredHours.Value, MidpointRounding.AwayFromZero));
 
             result.Statistics.ProductivityRequiredHoursByUser = requiredByUser;
 
@@ -2203,6 +2209,11 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         ShiftSubType = user.ShiftSubType ?? ShiftSubTypes.FixedMorning,
                         TwoShiftRotationPattern = user.TwoShiftRotationPattern,
                         HardshipPercent = user.HardshipPercent ?? 0m,
+                        HardshipScore = user.HardshipScore,
+                        Position = user.Position,
+                        JobTitle = user.JobTitle,
+                        IsSupervisor = user.IsSupervisor,
+                        IsHeadNurse = user.IsHeadNurse,
                         OvertimeConsent = user.OvertimeConsent ?? false,
                         IsProjectPersonnel = user.IsProjectPersonnel,
                         DateOfEmployment = DateConverter.NormalizeEmploymentDate(user.DateOfEmployment),
@@ -3160,7 +3171,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     ShiftType = user.ShiftType,
                     ShiftSubType = user.ShiftSubType,
                     TwoShiftRotationPattern = user.TwoShiftRotationPattern,
-                    ProductivityRequiredHours = user.ProductivityRequiredHours.HasValue ? (double)user.ProductivityRequiredHours.Value : null,
+                    ProductivityRequiredHours = user.ProductivityRequiredHours.HasValue ? Math.Round((double)user.ProductivityRequiredHours.Value, MidpointRounding.AwayFromZero) : null,
                     OvertimeConsent = user.OvertimeConsent,
                     MaxMonthlyOvertimeHours = user.MaxMonthlyOvertimeHours,
                     MaxConsecutiveWorkHours = user.MaxConsecutiveWorkHours

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.DTOs.ProductivityModel;
 using ShiftYar.Application.Interfaces.ProductivityModel;
 using ShiftYar.Domain.Entities.ProductivityModel;
@@ -8,16 +9,8 @@ using ShiftYar.Domain.Entities.ProductivityModel;
 namespace ShiftYar.Application.Features.ProductivityModel.Services
 {
     /// <summary>
-    /// Implements the formulas mandated by the Regulation of Productivity Promotion of Clinical Employees.
-    /// FinalMonthly = (BaseWeekly × Weeks) − (WeeklyReductions × Weeks) − NightHolidayCredit.
-    /// NightHolidayCredit = (NightHolidayHours × 1.5) − NightHolidayHours.
-    /// </summary>
-    /// <summary>
-    /// Implements the formulas mandated by the Regulation of Productivity Promotion of Clinical Employees in Iran (Group 1)
-    /// and General/Ordinary Civil Service Labor Law (Group 2).
-    /// BaseHours = WorkingDays * (22 / 3) = WorkingDays * 7.333333333333333
-    /// Group 1 Deduction = (TotalDays / 7) * WeeklyDeductions
-    /// Group 2 Deduction = 0
+    /// پیاده‌سازی فرمول‌های دستورالعمل اجرایی قانون ارتقای بهره‌وری کارکنان بالینی نظام سلامت وزارت بهداشت (گروه اول)
+    /// و قوانین عمومی مدیریت خدمات کشوری / قانون کار (گروه دوم).
     /// </summary>
     public class WorkingHoursCalculator : IWorkingHoursCalculator
     {
@@ -46,6 +39,13 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
             if (request.TotalDays > 0 && request.WorkingDays > request.TotalDays)
             {
                 throw new ArgumentException("WorkingDays cannot exceed TotalDays.", nameof(request));
+            }
+
+            // اعتبارسنجی شرط انحصاری متقابل (Mutually Exclusive / XOR) درصد و امتیاز سختی کار
+            var hardshipValidationError = HardshipRulesValidator.Validate(request.Staff.HardshipPercent, request.Staff.HardshipScore);
+            if (hardshipValidationError != null)
+            {
+                throw new ArgumentException(hardshipValidationError, nameof(request));
             }
 
             var targetMonth = request.TargetMonth == default
@@ -129,7 +129,6 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
             }
 
             // گام ۱: محاسبه ساعت کار پایه ماه (۷ ساعت و ۲۰ دقیقه به ازای هر روز کاری غیرتعطیل)
-            // WorkingDays * DailyWorkingHours
             var baseMonthlyHours = Math.Max(0m, (decimal)workingDays * dailyHours);
             if (capToStandard && maxBaseHours > 0 && baseMonthlyHours > maxBaseHours)
             {
@@ -143,14 +142,13 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
             if (!isIncluded)
             {
                 // گروه دوم: پرسنل غیرمشمول (عادی / قانون خدمات کشوری یا کار)
-                // کسورات = ۰؛ ساعت موظفی برابر ساعت پایه روزهای کاری غیرتعطیل
-                var finalRequiredForOrdinary = Math.Max(0m, Math.Round(baseMonthlyHours, 2, MidpointRounding.AwayFromZero));
+                var finalRequiredForOrdinary = Math.Max(0m, Math.Round(baseMonthlyHours, MidpointRounding.AwayFromZero));
 
                 var ordinaryNotes = new List<string>
                 {
                     "پرسنل غیرمشمول قانون ارتقای بهره‌وری (پرسنل عادی / خدمات کشوری).",
                     $"تقویم مبنا: {totalDays} روز کل، {fridaysCount} جمعه، {officialHolidaysCount} تعطیل رسمی، {workingDays} روز کاری موظف.",
-                    $"ساعت موظفی بر اساس ضرب تعداد روزهای کاری غیرتعطیل ({workingDays} روز) در {dailyHours:F2} ساعت محاسبه شد: {finalRequiredForOrdinary} ساعت.",
+                    $"ساعت موظفی بر اساس ضرب تعداد روزهای کاری غیرتعطیل ({workingDays} روز) در {dailyHours:F2} ساعت محاسبه و گرد شد: {finalRequiredForOrdinary} ساعت.",
                     "کسورات ناشی از سابقه، سختی کار یا نوبت‌کاری بهره‌وری برای این گروه اعمال نمی‌شود."
                 };
 
@@ -197,56 +195,101 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
 
             // گروه اول: پرسنل مشمول طرح بهره‌وری
             var yearsOfService = request.Staff.ClinicalExperienceYears.HasValue && request.Staff.ClinicalExperienceYears.Value >= 0
-                ? request.Staff.ClinicalExperienceYears.Value
-                : staffInfo.ResolveYearsOfService(targetMonth);
+                ? (decimal)request.Staff.ClinicalExperienceYears.Value
+                : staffInfo.ResolveYearsOfServiceDecimal(targetMonth);
 
-            if (yearsOfService < 0)
+            if (yearsOfService < 0m)
             {
-                yearsOfService = 0;
+                yearsOfService = 0m;
             }
 
-            // گام ۲: محاسبه کسر ساعت هفتگی قانون ارتقای بهره‌وری
-            // ۱. سابقه بالینی: ۰ تا ۴ سال (۰h)، ۵ تا ۱۲ سال (۱h)، ۱۳ تا ۱۷ سال (۲h)، ۱۸ سال به بالا (۳h)
+            // گام ۲: محاسبه کسر ساعت هفتگی بر اساس دستورالعمل رسمی وزارت بهداشت
+            // ۱. کاهش سنوات خدمت:
+            // ۰ تا ۴ سال (شامل بدو خدمت و طرحی): ۱.۰ ساعت
+            // ۴ سال و ۱ ماه تا ۸ سال: ۲.۰ ساعت
+            // ۸ سال و ۱ ماه تا ۱۲ سال: ۳.۰ ساعت
+            // ۱۲ سال و ۱ ماه تا ۱۶ سال: ۴.۰ ساعت
+            // ۱۶ سال و ۱ ماه به بالا: ۵.۰ ساعت
             var seniorityReduction = ruleConfig.GetSeniorityReduction(yearsOfService);
 
-            // ۲. سختی کار بخش: بخش‌های ویژه (۲ ساعت)، سایر بخش‌ها (۰ ساعت مگر در بخش ویژه یا با آورراید صریح کارگزینی)
-            var hardshipReduction = request.RuleOverrides?.HardshipReductionPerWeek
-                ?? (request.Staff.IsSpecialSection
-                    ? (staffInfo.HardshipPercent > 0m
-                        ? ruleConfig.GetHardshipReduction(staffInfo.HardshipPercent)
-                        : ruleConfig.SpecialSectionHardshipReduction)
-                    : ruleConfig.GeneralSectionHardshipReduction);
+            // ۲. کاهش صعوبت/سختی کار (حداکثر ۲.۰ ساعت):
+            // رده‌های مدیریت بالینی (ماده ۴ دستورالعمل): سوپروایزر، سرپرستار، مترون و مدیران پرستاری -> قطعی ۲.۰ ساعت
+            var isClinicalManager = ClinicalManagementRoleDetector.IsClinicalManager(
+                staffInfo.Position,
+                staffInfo.JobTitle,
+                staffInfo.Role,
+                staffInfo.IsSupervisor,
+                staffInfo.IsHeadNurse,
+                staffInfo.StaffFullName);
 
-            // ۳. الگوی نوبت‌کاری: طبق آیین‌نامه بیمارستانی، کسر نوبت‌کاری (شیفت در گردش سه نوبته) به پرسنل دارای سابقه بالینی حداقل ۱۰ سال تعلق می‌گیرد
+            decimal hardshipReduction;
+            if (request.RuleOverrides?.HardshipReductionPerWeek.HasValue == true)
+            {
+                hardshipReduction = request.RuleOverrides.HardshipReductionPerWeek.Value;
+            }
+            else if (isClinicalManager)
+            {
+                // استثنای رده‌های مدیریتی بالینی (ماده ۴): سقف ۲.۰ ساعت تخفیف صعوبت کار
+                hardshipReduction = 2.0m;
+            }
+            else if (staffInfo.HardshipScore.HasValue)
+            {
+                // بر اساس امتیاز سختی کار قانون مدیریت خدمات کشوری:
+                // ۰ تا ۳۷۵: ۰.۵h | ۳۷۶ تا ۷۵۰: ۱.۰h | ۷۵۱ تا ۱۰۰۰: ۱.۵h | بالای ۱۰۰۰: ۲.۰h
+                hardshipReduction = ruleConfig.GetHardshipReductionFromScore(staffInfo.HardshipScore.Value);
+            }
+            else if (staffInfo.HardshipPercent > 0m)
+            {
+                // بر اساس درصد نظام هماهنگ:
+                // ۸ تا ۲۵٪: ۰.۵h | ۲۶ تا ۵۰٪: ۱.۰h | ۵۱ تا ۷۵٪: ۱.۵h | ۷۶ تا ۱۰۰٪: ۲.۰h | زیر ۸٪: ۰h
+                hardshipReduction = ruleConfig.GetHardshipReduction(staffInfo.HardshipPercent);
+            }
+            else if (request.Staff.IsSpecialSection)
+            {
+                hardshipReduction = ruleConfig.SpecialSectionHardshipReduction;
+            }
+            else
+            {
+                hardshipReduction = ruleConfig.GeneralSectionHardshipReduction;
+            }
+
+            // ۳. کاهش نوبت‌کاری غیرمتعارف (گردشی):
+            // کلیه پرسنلی که نوبتکاری در گردش دارند: دقیقاً ۱.۰ ساعت کسر در هفته (حذف پیش‌شرط سابقه ۱۰ سال)
+            // روزکار ثابت: ۰.۰ ساعت
             var shiftPattern = request.Staff.ShiftPattern.HasValue
                 ? request.Staff.ShiftPattern.Value
                 : (staffInfo.ShiftPattern != ShiftPatternType.FixedDay
                     ? staffInfo.ShiftPattern
                     : (staffInfo.HasUncommonRotatingShifts ? ShiftPatternType.ThreeShiftRotating : ShiftPatternType.FixedDay));
 
-            var hasExplicitShiftOverride = request.RuleOverrides != null && (
-                request.RuleOverrides.RotatingShiftReductionPerWeek.HasValue ||
-                request.RuleOverrides.ThreeShiftRotatingReductionHours.HasValue ||
-                request.RuleOverrides.TwoShiftRotatingReductionHours.HasValue ||
-                request.RuleOverrides.FixedNightReductionHours.HasValue ||
-                request.RuleOverrides.FixedDayReductionHours.HasValue);
+            var isRotatingOrUnconventional = staffInfo.HasUncommonRotatingShifts
+                || shiftPattern == ShiftPatternType.ThreeShiftRotating
+                || shiftPattern == ShiftPatternType.TwoShiftRotating
+                || shiftPattern == ShiftPatternType.FixedNight;
 
-            var shiftPatternReduction = 0m;
-            if (yearsOfService >= 10 || hasExplicitShiftOverride)
+            decimal shiftPatternReduction;
+            if (request.RuleOverrides?.RotatingShiftReductionPerWeek.HasValue == true)
             {
-                shiftPatternReduction = request.RuleOverrides?.RotatingShiftReductionPerWeek
-                    ?? ruleConfig.GetShiftPatternReduction(shiftPattern);
+                shiftPatternReduction = request.RuleOverrides.RotatingShiftReductionPerWeek.Value;
+            }
+            else if (request.RuleOverrides != null && (
+                (shiftPattern == ShiftPatternType.ThreeShiftRotating && request.RuleOverrides.ThreeShiftRotatingReductionHours.HasValue) ||
+                (shiftPattern == ShiftPatternType.TwoShiftRotating && request.RuleOverrides.TwoShiftRotatingReductionHours.HasValue) ||
+                (shiftPattern == ShiftPatternType.FixedNight && request.RuleOverrides.FixedNightReductionHours.HasValue) ||
+                (shiftPattern == ShiftPatternType.FixedDay && request.RuleOverrides.FixedDayReductionHours.HasValue)))
+            {
+                shiftPatternReduction = ruleConfig.GetShiftPatternReduction(shiftPattern);
+            }
+            else if (isRotatingOrUnconventional)
+            {
+                shiftPatternReduction = ruleConfig.RotatingShiftReductionPerWeek; // 1.0m
+            }
+            else
+            {
+                shiftPatternReduction = 0.0m;
             }
 
-            // پرسنل با سابقه بالینی زیر ۵ سال (بدو خدمت/طرحی) در بخش‌های درمانی روتین مشمول کسر ساعت بهره‌وری نمی‌شوند
-            if (yearsOfService < 5 && request.RuleOverrides == null && !request.Staff.IsSpecialSection)
-            {
-                seniorityReduction = 0m;
-                hardshipReduction = 0m;
-                shiftPatternReduction = 0m;
-            }
-
-            // قانون گارد سقف کسر هفتگی (حداکثر ۸ ساعت)
+            // قانون گارد سقف کسر هفتگی: مجموع کاهش = Min(8.0, سنوات + صعوبت + نوبت‌کاری)
             var totalWeeklyReduction = Math.Min(ruleConfig.MaxWeeklyReduction, seniorityReduction + hardshipReduction + shiftPatternReduction);
             var weeklyRequiredHours = Math.Max(0m, ruleConfig.BaseWeeklyHours - totalWeeklyReduction);
 
@@ -260,15 +303,14 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
             }
 
             // محاسبه اعتبار شیفت شب/تعطیل (منحصراً جهت گزارش و اطلاعات متادیتا)
-            // طبق قانون، ضریب ۱.۵ شیفت شب و روزهای تعطیل مربوط به ساعات کارکرد مؤثر شیفت‌ها است و نباید از ساعت موظفی کسر شود
             var nightHolidayWeightedHours = nightHolidayHours * ruleConfig.NightHolidayMultiplier;
             var nightHolidayCredit = nightHolidayWeightedHours - nightHolidayHours;
 
-            // کسورات ساعت موظفی منحصراً ناشی از تخفیف‌های سه‌گانه قانون ارتقای بهره‌وری (سابقه، سختی کار، نوبت‌کاری) است
+            // کسورات ساعت موظفی منحصراً ناشی از تخفیف‌های سه‌گانه قانون ارتقای بهره‌وری است
             var totalDeductions = monthlyReductionFromWeekly;
 
-            // گام ۴: محاسبه ساعت موظفی خالص ماه
-            var finalMonthlyRequiredHours = Math.Max(0m, Math.Round(baseMonthlyHours - totalDeductions, 2, MidpointRounding.AwayFromZero));
+            // گام ۴: محاسبه ساعت موظفی خالص ماه (گردشده به نزدیک‌ترین عدد صحیح)
+            var finalMonthlyRequiredHours = Math.Max(0m, Math.Round(baseMonthlyHours - totalDeductions, MidpointRounding.AwayFromZero));
 
             return new WorkingHoursCalculationResultDto
             {
@@ -290,6 +332,8 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
                     NetRequiredHours = finalMonthlyRequiredHours,
                     SeniorityReductionPerWeek = seniorityReduction,
                     HardshipReductionPerWeek = hardshipReduction,
+                    HardshipScore = staffInfo.HardshipScore,
+                    IsClinicalManager = isClinicalManager,
                     ShiftPattern = shiftPattern,
                     ShiftPatternReductionPerWeek = shiftPatternReduction,
                     RotatingShiftReductionPerWeek = shiftPatternReduction,
@@ -308,9 +352,12 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
                         (excludeThursdays && thursdaysCount > 0)
                             ? $"پنج‌شنبه‌ها ({thursdaysCount} روز) طبق تنظیمات به عنوان روز غیرکاری از موظف کسر شدند."
                             : null!,
+                        isClinicalManager
+                            ? "ماده ۴ دستورالعمل اجرایی: تخفیف صعوبت کار برای پست مدیریت بالینی (سوپروایزر/سرپرستار/مترون) به صورت خودکار با سقف ۲.۰ ساعت در هفته لحاظ شد."
+                            : null!,
                         $"تخفیف هفتگی بهره‌وری: سابقه ({seniorityReduction}h) + صعوبت ({hardshipReduction}h) + نوبت‌کاری ({shiftPatternReduction}h) = {totalWeeklyReduction} ساعت در هفته (سقف {ruleConfig.MaxWeeklyReduction}h).",
                         $"کسر ماهانه بهره‌وری: ({totalDays}/7) × {totalWeeklyReduction} = {monthlyReductionFromWeekly} ساعت.",
-                        $"ساعت موظفی خالص نهایی: {finalMonthlyRequiredHours} ساعت (تقریب صحیح: {(int)Math.Round(finalMonthlyRequiredHours, MidpointRounding.AwayFromZero)} ساعت)."
+                        $"ساعت موظفی خالص نهایی (گردشده): {finalMonthlyRequiredHours} ساعت."
                     }.Where(n => !string.IsNullOrEmpty(n)).ToList()
                 }
             };
@@ -332,6 +379,12 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
                 DateOfEmployment = StaffEmploymentInfo.NormalizeEmploymentDate(dto.DateOfEmployment),
                 YearsOfServiceOverride = dto.ClinicalExperienceYears ?? dto.YearsOfServiceOverride,
                 HardshipPercent = dto.HardshipPercent,
+                HardshipScore = dto.HardshipScore,
+                Position = dto.Position,
+                JobTitle = dto.JobTitle,
+                Role = dto.Role,
+                IsSupervisor = dto.IsSupervisor,
+                IsHeadNurse = dto.IsHeadNurse,
                 HasUncommonRotatingShifts = dto.HasUncommonRotatingShifts || pattern == ShiftPatternType.ThreeShiftRotating || pattern == ShiftPatternType.TwoShiftRotating,
                 ShiftPattern = pattern
             };
@@ -371,4 +424,3 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
         }
     }
 }
-
