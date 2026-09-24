@@ -56,7 +56,8 @@ public class ShiftSchedulingProductivitySnapshotTests
             HolidayDates = new HashSet<DateTime>
             {
                 new DateTime(2026, 8, 30) // ۸ شهریور
-            }
+            },
+            CapBaseHoursToStandardMonth = true
         };
     }
 

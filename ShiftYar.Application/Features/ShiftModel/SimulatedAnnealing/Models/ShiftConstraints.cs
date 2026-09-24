@@ -22,6 +22,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public List<ShiftRequirement> ShiftRequirements { get; set; } = new List<ShiftRequirement>();
         /// <summary>روزهای تعطیل بازه (پرسنل فیکس در این روزها شیفت نمی‌گیرند؛ ظرفیت تخصص می‌تواند متفاوت باشد)</summary>
         public HashSet<DateTime> HolidayDates { get; set; } = new HashSet<DateTime>();
+        /// <summary>سقف‌گذاری ساعت کار پایه بر مبنای ماه استاندارد (۱۷۶ ساعت / ۲۴ روز کاری). پیش‌فرض null (معادل false برای محاسبات تقویمی دقیق)</summary>
+        public bool? CapBaseHoursToStandardMonth { get; set; }
 
         public bool IsHoliday(DateTime date) => HolidayDates.Contains(date.Date);
 

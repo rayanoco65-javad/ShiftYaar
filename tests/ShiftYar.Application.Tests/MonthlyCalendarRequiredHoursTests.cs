@@ -416,5 +416,84 @@ namespace ShiftYar.Application.Tests
         }
 
         #endregion
+
+        #region سناریو ۹: تست کاربر جواد انصاری در مهر ماه ۱۴۰۵ (۳۰ روزه، ۴ جمعه، بدون تعطیل رسمی وسط هفته)
+
+        [Fact]
+        public void Scenario9_Mehr1405_JavadAnsari_WithHardshipThirtyPercent_Calculates183Hours()
+        {
+            // جواد انصاری: ۲ سال سابقه (۱ ساعت سنوات) + ۳۰٪ سختی کار (۱ ساعت صعوبت) + شیفت ثابت روز (۰ ساعت نوبت‌کاری)
+            // تخفیف هفتگی: ۲.۰ ساعت
+            // مهر ماه ۱۴۰۵: ۳۰ روزه، ۴ جمعه، ۰ تعطیل رسمی وسط هفته => ۲۶ روز کاری
+            // موظفی خام: ۲۶ * (۴۴/۶) = ۱۹۰.۶۷ ساعت
+            // کسر ماهانه بر مبنای ۴ هفته استاندارد: ۲ * ۴ = ۸.۰ ساعت
+            // موظفی خالص: ۱۹۰.۶۷ - ۸.۰ = ۱۸۲.۶۷ ساعت => گردشده: ۱۸۳ ساعت
+            var user = new User
+            {
+                Id = 2,
+                FullName = "جواد انصاری",
+                DateOfEmployment = DateTime.UtcNow.AddYears(-2), // حدود ۲ سال سابقه = ۱ ساعت کسر سنوات
+                HardshipPercent = 30m,                           // ۳۰ درصد سختی کار نظام هماهنگ (بازه ۲۶ تا ۵۰ درصد = ۱.۰ ساعت)
+                HardshipScore = null,
+                ShiftType = ShiftEnums.ShiftTypes.FixedShift,    // ثابت صبح = ۰ ساعت نوبت‌کاری
+                IncludedProductivityPlan = true
+            };
+
+            var weeklyReduction = _calculator.GetWeeklyProductivityReduction(user);
+            Assert.Equal(2.0m, weeklyReduction);
+
+            var result = _calculator.CalculateMonthlyRequiredHoursForDaysDetails(
+                user,
+                totalDaysInMonth: 30,
+                workingDaysCount: 26,
+                numberOfWeeksInMonth: 4);
+
+            Assert.Equal(30, result.TotalDaysInMonth);
+            Assert.Equal(26, result.WorkingDaysCount);
+            Assert.Equal(190.67m, result.GrossMonthlyHours);
+            Assert.Equal(1.0m, result.SeniorityReductionPerWeek);
+            Assert.Equal(1.0m, result.HardshipReductionPerWeek);
+            Assert.Equal(0.0m, result.ShiftPatternReductionPerWeek);
+            Assert.Equal(2.0m, result.WeeklyProductivityReduction);
+            Assert.Equal(8.0m, result.TotalMonthlyReduction);
+            Assert.Equal(182.67m, result.NetMonthlyRequiredHours);
+            Assert.Equal(183, result.NetMonthlyRequiredHoursRounded);
+        }
+
+        [Fact]
+        public void Scenario9_Mehr1405_JavadAnsari_WithoutHardship_Calculates187Hours()
+        {
+            // جواد انصاری بدون ثبت درصد سختی کار: ۲ سال سابقه (۱ ساعت سنوات) + سختی کار (۰ ساعت) + شیفت ثابت (۰ ساعت)
+            // تخفیف هفتگی: ۱.۰ ساعت
+            // کسر ماهانه: ۱ * ۴ = ۴.۰ ساعت
+            // موظفی خالص: ۱۹۰.۶۷ - ۴.۰ = ۱۸۶.۶۷ ساعت => گردشده: ۱۸۷ ساعت
+            var user = new User
+            {
+                Id = 2,
+                FullName = "جواد انصاری",
+                DateOfEmployment = DateTime.UtcNow.AddYears(-2),
+                HardshipPercent = null,
+                HardshipScore = null,
+                ShiftType = ShiftEnums.ShiftTypes.FixedShift,
+                IncludedProductivityPlan = true
+            };
+
+            var weeklyReduction = _calculator.GetWeeklyProductivityReduction(user);
+            Assert.Equal(1.0m, weeklyReduction);
+
+            var result = _calculator.CalculateMonthlyRequiredHoursForDaysDetails(
+                user,
+                totalDaysInMonth: 30,
+                workingDaysCount: 26,
+                numberOfWeeksInMonth: 4);
+
+            Assert.Equal(0.0m, result.HardshipReductionPerWeek);
+            Assert.Equal(1.0m, result.WeeklyProductivityReduction);
+            Assert.Equal(4.0m, result.TotalMonthlyReduction);
+            Assert.Equal(186.67m, result.NetMonthlyRequiredHours);
+            Assert.Equal(187, result.NetMonthlyRequiredHoursRounded);
+        }
+
+        #endregion
     }
 }

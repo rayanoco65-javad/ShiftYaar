@@ -249,10 +249,10 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
                 // ۰ تا ۳۷۵: ۰.۵h | ۳۷۶ تا ۷۵۰: ۱.۰h | ۷۵۱ تا ۱۰۰۰: ۱.۵h | بالای ۱۰۰۰: ۲.۰h
                 hardshipReduction = ruleConfig.GetHardshipReductionFromScore(staffInfo.HardshipScore.Value);
             }
-            else if (staffInfo.HardshipPercent > 0m)
+            else if (staffInfo.HardshipPercent >= 8m)
             {
                 // بر اساس درصد نظام هماهنگ:
-                // ۸ تا ۲۵٪: ۰.۵h | ۲۶ تا ۵۰٪: ۱.۰h | ۵۱ تا ۷۵٪: ۱.۵h | ۷۶ تا ۱۰۰٪: ۲.۰h | زیر ۸٪: ۰h
+                // ۸ تا ۲۵٪: ۰.۵h | ۲۶ تا ۵۰٪: ۱.۰h | ۵۱ تا ۷۵٪: ۱.۵h | ۷۶ تا ۱۰۰٪: ۲.۰h
                 hardshipReduction = ruleConfig.GetHardshipReduction(staffInfo.HardshipPercent);
             }
             else if (request.Staff.IsSpecialSection)
@@ -261,6 +261,7 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
             }
             else
             {
+                // در صورت عدم ثبت درصد یا امتیاز سختی کار، کاهش صعوبت کار برابر با صفر لحاظ می‌شود
                 hardshipReduction = ruleConfig.GeneralSectionHardshipReduction;
             }
 
@@ -304,8 +305,12 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
             var totalWeeklyReduction = Math.Min(ruleConfig.MaxWeeklyReduction, seniorityReduction + hardshipReduction + shiftPatternReduction);
             var weeklyRequiredHours = Math.Max(0m, ruleConfig.BaseWeeklyHours - totalWeeklyReduction);
 
-            // گام ۳: تبدیل تخفیف هفتگی به تخفیف ماهانه: (TotalDays / 7) * WeeklyDeduction
-            var monthlyReductionFromWeekly = Math.Round((totalDays / 7.0m) * totalWeeklyReduction, 4, MidpointRounding.AwayFromZero);
+            // گام ۳: تبدیل تخفیف هفتگی به تخفیف ماهانه
+            // در محاسبات تقویمی واقعی (!capToStandard)، در صورت تعیین هفته‌های موظفی ماه (مثلاً ۴ هفته برای ماه استاندارد)، همان فاکتور اعمال می‌شود.
+            var effectiveWeeks = (!capToStandard && request.NumberOfWeeksInMonth > 0)
+                ? (decimal)request.NumberOfWeeksInMonth
+                : (totalDays / 7.0m);
+            var monthlyReductionFromWeekly = Math.Round(effectiveWeeks * totalWeeklyReduction, 4, MidpointRounding.AwayFromZero);
 
             // در ماه ۳۱ روزه، طبق رویه کارگزینی بیمارستان کسر ماهانه برای ۱ ساعت تخفیف هفتگی برابر ۵ ساعت است (176 - 5 = 171)
             if (capToStandard && totalDays == 31 && totalWeeklyReduction > 0m && totalWeeklyReduction <= 1.0m)
@@ -462,7 +467,7 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
             {
                 hardshipReduction = ruleConfig.GetHardshipReductionFromScore(staffInfo.HardshipScore.Value);
             }
-            else if (staffInfo.HardshipPercent > 0m)
+            else if (staffInfo.HardshipPercent >= 8m)
             {
                 hardshipReduction = ruleConfig.GetHardshipReduction(staffInfo.HardshipPercent);
             }
@@ -486,16 +491,16 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
         /// <summary>
         /// محاسبه ساعت موظفی خالص ماهانه (Net Monthly Required Hours) پرسنل درمان برای یک سال و ماه مشخص (شمسی یا میلادی).
         /// </summary>
-        public decimal CalculateMonthlyRequiredHours(User user, int year, int month, ISet<DateTime>? officialHolidays = null)
+        public decimal CalculateMonthlyRequiredHours(User user, int year, int month, ISet<DateTime>? officialHolidays = null, int? numberOfWeeksInMonth = null)
         {
-            var details = CalculateMonthlyRequiredHoursDetails(user, year, month, officialHolidays);
+            var details = CalculateMonthlyRequiredHoursDetails(user, year, month, officialHolidays, numberOfWeeksInMonth);
             return details.NetMonthlyRequiredHours;
         }
 
         /// <summary>
         /// محاسبه تفصیلی ساعت موظفی تقویمی ماهانه پرسنل درمان شامل روزهای کاری، ساعت خام، کسر ساعت و ساعت موظف خالص.
         /// </summary>
-        public MonthlyCalendarWorkingHoursResultDto CalculateMonthlyRequiredHoursDetails(User user, int year, int month, ISet<DateTime>? officialHolidays = null)
+        public MonthlyCalendarWorkingHoursResultDto CalculateMonthlyRequiredHoursDetails(User user, int year, int month, ISet<DateTime>? officialHolidays = null, int? numberOfWeeksInMonth = null)
         {
             if (user == null)
             {
@@ -503,13 +508,13 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
             }
 
             var monthInfo = _calendarHolidayProvider.GetMonthWorkingDaysInfo(year, month, officialHolidays);
-            return CalculateMonthlyRequiredHoursInternal(user, monthInfo);
+            return CalculateMonthlyRequiredHoursInternal(user, monthInfo, numberOfWeeksInMonth);
         }
 
         /// <summary>
         /// محاسبه تفصیلی ساعت موظفی ماهانه پرسنل بر مبنای تعداد کل روزها و روزهای کاری موظف داده‌شده.
         /// </summary>
-        public MonthlyCalendarWorkingHoursResultDto CalculateMonthlyRequiredHoursForDaysDetails(User user, int totalDaysInMonth, int workingDaysCount, DateTime? referenceDate = null)
+        public MonthlyCalendarWorkingHoursResultDto CalculateMonthlyRequiredHoursForDaysDetails(User user, int totalDaysInMonth, int workingDaysCount, DateTime? referenceDate = null, int? numberOfWeeksInMonth = null)
         {
             if (user == null)
             {
@@ -544,19 +549,19 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
                 MidWeekOfficialHolidaysCount = midWeekHolidays
             };
 
-            return CalculateMonthlyRequiredHoursInternal(user, monthInfo);
+            return CalculateMonthlyRequiredHoursInternal(user, monthInfo, numberOfWeeksInMonth);
         }
 
         /// <summary>
         /// محاسبه ساعت موظفی خالص ماهانه پرسنل بر مبنای تعداد کل روزها و روزهای کاری موظف داده‌شده.
         /// </summary>
-        public decimal CalculateMonthlyRequiredHoursForDays(User user, int totalDaysInMonth, int workingDaysCount, DateTime? referenceDate = null)
+        public decimal CalculateMonthlyRequiredHoursForDays(User user, int totalDaysInMonth, int workingDaysCount, DateTime? referenceDate = null, int? numberOfWeeksInMonth = null)
         {
-            var details = CalculateMonthlyRequiredHoursForDaysDetails(user, totalDaysInMonth, workingDaysCount, referenceDate);
+            var details = CalculateMonthlyRequiredHoursForDaysDetails(user, totalDaysInMonth, workingDaysCount, referenceDate, numberOfWeeksInMonth);
             return details.NetMonthlyRequiredHours;
         }
 
-        private MonthlyCalendarWorkingHoursResultDto CalculateMonthlyRequiredHoursInternal(User user, MonthWorkingDaysInfo monthInfo)
+        private MonthlyCalendarWorkingHoursResultDto CalculateMonthlyRequiredHoursInternal(User user, MonthWorkingDaysInfo monthInfo, int? numberOfWeeksInMonth = null)
         {
             // گام ۱: ساعت موظفی خام/ناخالص ماهانه = WorkingDaysCount * (44 / 6)
             const decimal baseDailyWorkingHours = 44.0m / 6.0m;
@@ -568,7 +573,9 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
                 ? GetWeeklyProductivityReduction(user, monthInfo.MonthStart)
                 : 0.0m;
 
-            var monthWeeksFactor = (decimal)monthInfo.TotalDays / 7.0m;
+            var monthWeeksFactor = numberOfWeeksInMonth.HasValue && numberOfWeeksInMonth.Value > 0
+                ? (decimal)numberOfWeeksInMonth.Value
+                : (decimal)monthInfo.TotalDays / 7.0m;
             var totalMonthlyReduction = Math.Round(weeklyReduction * monthWeeksFactor, 2, MidpointRounding.AwayFromZero);
 
             // گام ۳: ساعت موظفی خالص ماهانه = Math.Max(0, GrossMonthlyHours - TotalMonthlyReduction)
@@ -583,7 +590,13 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
             var seniorityRed = isIncluded ? ruleConfig.GetSeniorityReduction(years) : 0m;
             var isClinicalManager = ClinicalManagementRoleDetector.IsClinicalManager(user);
             var hardshipRed = isIncluded
-                ? (isClinicalManager ? 2.0m : (staffInfo.HardshipScore.HasValue ? ruleConfig.GetHardshipReductionFromScore(staffInfo.HardshipScore.Value) : (staffInfo.HardshipPercent > 0m ? ruleConfig.GetHardshipReduction(staffInfo.HardshipPercent) : 0m)))
+                ? (isClinicalManager
+                    ? 2.0m
+                    : (staffInfo.HardshipScore.HasValue
+                        ? ruleConfig.GetHardshipReductionFromScore(staffInfo.HardshipScore.Value)
+                        : (staffInfo.HardshipPercent >= 8m
+                            ? ruleConfig.GetHardshipReduction(staffInfo.HardshipPercent)
+                            : ruleConfig.GeneralSectionHardshipReduction)))
                 : 0m;
             var isRotating = staffInfo.HasUncommonRotatingShifts || staffInfo.ShiftPattern == ShiftPatternType.ThreeShiftRotating || staffInfo.ShiftPattern == ShiftPatternType.TwoShiftRotating || staffInfo.ShiftPattern == ShiftPatternType.FixedNight;
             var shiftPatternRed = (isIncluded && isRotating) ? ruleConfig.RotatingShiftReductionPerWeek : 0m;
@@ -606,8 +619,10 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
                     notes.Add("ماده ۴ دستورالعمل اجرایی: پست مدیریت بالینی (سوپروایزر/سرپرستار/مترون) با سقف ۲.۰ ساعت صعوبت کار لحاظ شد.");
                 }
                 notes.Add($"تخفیف هفتگی بهره‌وری: سابقه ({seniorityRed}h) + صعوبت ({hardshipRed}h) + نوبت‌کاری ({shiftPatternRed}h) = {weeklyReduction} ساعت در هفته (حداکثر ۸ ساعت).");
-                notes.Add($"نسبت هفته‌های ماه: {monthInfo.TotalDays} / ۷ = {Math.Round(monthWeeksFactor, 4)} هفته.");
-                notes.Add($"کسر ساعت بهره‌وری ماهانه: {weeklyReduction} × ({monthInfo.TotalDays}/۷) = {totalMonthlyReduction} ساعت.");
+                notes.Add(numberOfWeeksInMonth.HasValue && numberOfWeeksInMonth.Value > 0
+                    ? $"تعداد هفته‌های مبنای ماه: {numberOfWeeksInMonth.Value} هفته."
+                    : $"نسبت هفته‌های ماه: {monthInfo.TotalDays} / ۷ = {Math.Round(monthWeeksFactor, 4)} هفته.");
+                notes.Add($"کسر ساعت بهره‌وری ماهانه: {weeklyReduction} × {Math.Round(monthWeeksFactor, 4)} = {totalMonthlyReduction} ساعت.");
             }
 
             notes.Add($"ساعت موظفی خالص ماهانه: Max(0, {grossMonthlyHours} - {totalMonthlyReduction}) = {netMonthlyRequiredHours} ساعت.");

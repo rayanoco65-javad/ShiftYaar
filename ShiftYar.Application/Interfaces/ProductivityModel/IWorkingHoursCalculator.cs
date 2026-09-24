@@ -31,21 +31,21 @@ namespace ShiftYar.Application.Interfaces.ProductivityModel
         /// محاسبه ساعت موظفی خالص ماهانه (Net Monthly Required Hours) پرسنل درمان برای یک سال و ماه مشخص (شمسی یا میلادی).
         /// با دقت ۲ رقم اعشار گرد می‌شود.
         /// </summary>
-        decimal CalculateMonthlyRequiredHours(User user, int year, int month, ISet<DateTime>? officialHolidays = null);
+        decimal CalculateMonthlyRequiredHours(User user, int year, int month, ISet<DateTime>? officialHolidays = null, int? numberOfWeeksInMonth = null);
 
         /// <summary>
         /// محاسبه تفصیلی ساعت موظفی تقویمی ماهانه پرسنل درمان شامل روزهای کاری، ساعت خام، کسر ساعت و ساعت موظف خالص.
         /// </summary>
-        MonthlyCalendarWorkingHoursResultDto CalculateMonthlyRequiredHoursDetails(User user, int year, int month, ISet<DateTime>? officialHolidays = null);
+        MonthlyCalendarWorkingHoursResultDto CalculateMonthlyRequiredHoursDetails(User user, int year, int month, ISet<DateTime>? officialHolidays = null, int? numberOfWeeksInMonth = null);
 
         /// <summary>
         /// محاسبه تفصیلی ساعت موظفی ماهانه پرسنل بر مبنای تعداد کل روزها و روزهای کاری موظف داده‌شده.
         /// </summary>
-        MonthlyCalendarWorkingHoursResultDto CalculateMonthlyRequiredHoursForDaysDetails(User user, int totalDaysInMonth, int workingDaysCount, DateTime? referenceDate = null);
+        MonthlyCalendarWorkingHoursResultDto CalculateMonthlyRequiredHoursForDaysDetails(User user, int totalDaysInMonth, int workingDaysCount, DateTime? referenceDate = null, int? numberOfWeeksInMonth = null);
 
         /// <summary>
         /// محاسبه ساعت موظفی خالص ماهانه پرسنل بر مبنای تعداد کل روزها و روزهای کاری موظف داده‌شده.
         /// </summary>
-        decimal CalculateMonthlyRequiredHoursForDays(User user, int totalDaysInMonth, int workingDaysCount, DateTime? referenceDate = null);
+        decimal CalculateMonthlyRequiredHoursForDays(User user, int totalDaysInMonth, int workingDaysCount, DateTime? referenceDate = null, int? numberOfWeeksInMonth = null);
     }
 }

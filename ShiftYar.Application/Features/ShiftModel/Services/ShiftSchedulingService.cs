@@ -1335,12 +1335,27 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 ThursdaysCount = thursdays,
                 NumberOfWeeksInMonth = weeks,
                 NightHolidayHours = 0m,
-                CapBaseHoursToStandardMonth = true
+                CapBaseHoursToStandardMonth = constraints.CapBaseHoursToStandardMonth ?? false
             };
 
             try
             {
                 var result = _workingHoursCalculator.CalculateMonthlyHours(request);
+
+                try
+                {
+                    var calendarSnapshot = _workingHoursCalculator.CalculateMonthlyRequiredHoursForDaysDetails(
+                        user,
+                        totalDays,
+                        workingDays,
+                        constraints.StartDate,
+                        weeks);
+                    userConstraint.MonthlyCalendarSnapshot = calendarSnapshot;
+                }
+                catch (Exception calEx)
+                {
+                    _logger?.LogDebug(calEx, "Failed to compute calendar snapshot for user {UserId}", user.Id);
+                }
                 _logger?.LogInformation(
                     "ProductivitySnapshot calculated for User {UserId} ({UserName}): BaseHours={BaseHours}, SeniorityRed={SeniorityRed}h, HardshipRed={HardshipRed}h, ShiftRed={ShiftRed}h, TotalWeeklyRed={WeeklyRed}h, MonthlyRed={MonthlyRed}h => FinalRequiredHours={FinalHours}",
                     user.Id,
