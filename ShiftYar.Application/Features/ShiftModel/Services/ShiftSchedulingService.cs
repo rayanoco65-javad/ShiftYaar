@@ -1259,7 +1259,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 return null;
             }
 
-            var isIncluded = user.IncludedProductivityPlan ?? (userConstraint.ShiftType == ShiftTypes.RotatingShift);
+            var isRotatingUser = userConstraint.ShiftType == ShiftTypes.RotatingShift
+                || userConstraint.ShiftSubType == ShiftSubTypes.TwoShifts
+                || userConstraint.ShiftSubType == ShiftSubTypes.ThreeShifts
+                || userConstraint.ShiftSubType == ShiftSubTypes.FixedNight
+                || user.ShiftSubType == ShiftSubTypes.TwoShifts
+                || user.ShiftSubType == ShiftSubTypes.ThreeShifts
+                || user.ShiftSubType == ShiftSubTypes.FixedNight;
+
+            var isIncluded = user.IncludedProductivityPlan ?? isRotatingUser;
 
             var totalDays = Math.Max(1, (int)(constraints.EndDate.Date - constraints.StartDate.Date).TotalDays + 1);
             var fridays = 0;
@@ -1289,11 +1297,14 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             ShiftPatternType shiftPattern;
             if (userConstraint.ShiftType == ShiftTypes.FixedShift)
             {
-                var isNight = userConstraint.AllowedShiftLabels.Contains(ShiftLabel.Night) ||
+                var isNight = userConstraint.ShiftSubType == ShiftSubTypes.FixedNight ||
+                              userConstraint.AllowedShiftLabels.Contains(ShiftLabel.Night) ||
                               userConstraint.AllowedShiftPermissions.HasFlag(UserShiftPermission.Night);
                 shiftPattern = isNight ? ShiftPatternType.FixedNight : ShiftPatternType.FixedDay;
             }
-            else if (userConstraint.ShiftType == ShiftTypes.RotatingShift)
+            else if (userConstraint.ShiftType == ShiftTypes.RotatingShift ||
+                     userConstraint.ShiftSubType == ShiftSubTypes.TwoShifts ||
+                     userConstraint.ShiftSubType == ShiftSubTypes.ThreeShifts)
             {
                 shiftPattern = userConstraint.ShiftSubType == ShiftSubTypes.TwoShifts
                     ? ShiftPatternType.TwoShiftRotating
@@ -1301,10 +1312,14 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             }
             else
             {
-                shiftPattern = ShiftPatternType.FixedDay;
+                shiftPattern = StaffEmploymentInfo.ResolveShiftPattern(user);
             }
 
             var isClinicalManager = ClinicalManagementRoleDetector.IsClinicalManager(user);
+            var isRotatingPattern = shiftPattern == ShiftPatternType.ThreeShiftRotating
+                || shiftPattern == ShiftPatternType.TwoShiftRotating
+                || shiftPattern == ShiftPatternType.FixedNight;
+
             var staffInfo = new StaffEmploymentInfoDto
             {
                 StaffId = user.Id ?? 0,
@@ -1318,7 +1333,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 JobTitle = user.JobTitle ?? userConstraint.JobTitle,
                 IsSupervisor = user.IsSupervisor ?? userConstraint.IsSupervisor ?? (isClinicalManager ? true : (bool?)null),
                 IsHeadNurse = user.IsHeadNurse ?? userConstraint.IsHeadNurse,
-                HasUncommonRotatingShifts = shiftPattern == ShiftPatternType.ThreeShiftRotating || shiftPattern == ShiftPatternType.TwoShiftRotating,
+                HasUncommonRotatingShifts = isRotatingPattern,
                 ShiftPattern = shiftPattern
             };
 
@@ -2599,9 +2614,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                             // برای پرسنل فیکس، حضور کل‌روز معادل حضور در شیفت فیکس همان کاربر است
                             if (uc.ShiftType == ShiftTypes.FixedShift)
                             {
-                                var fixedLabel = uc.ShiftSubType == ShiftSubTypes.FixedEvening
-                                    ? ShiftLabel.Evening
-                                    : ShiftLabel.Morning;
+                                var fixedLabel = uc.ShiftSubType == ShiftSubTypes.FixedNight
+                                    ? ShiftLabel.Night
+                                    : (uc.ShiftSubType == ShiftSubTypes.FixedEvening ? ShiftLabel.Evening : ShiftLabel.Morning);
 
                                 var (resolvedLabel, resolvedShiftId) = ResolveRequestShiftMapping(
                                     (int)fixedLabel, departmentShifts);
@@ -2647,9 +2662,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                             {
                                 if (uc.ShiftType == ShiftTypes.FixedShift)
                                 {
-                                    var fixedLabel = uc.ShiftSubType == ShiftSubTypes.FixedEvening
-                                        ? ShiftLabel.Evening
-                                        : ShiftLabel.Morning;
+                                    var fixedLabel = uc.ShiftSubType == ShiftSubTypes.FixedNight
+                                        ? ShiftLabel.Night
+                                        : (uc.ShiftSubType == ShiftSubTypes.FixedEvening ? ShiftLabel.Evening : ShiftLabel.Morning);
                                     var resolved = ResolveRequestShiftMapping(
                                         (int)fixedLabel, departmentShifts);
                                     resolvedLabel = resolved.Label;
@@ -2782,9 +2797,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 foreach (var uc in constraints.UserConstraints.Where(u =>
                              u.IsActive && u.ShiftType == ShiftTypes.FixedShift))
                 {
-                    var fixedLabel = uc.ShiftSubType == ShiftSubTypes.FixedEvening
-                        ? ShiftLabel.Evening
-                        : ShiftLabel.Morning;
+                    var fixedLabel = uc.ShiftSubType == ShiftSubTypes.FixedNight
+                        ? ShiftLabel.Night
+                        : (uc.ShiftSubType == ShiftSubTypes.FixedEvening ? ShiftLabel.Evening : ShiftLabel.Morning);
 
                     for (var date = scheduleStartDate; date < scheduleEndExclusive; date = date.AddDays(1))
                     {

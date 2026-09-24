@@ -33,9 +33,12 @@ public static class ShiftEligibilityResolver
     {
         if (shiftType == ShiftTypes.FixedShift)
         {
-            return shiftSubType == ShiftSubTypes.FixedEvening
-                ? UserShiftPermission.Evening
-                : UserShiftPermission.Morning;
+            return shiftSubType switch
+            {
+                ShiftSubTypes.FixedNight => UserShiftPermission.Night,
+                ShiftSubTypes.FixedEvening => UserShiftPermission.Evening,
+                _ => UserShiftPermission.Morning
+            };
         }
 
         return shiftSubType switch
@@ -53,6 +56,7 @@ public static class ShiftEligibilityResolver
                      | UserShiftPermission.Evening
                      | UserShiftPermission.MorningEveningSameDay
             },
+            ShiftSubTypes.FixedNight => UserShiftPermission.Night,
             ShiftSubTypes.FixedEvening => UserShiftPermission.Evening,
             ShiftSubTypes.FixedMorning => UserShiftPermission.Morning,
             _ => AllPermissions

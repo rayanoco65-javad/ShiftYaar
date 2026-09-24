@@ -21,7 +21,8 @@ namespace ShiftYar.Domain.Enums.ShiftModel
             FixedMorning = 0,  //فیکس صبح
             FixedEvening = 1,  //فیکس عصر
             TwoShifts = 2,     //گردشی دونوبت کاری
-            ThreeShifts = 3    //گردشی سه نوبت کاری
+            ThreeShifts = 3,   //گردشی سه نوبت کاری
+            FixedNight = 4     //فیکس شب
         }
 
         //حالات شیفت گردشی دونوبت کاری

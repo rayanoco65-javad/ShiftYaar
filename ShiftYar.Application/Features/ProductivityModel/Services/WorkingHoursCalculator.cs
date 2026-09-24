@@ -294,7 +294,11 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
             }
             else if (isRotatingOrUnconventional)
             {
-                shiftPatternReduction = ruleConfig.RotatingShiftReductionPerWeek; // 1.0m
+                shiftPatternReduction = ruleConfig.GetShiftPatternReduction(shiftPattern);
+                if (shiftPatternReduction <= 0m && isRotatingOrUnconventional)
+                {
+                    shiftPatternReduction = ruleConfig.RotatingShiftReductionPerWeek; // 1.0m
+                }
             }
             else
             {
@@ -482,7 +486,11 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
                 || staffInfo.ShiftPattern == ShiftPatternType.TwoShiftRotating
                 || staffInfo.ShiftPattern == ShiftPatternType.FixedNight;
 
-            var shiftPatternReduction = isRotating ? ruleConfig.RotatingShiftReductionPerWeek : 0.0m;
+            var shiftPatternReduction = isRotating
+                ? (staffInfo.ShiftPattern != ShiftPatternType.FixedDay
+                    ? ruleConfig.GetShiftPatternReduction(staffInfo.ShiftPattern)
+                    : ruleConfig.RotatingShiftReductionPerWeek)
+                : 0.0m;
 
             var totalWeeklyReduction = Math.Min(ruleConfig.MaxWeeklyReduction, seniorityReduction + hardshipReduction + shiftPatternReduction);
             return Math.Round(totalWeeklyReduction, 2, MidpointRounding.AwayFromZero);
@@ -599,7 +607,11 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
                             : ruleConfig.GeneralSectionHardshipReduction)))
                 : 0m;
             var isRotating = staffInfo.HasUncommonRotatingShifts || staffInfo.ShiftPattern == ShiftPatternType.ThreeShiftRotating || staffInfo.ShiftPattern == ShiftPatternType.TwoShiftRotating || staffInfo.ShiftPattern == ShiftPatternType.FixedNight;
-            var shiftPatternRed = (isIncluded && isRotating) ? ruleConfig.RotatingShiftReductionPerWeek : 0m;
+            var shiftPatternRed = (isIncluded && isRotating)
+                ? (staffInfo.ShiftPattern != ShiftPatternType.FixedDay
+                    ? ruleConfig.GetShiftPatternReduction(staffInfo.ShiftPattern)
+                    : ruleConfig.RotatingShiftReductionPerWeek)
+                : 0m;
 
             var notes = new List<string>
             {
@@ -683,7 +695,7 @@ namespace ShiftYar.Application.Features.ProductivityModel.Services
                 Role = dto.Role,
                 IsSupervisor = dto.IsSupervisor,
                 IsHeadNurse = dto.IsHeadNurse,
-                HasUncommonRotatingShifts = dto.HasUncommonRotatingShifts || pattern == ShiftPatternType.ThreeShiftRotating || pattern == ShiftPatternType.TwoShiftRotating,
+                HasUncommonRotatingShifts = dto.HasUncommonRotatingShifts || pattern == ShiftPatternType.ThreeShiftRotating || pattern == ShiftPatternType.TwoShiftRotating || pattern == ShiftPatternType.FixedNight,
                 ShiftPattern = pattern
             };
         }

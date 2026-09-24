@@ -117,6 +117,56 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
         /// <summary>
         /// Convenience helper to build employment info straight from existing User aggregate to avoid data duplication.
         /// </summary>
+        /// <summary>
+        /// تشخیص دقیق الگوی شیفت پرسنل (ثابت روز، دو نوبته گردشی، سه نوبته گردشی، یا ثابت شب)
+        /// از روی فیلدهای ShiftSubType، ShiftType، TwoShiftRotationPattern و AllowedShiftPermissions.
+        /// </summary>
+        public static ShiftPatternType ResolveShiftPattern(User user)
+        {
+            if (user == null)
+            {
+                return ShiftPatternType.FixedDay;
+            }
+
+            // ۱. بررسی زیرنوع شیفت فیکس شب یا مجوز شب اختصاصی
+            var isFixedNightSubType = user.ShiftSubType == Domain.Enums.ShiftModel.ShiftEnums.ShiftSubTypes.FixedNight;
+            var hasNightPermission = user.AllowedShiftPermissions.HasValue &&
+                                     user.AllowedShiftPermissions.Value.HasFlag(Domain.Enums.ShiftModel.ShiftEnums.UserShiftPermission.Night);
+            var isOnlyNightPermission = hasNightPermission &&
+                                        !user.AllowedShiftPermissions.Value.HasFlag(Domain.Enums.ShiftModel.ShiftEnums.UserShiftPermission.Morning) &&
+                                        !user.AllowedShiftPermissions.Value.HasFlag(Domain.Enums.ShiftModel.ShiftEnums.UserShiftPermission.Evening);
+
+            if (isFixedNightSubType ||
+                (user.ShiftType == Domain.Enums.ShiftModel.ShiftEnums.ShiftTypes.FixedShift && hasNightPermission) ||
+                isOnlyNightPermission)
+            {
+                return ShiftPatternType.FixedNight;
+            }
+
+            // ۲. بررسی شیفت دو نوبته در گردش
+            if (user.ShiftSubType == Domain.Enums.ShiftModel.ShiftEnums.ShiftSubTypes.TwoShifts ||
+                user.TwoShiftRotationPattern.HasValue ||
+                (user.ShiftType == Domain.Enums.ShiftModel.ShiftEnums.ShiftTypes.RotatingShift && user.ShiftSubType == Domain.Enums.ShiftModel.ShiftEnums.ShiftSubTypes.TwoShifts))
+            {
+                return ShiftPatternType.TwoShiftRotating;
+            }
+
+            // ۳. بررسی شیفت سه نوبته در گردش
+            if (user.ShiftSubType == Domain.Enums.ShiftModel.ShiftEnums.ShiftSubTypes.ThreeShifts ||
+                user.ShiftType == Domain.Enums.ShiftModel.ShiftEnums.ShiftTypes.RotatingShift)
+            {
+                return ShiftPatternType.ThreeShiftRotating;
+            }
+
+            // ۴. بررسی شیفت ثابت روز
+            if (user.ShiftType == Domain.Enums.ShiftModel.ShiftEnums.ShiftTypes.FixedShift)
+            {
+                return hasNightPermission ? ShiftPatternType.FixedNight : ShiftPatternType.FixedDay;
+            }
+
+            return ShiftPatternType.FixedDay;
+        }
+
         public static StaffEmploymentInfo FromUser(
             User user,
             ShiftPatternType? shiftPattern = null,
@@ -133,24 +183,18 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
             {
                 pattern = shiftPattern.Value;
             }
-            else if (user.ShiftType == Domain.Enums.ShiftModel.ShiftEnums.ShiftTypes.RotatingShift)
-            {
-                pattern = user.ShiftSubType == Domain.Enums.ShiftModel.ShiftEnums.ShiftSubTypes.TwoShifts
-                    ? ShiftPatternType.TwoShiftRotating
-                    : ShiftPatternType.ThreeShiftRotating;
-            }
-            else if (user.ShiftType == Domain.Enums.ShiftModel.ShiftEnums.ShiftTypes.FixedShift)
-            {
-                var isNight = user.AllowedShiftPermissions.HasValue &&
-                              user.AllowedShiftPermissions.Value.HasFlag(Domain.Enums.ShiftModel.ShiftEnums.UserShiftPermission.Night);
-                pattern = isNight ? ShiftPatternType.FixedNight : ShiftPatternType.FixedDay;
-            }
             else
             {
-                pattern = hasUncommonRotatingShifts ? ShiftPatternType.ThreeShiftRotating : ShiftPatternType.FixedDay;
+                pattern = ResolveShiftPattern(user);
+                if (pattern == ShiftPatternType.FixedDay && hasUncommonRotatingShifts)
+                {
+                    pattern = ShiftPatternType.ThreeShiftRotating;
+                }
             }
 
-            var isRotating = pattern == ShiftPatternType.ThreeShiftRotating || pattern == ShiftPatternType.TwoShiftRotating || pattern == ShiftPatternType.FixedNight;
+            var isRotating = pattern == ShiftPatternType.ThreeShiftRotating
+                || pattern == ShiftPatternType.TwoShiftRotating
+                || pattern == ShiftPatternType.FixedNight;
 
             return new StaffEmploymentInfo
             {
@@ -161,6 +205,7 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
                 HardshipScore = user.HardshipScore,
                 Position = user.Position,
                 JobTitle = user.JobTitle,
+                Role = user.Position,
                 IsSupervisor = user.IsSupervisor,
                 IsHeadNurse = user.IsHeadNurse,
                 HasUncommonRotatingShifts = hasUncommonRotatingShifts || isRotating,

@@ -94,9 +94,11 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
 
                 if (isFixed && !entity.ShiftLabel.HasValue && entity.RequestAction == RequestAction.RequestToBeOnShift)
                 {
-                    entity.ShiftLabel = userDepatment?.ShiftSubType == ShiftEnums.ShiftSubTypes.FixedEvening
-                        ? ShiftEnums.ShiftLabel.Evening
-                        : ShiftEnums.ShiftLabel.Morning;
+                    entity.ShiftLabel = userDepatment?.ShiftSubType == ShiftEnums.ShiftSubTypes.FixedNight
+                        ? ShiftEnums.ShiftLabel.Night
+                        : (userDepatment?.ShiftSubType == ShiftEnums.ShiftSubTypes.FixedEvening
+                            ? ShiftEnums.ShiftLabel.Evening
+                            : ShiftEnums.ShiftLabel.Morning);
                 }
 
                 // فقط مقادیر خارج از enum (مثل Shift.Id=3) را به‌عنوان ShiftId remap کن.
@@ -238,9 +240,11 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
 
                 if (isFixed && !entity.ShiftLabel.HasValue && entity.RequestAction == RequestAction.RequestToBeOnShift)
                 {
-                    entity.ShiftLabel = entity.User?.ShiftSubType == ShiftEnums.ShiftSubTypes.FixedEvening
-                        ? ShiftEnums.ShiftLabel.Evening
-                        : ShiftEnums.ShiftLabel.Morning;
+                    entity.ShiftLabel = entity.User?.ShiftSubType == ShiftEnums.ShiftSubTypes.FixedNight
+                        ? ShiftEnums.ShiftLabel.Night
+                        : (entity.User?.ShiftSubType == ShiftEnums.ShiftSubTypes.FixedEvening
+                            ? ShiftEnums.ShiftLabel.Evening
+                            : ShiftEnums.ShiftLabel.Morning);
                 }
 
                 var nightQuotaError = await ValidateNightOnRequestAgainstMonthlyQuotaAsync(entity);

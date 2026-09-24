@@ -110,7 +110,12 @@ public static class ShiftQuotaTypeValidator
     {
         if (user.ShiftType == ShiftTypes.FixedShift)
         {
-            return user.ShiftSubType == ShiftSubTypes.FixedEvening ? "(شیفت ثابت عصر)" : "(شیفت ثابت صبح)";
+            return user.ShiftSubType switch
+            {
+                ShiftSubTypes.FixedNight => "(شیفت ثابت شب)",
+                ShiftSubTypes.FixedEvening => "(شیفت ثابت عصر)",
+                _ => "(شیفت ثابت صبح)"
+            };
         }
 
         if (user.ShiftSubType == ShiftSubTypes.ThreeShifts)

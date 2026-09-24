@@ -495,5 +495,68 @@ namespace ShiftYar.Application.Tests
         }
 
         #endregion
+
+        #region سناریو ۱۰: تضمین کسر ۱ ساعت هفتگی (۴ ساعت ماهانه) برای دو نوبته، سه نوبته و ثابت شب
+
+        [Theory]
+        [InlineData(ShiftEnums.ShiftSubTypes.TwoShifts, null, 1.0)]
+        [InlineData(ShiftEnums.ShiftSubTypes.ThreeShifts, null, 1.0)]
+        [InlineData(ShiftEnums.ShiftSubTypes.FixedNight, null, 1.0)]
+        [InlineData(ShiftEnums.ShiftSubTypes.FixedMorning, null, 0.0)]
+        [InlineData(ShiftEnums.ShiftSubTypes.FixedEvening, null, 0.0)]
+        public void Scenario10_ShiftPatterns_DeductionsMatchPolicy(
+            ShiftEnums.ShiftSubTypes subType,
+            ShiftEnums.ShiftTypes? shiftType,
+            decimal expectedShiftReduction)
+        {
+            var user = new User
+            {
+                Id = 1001,
+                FullName = "پرسنل تست الگوی شیفت",
+                DateOfEmployment = DateTime.UtcNow, // بدو خدمت = ۱ ساعت سنوات
+                ShiftSubType = subType,
+                ShiftType = shiftType,
+                IncludedProductivityPlan = true
+            };
+
+            var result = _calculator.CalculateMonthlyRequiredHoursForDaysDetails(
+                user,
+                totalDaysInMonth: 30,
+                workingDaysCount: 26,
+                numberOfWeeksInMonth: 4);
+
+            Assert.Equal(expectedShiftReduction, result.ShiftPatternReductionPerWeek);
+            var expectedWeekly = 1.0m + expectedShiftReduction; // سنوات (۱ ساعت) + نوبت‌کاری
+            Assert.Equal(expectedWeekly, result.WeeklyProductivityReduction);
+            Assert.Equal(expectedWeekly * 4.0m, result.TotalMonthlyReduction);
+        }
+
+        [Fact]
+        public void Scenario10_FixedNight_ViaAllowedShiftPermissions_ReceivesOneHourReduction()
+        {
+            var user = new User
+            {
+                Id = 1002,
+                FullName = "پرسنل فیکس شب با مجوز",
+                DateOfEmployment = DateTime.UtcNow,
+                ShiftType = ShiftEnums.ShiftTypes.FixedShift,
+                AllowedShiftPermissions = ShiftEnums.UserShiftPermission.Night,
+                IncludedProductivityPlan = true
+            };
+
+            var result = _calculator.CalculateMonthlyRequiredHoursForDaysDetails(
+                user,
+                totalDaysInMonth: 30,
+                workingDaysCount: 26,
+                numberOfWeeksInMonth: 4);
+
+            Assert.Equal(1.0m, result.ShiftPatternReductionPerWeek);
+            Assert.Equal(2.0m, result.WeeklyProductivityReduction); // ۱ سنوات + ۱ ثابت شب
+            Assert.Equal(8.0m, result.TotalMonthlyReduction);       // ۲ * ۴ = ۸ ساعت
+            Assert.Equal(182.67m, result.NetMonthlyRequiredHours);  // ۱۹۰.۶۷ - ۸ = ۱۸۲.۶۷
+            Assert.Equal(183, result.NetMonthlyRequiredHoursRounded);
+        }
+
+        #endregion
     }
 }
