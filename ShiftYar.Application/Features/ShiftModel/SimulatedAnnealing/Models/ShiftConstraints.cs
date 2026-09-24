@@ -150,6 +150,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public bool IncludedInProductivityPlan { get; set; }
         public decimal? ProductivityRequiredHours { get; set; }
         public WorkingHoursCalculationResultDto? ProductivitySnapshot { get; set; }
+        public MonthlyCalendarWorkingHoursResultDto? MonthlyCalendarSnapshot { get; set; }
         public decimal HardshipPercent { get; set; }
         public decimal? HardshipPercentage
         {

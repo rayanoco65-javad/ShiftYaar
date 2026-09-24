@@ -22,7 +22,7 @@ public static class ProductivityRequiredHoursResolver
     {
         if (HasManualOverride(user))
         {
-            var manualHours = Math.Round(user.MaxProductivityRequiredHours!.Value, MidpointRounding.AwayFromZero);
+            var manualHours = Math.Round(user.MaxProductivityRequiredHours!.Value, 2, MidpointRounding.AwayFromZero);
             userConstraint.IncludedInProductivityPlan = true;
             userConstraint.ProductivityRequiredHours = manualHours;
 
@@ -65,6 +65,37 @@ public static class ProductivityRequiredHoursResolver
 
         userConstraint.IncludedInProductivityPlan = calculatedSnapshot.Breakdown?.IsIncludedInProductivityPlan ?? (user.IncludedProductivityPlan != false);
         userConstraint.ProductivitySnapshot = calculatedSnapshot;
-        userConstraint.ProductivityRequiredHours = Math.Round(calculatedSnapshot.FinalMonthlyRequiredHours, MidpointRounding.AwayFromZero);
+        userConstraint.ProductivityRequiredHours = Math.Round(calculatedSnapshot.FinalMonthlyRequiredHours, 2, MidpointRounding.AwayFromZero);
+    }
+
+    public static void ApplyToUserConstraint(
+        User user,
+        UserConstraint userConstraint,
+        MonthlyCalendarWorkingHoursResultDto? calendarSnapshot)
+    {
+        if (HasManualOverride(user))
+        {
+            var manualHours = Math.Round(user.MaxProductivityRequiredHours!.Value, 2, MidpointRounding.AwayFromZero);
+            userConstraint.IncludedInProductivityPlan = true;
+            userConstraint.ProductivityRequiredHours = manualHours;
+
+            if (calendarSnapshot != null)
+            {
+                calendarSnapshot.HasManualOverride = true;
+                calendarSnapshot.ManualOverrideHours = manualHours;
+                calendarSnapshot.Notes.Add("ساعت موظفی از فیلد دستی «حداکثر ساعت موظفی» کاربر اعمال شد (به‌جای مقدار محاسبه‌شده تقویمی).");
+                userConstraint.MonthlyCalendarSnapshot = calendarSnapshot;
+            }
+            return;
+        }
+
+        if (calendarSnapshot == null)
+        {
+            return;
+        }
+
+        userConstraint.IncludedInProductivityPlan = calendarSnapshot.IsIncludedInProductivityPlan;
+        userConstraint.MonthlyCalendarSnapshot = calendarSnapshot;
+        userConstraint.ProductivityRequiredHours = Math.Round(calendarSnapshot.NetMonthlyRequiredHours, 2, MidpointRounding.AwayFromZero);
     }
 }

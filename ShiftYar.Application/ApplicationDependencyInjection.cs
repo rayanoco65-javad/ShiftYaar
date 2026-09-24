@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using ShiftYar.Application.Common.Mappings;
 using ShiftYar.Application.Features.DepartmentModel.Services;
 using ShiftYar.Application.Features.PermissionModel.Services;
@@ -37,6 +37,7 @@ using ShiftYar.Application.Features.Settings.Services;
 using ShiftYar.Application.Interfaces.ProductivityModel;
 using ShiftYar.Application.Features.ProductivityModel.Services;
 using ShiftYar.Application.Features.ShiftModel.Jobs;
+using ShiftYar.Application.Common.Utilities;
 
 namespace ShiftYar.Application
 {
@@ -81,6 +82,7 @@ namespace ShiftYar.Application
             services.AddScoped<IDepartmentSchedulingSettingsService, DepartmentSchedulingSettingsService>();
             services.AddScoped<IShiftExchangeService, ShiftExchangeService>();
             services.AddScoped<IAlgorithmSettingsService, AlgorithmSettingsService>();
+            services.AddScoped<ICalendarHolidayProvider, CalendarHolidayProvider>();
             services.AddScoped<IWorkingHoursCalculator, WorkingHoursCalculator>();
 
             // اجرای پس‌زمینهٔ زمان‌بندی (برای جلوگیری از 502 ناشی از حل طولانی/سنگین در مسیر درخواست)

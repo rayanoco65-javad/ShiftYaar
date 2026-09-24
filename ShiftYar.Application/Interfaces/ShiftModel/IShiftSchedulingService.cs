@@ -56,5 +56,10 @@ namespace ShiftYar.Application.Interfaces.ShiftModel
 
         /// در صورت مسدود بودن شیفت‌بندی ماهانه، متن خطا؛ در غیر این صورت null
         Task<string?> GetMonthlyScheduleCreationBlockerAsync(int departmentId, DateTime rangeStart, DateTime rangeEnd);
+
+        /// <summary>
+        /// محاسبه ساعت موظفی خالص ماهانه پرسنل بالینی بر اساس تقویم ماه و کسر ساعت بهره‌وری
+        /// </summary>
+        decimal CalculateMonthlyRequiredHours(ShiftYar.Domain.Entities.UserModel.User user, int year, int month);
     }
 }

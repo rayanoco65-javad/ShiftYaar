@@ -3686,6 +3686,24 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             return await ConvertToOrToolsConstraintsAsync(constraints, dto);
         }
 
+        /// <summary>
+        /// محاسبه ساعت موظفی خالص ماهانه پرسنل بالینی بر اساس تقویم ماه و کسر ساعت بهره‌وری
+        /// </summary>
+        public decimal CalculateMonthlyRequiredHours(User user, int year, int month)
+        {
+            if (user == null)
+            {
+                throw new ArgumentNullException(nameof(user));
+            }
+
+            if (_workingHoursCalculator == null)
+            {
+                throw new InvalidOperationException("WorkingHoursCalculator is not available.");
+            }
+
+            return _workingHoursCalculator.CalculateMonthlyRequiredHours(user, year, month);
+        }
+
         #endregion
     }
 }

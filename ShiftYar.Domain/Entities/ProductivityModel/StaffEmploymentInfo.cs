@@ -128,7 +128,29 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
                 throw new ArgumentNullException(nameof(user));
             }
 
-            var pattern = shiftPattern ?? (hasUncommonRotatingShifts ? ShiftPatternType.ThreeShiftRotating : ShiftPatternType.FixedDay);
+            ShiftPatternType pattern;
+            if (shiftPattern.HasValue)
+            {
+                pattern = shiftPattern.Value;
+            }
+            else if (user.ShiftType == Domain.Enums.ShiftModel.ShiftEnums.ShiftTypes.RotatingShift)
+            {
+                pattern = user.ShiftSubType == Domain.Enums.ShiftModel.ShiftEnums.ShiftSubTypes.TwoShifts
+                    ? ShiftPatternType.TwoShiftRotating
+                    : ShiftPatternType.ThreeShiftRotating;
+            }
+            else if (user.ShiftType == Domain.Enums.ShiftModel.ShiftEnums.ShiftTypes.FixedShift)
+            {
+                var isNight = user.AllowedShiftPermissions.HasValue &&
+                              user.AllowedShiftPermissions.Value.HasFlag(Domain.Enums.ShiftModel.ShiftEnums.UserShiftPermission.Night);
+                pattern = isNight ? ShiftPatternType.FixedNight : ShiftPatternType.FixedDay;
+            }
+            else
+            {
+                pattern = hasUncommonRotatingShifts ? ShiftPatternType.ThreeShiftRotating : ShiftPatternType.FixedDay;
+            }
+
+            var isRotating = pattern == ShiftPatternType.ThreeShiftRotating || pattern == ShiftPatternType.TwoShiftRotating || pattern == ShiftPatternType.FixedNight;
 
             return new StaffEmploymentInfo
             {
@@ -141,7 +163,7 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
                 JobTitle = user.JobTitle,
                 IsSupervisor = user.IsSupervisor,
                 IsHeadNurse = user.IsHeadNurse,
-                HasUncommonRotatingShifts = hasUncommonRotatingShifts || pattern == ShiftPatternType.ThreeShiftRotating || pattern == ShiftPatternType.TwoShiftRotating,
+                HasUncommonRotatingShifts = hasUncommonRotatingShifts || isRotating,
                 ShiftPattern = pattern,
                 YearsOfServiceOverride = yearsOfServiceOverride
             };
