@@ -1007,6 +1007,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
                         ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
                     }
+                    DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
+                    ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
+                    AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
+                    ApprovedRequestGuard.ForceApply(candidateSolution, constraints);
                     scheduler.RefreshSolutionViolations(candidateSolution);
 
                     EnsureApprovedRequestsOrThrow(scheduler, candidateSolution, constraints);
@@ -3432,6 +3436,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
                 ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
             }
+            DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
+            ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+            ApprovedRequestGuard.ForceApply(solution, constraints);
             scheduler.RefreshSolutionViolations(solution);
 
             EnsureApprovedRequestsOrThrow(scheduler, solution, constraints);
@@ -3570,6 +3578,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
                         ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
                     }
+                    DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
+                    ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
+                    AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
+                    ApprovedRequestGuard.ForceApply(candidateSolution, constraints);
                     scheduler.RefreshSolutionViolations(candidateSolution);
 
                     EnsureApprovedRequestsOrThrow(scheduler, candidateSolution, constraints);

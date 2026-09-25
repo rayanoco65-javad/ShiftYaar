@@ -553,6 +553,11 @@ public static class MorningEveningBalanceGuard
         SaShiftAssignment assignment,
         params SaShiftAssignment[] toRemove)
     {
+        if (!ShiftEligibilityResolver.MayTakeLabelOnDate(user, assignment.ShiftLabel, assignment.Date, constraints.StartDate))
+        {
+            return false;
+        }
+
         if (user.UnavailableDates.Any(d => d.Date == assignment.Date.Date))
         {
             return false;

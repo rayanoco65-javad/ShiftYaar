@@ -2443,6 +2443,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             {
                 var helpers = _constraints.UserConstraints
                     .Where(u => u.IsActive && ShiftManagerRules.IsManager(u) && !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
+                    .Where(u => ShiftEligibilityResolver.MayTakeLabelOnDate(u, shiftReq.ShiftLabel, date, _constraints.StartDate))
                     .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
                     .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
                     .Where(u => !HasDailyConflict(solution, u.UserId, date, shiftReq.ShiftLabel))
@@ -2554,6 +2555,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 {
                     var secondMgr = _constraints.UserConstraints
                         .Where(u => u.IsActive && ShiftManagerRules.IsManager(u) && !triedSecondMgrs.Contains(u.UserId) && !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
+                        .Where(u => ShiftEligibilityResolver.MayTakeLabelOnDate(u, shiftReq.ShiftLabel, date, _constraints.StartDate))
                         .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
                         .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
                         .Where(u => !HasDailyConflict(solution, u.UserId, date, shiftReq.ShiftLabel))

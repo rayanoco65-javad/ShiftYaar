@@ -17,7 +17,7 @@ public static class AdjacentShiftRestGuard
         foreach (var user in constraints.UserConstraints)
         {
             // چند پاس تا همه جفت‌های ممنوع پاک شوند
-            for (var pass = 0; pass < 8; pass++)
+            for (var pass = 0; pass < 16; pass++)
             {
                 var pairs = AdjacentShiftRestRules.FindForbiddenPairs(
                     solution.GetUserAllAssignments(user.UserId),
@@ -27,30 +27,38 @@ public static class AdjacentShiftRestGuard
                     break;
                 }
 
-                var (earlier, later) = pairs[0];
-                // اگر فقط به‌خاطر تنظیمات عصر/شب بعد از شب ممنوع است و شیفت بعدی ON تأییدشده است،
-                // انتساب غیرمحافظت‌شدهٔ قبلی را حذف کن؛ هر دو محافظت‌شده → نگه دار.
-                if (IsWaivedByApprovedLaterSlot(user, earlier, later))
+                var removedAny = false;
+                foreach (var (earlier, later) in pairs)
                 {
-                    if (IsRequestProtected(user, earlier))
+                    // اگر فقط به‌خاطر تنظیمات عصر/شب بعد از شب ممنوع است و شیفت بعدی ON تأییدشده است،
+                    // انتساب غیرمحافظت‌شدهٔ قبلی را حذف کن؛ هر دو محافظت‌شده → نگه دار.
+                    if (IsWaivedByApprovedLaterSlot(user, earlier, later))
                     {
+                        if (IsRequestProtected(user, earlier))
+                        {
+                            continue;
+                        }
+
+                        solution.UnlockSkeletonAssignment(earlier.UserId, earlier.ShiftId, earlier.Date);
+                        solution.RemoveAssignment(earlier.UserId, earlier.ShiftId, earlier.Date, force: true);
+                        removedAny = true;
                         break;
                     }
 
-                    solution.UnlockSkeletonAssignment(earlier.UserId, earlier.ShiftId, earlier.Date);
-                    solution.RemoveAssignment(earlier.UserId, earlier.ShiftId, earlier.Date, force: true);
-                    continue;
+                    var remove = ChooseRemovable(user, earlier, later, solution, constraints);
+                    if (remove != null)
+                    {
+                        solution.UnlockSkeletonAssignment(remove.UserId, remove.ShiftId, remove.Date);
+                        solution.RemoveAssignment(remove.UserId, remove.ShiftId, remove.Date, force: true);
+                        removedAny = true;
+                        break;
+                    }
                 }
 
-                var remove = ChooseRemovable(user, earlier, later, solution, constraints);
-                if (remove == null)
+                if (!removedAny)
                 {
-                    // هر دو ON تأییدشده‌اند — این جفت گزارش نمی‌شود؛ حلقه را قطع کن
                     break;
                 }
-
-                solution.UnlockSkeletonAssignment(remove.UserId, remove.ShiftId, remove.Date);
-                solution.RemoveAssignment(remove.UserId, remove.ShiftId, remove.Date, force: true);
             }
         }
     }

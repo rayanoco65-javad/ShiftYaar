@@ -2451,7 +2451,198 @@ public class DiagnoseDept2NightQuotasTests
                 }
             }
         }
+
+    [Fact]
+    public void Test_DiagnoseMehr1405_HardDailyRules()
+    {
+        var path = @"C:\Users\Paria\.gemini\antigravity-ide\brain\b6b8527e-1692-4bb0-9e37-68d60e1e0b34\scratch\dept2_1405_07_constraints.json";
+        var json = System.IO.File.ReadAllText(path);
+        var constraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(json)!;
+
+        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            MaxIterations = 4000,
+            MaxIterationsWithoutImprovement = 600
+        });
+
+        var testSol = new ShiftSolution();
+        ApprovedRequestGuard.ForceApply(testSol, constraints);
+        _output.WriteLine($"[After ApprovedRequestGuard.ForceApply] U14 10-03: {testSol.GetUserAssignments(14, new DateTime(2026, 10, 3)).Count()}");
+
+        var genInitMethod = typeof(SimulatedAnnealingScheduler).GetMethod("GenerateFeasibleInitialSolution", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var sol = (ShiftSolution)genInitMethod.Invoke(scheduler, null)!;
+        _output.WriteLine($"[After GenerateFeasibleInitialSolution] U14 10-03: {string.Join(",", sol.GetUserAssignments(14, new DateTime(2026, 10, 3)).Select(a => $"{a.ShiftLabel}(Skel={a.IsSkeleton})"))}");
+
+        var runLoopMethod = typeof(SimulatedAnnealingScheduler).GetMethod("RunAnnealingLoop", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var curSol = sol.Clone();
+        var bestSol = sol.Clone();
+        var args = new object[] { curSol, bestSol, System.Threading.CancellationToken.None };
+        runLoopMethod.Invoke(scheduler, args);
+        bestSol = (ShiftSolution)args[1];
+        _output.WriteLine($"[After RunAnnealingLoop] U14 10-03: {string.Join(",", bestSol.GetUserAssignments(14, new DateTime(2026, 10, 3)).Select(a => $"{a.ShiftLabel}(Skel={a.IsSkeleton})"))}");
+
+        void PrintU14(string label)
+        {
+            var asgs = bestSol.GetUserAssignments(14, new DateTime(2026, 10, 3)).ToList();
+            _output.WriteLine($"  [{label}] U14: {string.Join(", ", asgs.Select(a => $"{a.ShiftLabel}(Skel={a.IsSkeleton})"))}");
+        }
+
+        PrintU14("Start");
+        ApprovedRequestGuard.ForceApply(bestSol, constraints);
+        PrintU14("ApprovedRequestGuard.ForceApply");
+        DailyDuplicateAssignmentGuard.StripDuplicates(bestSol, constraints);
+        ShiftEligibilityGuard.StripIneligibleAssignments(bestSol, constraints);
+        AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSol, constraints);
+        PrintU14("Pre-strips");
+        scheduler.BuildReservedManagerSkeleton(bestSol);
+        PrintU14("BuildReservedManagerSkeleton");
+        ExactNightQuotaGuard.Enforce(bestSol, constraints);
+        ExactNightQuotaGuard.ForceSatisfyAllDeficits(bestSol, constraints);
+        ExactDayShiftQuotaGuard.EnforceAll(bestSol, constraints);
+        PrintU14("ExactNight/DayQuotaGuard");
+        ShiftCoverageGuard.Enforce(bestSol, constraints);
+        PrintU14("ShiftCoverageGuard.Enforce 1");
+        ProductivityHourFillGuard.Enforce(bestSol, constraints);
+        PrintU14("ProductivityHourFillGuard.Enforce 1");
+        MorningEveningBalanceGuard.Enforce(bestSol, constraints);
+        PrintU14("MorningEveningBalanceGuard.Enforce 1");
+        HolidayMorningEveningFairnessGuard.Enforce(bestSol, constraints);
+        PrintU14("HolidayMorningEveningFairnessGuard.Enforce");
+        ShiftCoverageGuard.StripExcessCoverage(bestSol, constraints);
+        PrintU14("ShiftCoverageGuard.StripExcessCoverage 1");
+        ShiftCoverageGuard.EnforceCapacityCeiling(bestSol, constraints);
+        PrintU14("EnforceCapacityCeiling");
+        ProductivityHourFillGuard.EnforceFinalBalance(bestSol, constraints);
+        PrintU14("ProductivityHourFillGuard.EnforceFinalBalance 1");
+        ShiftSeniorityDistributionGuard.Enforce(bestSol, constraints);
+        PrintU14("ShiftSeniorityDistributionGuard.Enforce 1");
+        scheduler.RepairManagerMix(bestSol);
+        PrintU14("RepairManagerMix");
+        var candidateSolution = bestSol;
+
+        void CheckState(string step)
+        {
+            var u14_1003 = candidateSolution.GetUserAssignments(14, new DateTime(2026, 10, 3)).ToList();
+            var u20_0928 = candidateSolution.GetUserAssignments(20, new DateTime(2026, 9, 28)).ToList();
+            var u20_0929 = candidateSolution.GetUserAssignments(20, new DateTime(2026, 9, 29)).ToList();
+
+            var eligibilityViolations = ShiftEligibilityGuard.GetViolations(candidateSolution, constraints);
+            var adjacencyViolations = AdjacentShiftRestGuard.GetViolations(candidateSolution, constraints);
+            var dailyViolations = DailyDuplicateAssignmentGuard.GetViolations(candidateSolution, constraints);
+            var underCapacity = ShiftCoverageGuard.GetUnderCapacityViolations(candidateSolution, constraints);
+
+            _output.WriteLine($"[{step}]");
+            _output.WriteLine($"  U14 (2026-10-03): {string.Join("; ", u14_1003.Select(a => $"{a.ShiftLabel} (Skel={a.IsSkeleton}, Locked={candidateSolution.IsLockedSkeleton(14, a.ShiftId, a.Date)})"))}");
+            _output.WriteLine($"  U20 (2026-09-28): {string.Join("; ", u20_0928.Select(a => $"{a.ShiftLabel} (Skel={a.IsSkeleton}, Locked={candidateSolution.IsLockedSkeleton(20, a.ShiftId, a.Date)})"))}");
+            _output.WriteLine($"  U20 (2026-09-29): {string.Join("; ", u20_0929.Select(a => $"{a.ShiftLabel} (Skel={a.IsSkeleton}, Locked={candidateSolution.IsLockedSkeleton(20, a.ShiftId, a.Date)})"))}");
+            _output.WriteLine($"  Violations: Eligibility={eligibilityViolations.Count}, Adjacency={adjacencyViolations.Count}, Daily={dailyViolations.Count}, UnderCapacity={underCapacity.Count}");
+            foreach (var v in eligibilityViolations.Where(x => x.Contains("۱۴") || x.Contains("14"))) _output.WriteLine($"    [Elig Vio] {v}");
+            foreach (var v in adjacencyViolations.Where(x => x.Contains("۲۰") || x.Contains("20"))) _output.WriteLine($"    [Adj Vio] {v}");
+        }
+
+        CheckState("After SA Optimize");
+
+        ExactNightQuotaGuard.ForceSatisfyAllDeficits(candidateSolution, constraints);
+        ExactNightQuotaGuard.GlobalRebalanceNightQuotas(candidateSolution, constraints);
+        ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
+        CheckState("After ExactNightQuotaGuard 1");
+
+        scheduler.PerformFinalManagerMixRepairSweep(candidateSolution);
+        CheckState("After PerformFinalManagerMixRepairSweep 1");
+
+        if (!scheduler.AreExactNightQuotasSatisfied(candidateSolution, out _))
+        {
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(candidateSolution, constraints);
+            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(candidateSolution, constraints);
+            ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
+            CheckState("After ExactNightQuotaGuard 2");
+        }
+
+        ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+        ShiftCoverageGuard.FillRemainingAfterForceApply(candidateSolution, constraints);
+        ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+        CheckState("After FillRemainingAfterForceApply");
+
+        MorningEveningBalanceGuard.Enforce(candidateSolution, constraints);
+        CheckState("After MorningEveningBalanceGuard");
+
+        OvertimeBalanceGuard.Enforce(candidateSolution, constraints);
+        CheckState("After OvertimeBalanceGuard");
+
+        AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
+        CheckState("After StripForbiddenAdjacencies 1");
+
+        MaxConsecutiveWorkdayGuard.Enforce(candidateSolution, constraints);
+        CheckState("After MaxConsecutiveWorkdayGuard");
+
+        ExactNightQuotaGuard.ForceSatisfyAllDeficits(candidateSolution, constraints);
+        ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
+        CheckState("After ExactNightQuotaGuard 3");
+
+        var u20 = constraints.UserConstraints.First(u => u.UserId == 20);
+        _output.WriteLine($"U20 ReqSlots: {string.Join(", ", u20.RequiredShiftSlots.Select(s => $"{s.Date:yyyy-MM-dd}:{s.ShiftLabel}"))}");
+        _output.WriteLine($"U20 ReqDates: {string.Join(", ", u20.RequiredPresenceDates.Select(d => $"{d:yyyy-MM-dd}"))}");
+        var pairs20 = ShiftYar.Application.Common.Utilities.AdjacentShiftRestRules.FindForbiddenPairs(
+            candidateSolution.GetUserAllAssignments(20),
+            constraints.HardRules);
+        _output.WriteLine($"U20 Forbidden Pairs: {pairs20.Count}");
+        foreach (var (e, l) in pairs20)
+        {
+            _output.WriteLine($"  Pair: {e.ShiftLabel} on {e.Date:yyyy-MM-dd} -> {l.ShiftLabel} on {l.Date:yyyy-MM-dd}");
+            _output.WriteLine($"  IsWaivedByApprovedLaterSlot: {AdjacentShiftRestGuard.IsWaivedByApprovedLaterSlot(u20, e, l)}");
+        }
+
+        for (var pass = 0; pass < 3; pass++)
+        {
+            DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
+            ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(candidateSolution, constraints);
+            CheckState($"Pass {pass}: After Strips");
+
+            scheduler.PerformFinalManagerMixRepairSweep(candidateSolution, throwIfUnsatisfied: false);
+            CheckState($"Pass {pass}: After ManagerMixRepair");
+
+            ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
+            ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+            CheckState($"Pass {pass}: After ForceFillAllMissingCoverage");
+
+            if (DailyDuplicateAssignmentGuard.GetViolations(candidateSolution, constraints).Count == 0
+                && ShiftEligibilityGuard.GetViolations(candidateSolution, constraints).Count == 0
+                && AdjacentShiftRestGuard.GetViolations(candidateSolution, constraints).Count == 0
+                && MaxConsecutiveWorkdayRules.GetViolations(candidateSolution, constraints).Count == 0
+                && ShiftCoverageGuard.GetUnderCapacityViolations(candidateSolution, constraints).Count == 0)
+            {
+                _output.WriteLine($"Pass {pass}: Converged early with 0 violations!");
+                break;
+            }
+        }
+
+        if (ShiftCoverageGuard.GetUnderCapacityViolations(candidateSolution, constraints).Count > 0)
+        {
+            ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
+            ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+            CheckState("Final ForceFillAllMissingCoverage");
+        }
+
+        DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
+        ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
+        AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
+        ApprovedRequestGuard.ForceApply(candidateSolution, constraints);
+
+        var finalElig = ShiftEligibilityGuard.GetViolations(candidateSolution, constraints);
+        var finalAdj = AdjacentShiftRestGuard.GetViolations(candidateSolution, constraints);
+        var finalDaily = DailyDuplicateAssignmentGuard.GetViolations(candidateSolution, constraints);
+
+        _output.WriteLine($"FINAL: Eligibility={finalElig.Count}, Adjacency={finalAdj.Count}, Daily={finalDaily.Count}");
+        foreach (var v in finalElig) _output.WriteLine($"  [FINAL ELIG VIO] {v}");
+        foreach (var v in finalAdj) _output.WriteLine($"  [FINAL ADJ VIO] {v}");
+
+        Assert.Empty(finalElig);
+        Assert.Empty(finalAdj);
+        Assert.Empty(finalDaily);
     }
+}
 
 
 

@@ -303,6 +303,11 @@ public static class HolidayMorningEveningFairnessGuard
         ShiftLabel label,
         int shiftId)
     {
+        if (!ShiftEligibilityResolver.MayTakeLabelOnDate(user, label, date, constraints.StartDate))
+        {
+            return false;
+        }
+
         if (user.UnavailableDates.Any(d => d.Date == date.Date))
         {
             return false;

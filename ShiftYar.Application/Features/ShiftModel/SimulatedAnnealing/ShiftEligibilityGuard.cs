@@ -18,13 +18,8 @@ public static class ShiftEligibilityGuard
         {
             if (!IsAssignmentEligible(solution, constraints, assignment))
             {
-                if (solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
-                    || assignment.IsSkeleton)
-                {
-                    continue;
-                }
-
-                solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                solution.UnlockSkeletonAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date, force: true);
             }
         }
     }
