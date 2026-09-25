@@ -2335,9 +2335,14 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         // (سقف طول زنجیره با MaxConsecutiveNightShifts کنترل می‌شود)
                         userConstraint.MinDaysBetweenNightShifts = 0;
                     }
+                    var isFixedNightUser = userConstraint.ShiftSubType == ShiftSubTypes.FixedNight
+                        || (userConstraint.ShiftType == ShiftTypes.FixedShift &&
+                            userConstraint.AllowedShiftLabels.Count == 1 &&
+                            userConstraint.AllowedShiftLabels[0] == ShiftLabel.Night);
+
                     if (!userConstraint.HasExactNightQuota)
                     {
-                        userConstraint.MaxNightShiftsPerMonth = 8; // پیش‌فرض
+                        userConstraint.MaxNightShiftsPerMonth = isFixedNightUser ? 20 : 8; // فیکس شب سقف بالاتری برای پوشش موظفی نیاز دارد
                     }
 
                     // Override from department settings if enforcement is on
@@ -2359,7 +2364,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         }
                         if (!userConstraint.HasExactNightQuota &&
                             constraints.HardRules.EnforceNightShiftMonthlyCap &&
-                            deptSettingEarly.MaxNightShiftsPerMonth.HasValue)
+                            deptSettingEarly.MaxNightShiftsPerMonth.HasValue &&
+                            !isFixedNightUser)
                         {
                             userConstraint.MaxNightShiftsPerMonth = Math.Max(0, deptSettingEarly.MaxNightShiftsPerMonth.Value);
                         }
@@ -2790,16 +2796,19 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                 // روزهای تعطیل بازه (تعطیلات رسمی و جمعه‌ها) قبلاً در ابتدای LoadConstraintsAsync بارگذاری شده‌اند.
 
-                // پرسنل فیکس (صبح/عصر) باید همهٔ روزهای غیرتعطیل شیفت باشند
-                // و در روزهای تعطیل هم نباید شیفت بگیرند (تعطیل = عدم‌حضور سخت)
+                // پرسنل فیکس روزکار (صبح/عصر) باید همهٔ روزهای غیرتعطیل شیفت باشند
+                // و در روزهای تعطیل هم نباید شیفت بگیرند (تعطیل = عدم‌حضور سخت).
+                // نکته مهم: پرسنل «فیکس شب» مشمول این حضور هرروزه نیستند؛ شیفت شب ۱۲ ساعته بوده
+                // و طبق موظفی و قواعد استراحت/سهمیه شب در طول ماه توزیع می‌شود (نه ۲۶ شب متوالی!).
                 var appliedFixedSlots = 0;
                 var appliedFixedHolidayOffs = 0;
                 foreach (var uc in constraints.UserConstraints.Where(u =>
-                             u.IsActive && u.ShiftType == ShiftTypes.FixedShift))
+                             u.IsActive &&
+                             u.ShiftType == ShiftTypes.FixedShift &&
+                             u.ShiftSubType != ShiftSubTypes.FixedNight &&
+                             !u.AllowedShiftPermissions.HasFlag(UserShiftPermission.Night)))
                 {
-                    var fixedLabel = uc.ShiftSubType == ShiftSubTypes.FixedNight
-                        ? ShiftLabel.Night
-                        : (uc.ShiftSubType == ShiftSubTypes.FixedEvening ? ShiftLabel.Evening : ShiftLabel.Morning);
+                    var fixedLabel = uc.ShiftSubType == ShiftSubTypes.FixedEvening ? ShiftLabel.Evening : ShiftLabel.Morning;
 
                     for (var date = scheduleStartDate; date < scheduleEndExclusive; date = date.AddDays(1))
                     {

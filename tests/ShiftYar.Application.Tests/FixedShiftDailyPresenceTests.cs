@@ -478,5 +478,81 @@ public class FixedShiftDailyPresenceTests
         Assert.Empty(ShiftCoverageGuard.GetOverCapacityViolations(solution, constraints));
         Assert.Empty(ApprovedRequestGuard.GetUnmetViolations(solution, constraints));
     }
+
+    [Fact]
+    public void FixedNightUser_WorksOnlyNights_AndRespectsRestRules()
+    {
+        var start = new DateTime(2026, 8, 23);
+        var days = 14;
+        var holiday = start.AddDays(5);
+
+        var fixedNightUser = new UserConstraint
+        {
+            UserId = 50,
+            Gender = UserGender.Female,
+            SpecialtyId = 10,
+            IsActive = true,
+            ShiftType = ShiftTypes.FixedShift,
+            ShiftSubType = ShiftSubTypes.FixedNight,
+            AllowedShiftPermissions = UserShiftPermission.Night,
+            AllowedShiftLabels = [ShiftLabel.Night],
+            MaxConsecutiveShifts = 2,
+            MinRestDaysBetweenShifts = 1,
+            MaxShiftsPerWeek = 4,
+            MaxNightShiftsPerMonth = 14,
+            MinDaysBetweenNightShifts = 1
+        };
+
+        var rotating1 = RotatingUser(51, UserGender.Male);
+        var rotating2 = RotatingUser(52, UserGender.Female);
+
+        var constraints = new ShiftConstraints
+        {
+            DepartmentId = 1,
+            StartDate = start,
+            EndDate = start.AddDays(days - 1),
+            HolidayDates = [holiday.Date],
+            UserConstraints = [fixedNightUser, rotating1, rotating2],
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning, requiredTotal: 1),
+                Shift(2, ShiftLabel.Evening, requiredTotal: 1),
+                Shift(3, ShiftLabel.Night, requiredTotal: 1)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceMinRestDays = true,
+                EnforceMaxConsecutiveShifts = true,
+                EnforceWeeklyMaxShifts = true,
+                EnforceSpecialtyCapacity = true,
+                AllowNightShiftAfterNightShift = false
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 }
+        };
+
+        var solution = new SimulatedAnnealingScheduler(constraints, FastParameters).Optimize();
+
+        var nightAssignments = solution.GetUserAllAssignments(fixedNightUser.UserId).ToList();
+
+        // فیکس شب فقط باید شیفت شب گرفته باشد، نه صبح و نه عصر
+        Assert.True(nightAssignments.All(a => a.ShiftLabel == ShiftLabel.Night),
+            "FixedNight user must only be assigned Night shifts.");
+
+        // فیکس شب باید شیفت شب گرفته باشد (بیکار نمانده باشد)
+        Assert.NotEmpty(nightAssignments);
+
+        // نباید شب‌های متوالی داشته باشد وقتی شب متوالی غیرفعال است
+        var dates = nightAssignments.Select(a => a.Date.Date).OrderBy(d => d).ToList();
+        for (var i = 0; i < dates.Count - 1; i++)
+        {
+            Assert.True((dates[i + 1] - dates[i]).TotalDays > 1,
+                $"FixedNight user should not have consecutive nights: {dates[i]:yyyy-MM-dd} and {dates[i + 1]:yyyy-MM-dd}");
+        }
+
+        Assert.Empty(ShiftCoverageGuard.GetOverCapacityViolations(solution, constraints));
+    }
 }
+
 
