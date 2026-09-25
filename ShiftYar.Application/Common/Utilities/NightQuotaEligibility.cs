@@ -41,26 +41,36 @@ public static class NightQuotaEligibility
             }
         }
 
+        var totalExactQuotas = constraints.UserConstraints
+            .Where(u => u.HasExactNightQuota)
+            .Sum(u => u.ExactNightShiftCount ?? 0);
+        var totalNightDemand = constraints.ShiftRequirements
+            .Where(s => s.ShiftLabel == ShiftLabel.Night)
+            .Sum(s => s.SpecialtyRequirements.Sum(sr =>
+            {
+                var days = (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1;
+                var holCount = constraints.HolidayDates.Count(h => h.Date >= constraints.StartDate.Date && h.Date <= constraints.EndDate.Date);
+                var regCount = days - holCount;
+                return sr.ForDay(false).RequiredTotalCount * regCount + sr.ForDay(true).RequiredTotalCount * holCount;
+            }));
+
+        if (totalNightDemand > 0 && totalExactQuotas > 0 && totalExactQuotas >= totalNightDemand)
+        {
+            if (exact.HasValue && total >= exact.Value)
+            {
+                return false;
+            }
+            if (!exact.HasValue)
+            {
+                return false;
+            }
+        }
+
         if (!exact.HasValue)
         {
-            var totalExactQuotas = constraints.UserConstraints
-                .Where(u => u.HasExactNightQuota)
-                .Sum(u => u.ExactNightShiftCount ?? 0);
-            if (totalExactQuotas > 0)
+            if (totalExactQuotas > 0 && totalExactQuotas >= totalNightDemand)
             {
-                var totalNightDemand = constraints.ShiftRequirements
-                    .Where(s => s.ShiftLabel == ShiftLabel.Night)
-                    .Sum(s => s.SpecialtyRequirements.Sum(sr =>
-                    {
-                        var days = (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1;
-                        var holCount = constraints.HolidayDates.Count(h => h.Date >= constraints.StartDate.Date && h.Date <= constraints.EndDate.Date);
-                        var regCount = days - holCount;
-                        return sr.ForDay(false).RequiredTotalCount * regCount + sr.ForDay(true).RequiredTotalCount * holCount;
-                    }));
-                if (totalExactQuotas >= totalNightDemand)
-                {
-                    return false;
-                }
+                return false;
             }
         }
 
@@ -74,12 +84,16 @@ public static class NightQuotaEligibility
 
     public static int GetMaxAllowedTotal(UserConstraint user)
     {
-        if (user.ExactNightShiftCount.HasValue && user.NightFallbackParticipation == false)
+        if (user.ExactNightShiftCount.HasValue)
         {
-            return user.ExactNightShiftCount.Value;
+            return user.NightFallbackParticipation == false
+                ? user.ExactNightShiftCount.Value
+                : int.MaxValue;
         }
 
-        return int.MaxValue;
+        return DayShiftQuotaEligibility.AllowsSurplus(user.NightFallbackParticipation)
+            ? int.MaxValue
+            : 0;
     }
 
     public static int CountNights(ShiftSolution solution, int userId) =>

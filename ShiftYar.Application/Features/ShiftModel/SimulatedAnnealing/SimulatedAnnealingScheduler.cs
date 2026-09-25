@@ -2532,7 +2532,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         {
                             var currentNights = solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
                             var remaining = (u.ExactNightShiftCount ?? 0) - currentNights;
-                            return remaining > 0 ? 0 : 1;
+                            return remaining > 0 ? 0 : 10;
                         }
                         return 2;
                     }
@@ -3541,7 +3541,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         {
                             var currentNights = solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
                             var remaining = (u.ExactNightShiftCount ?? 0) - currentNights;
-                            return remaining > 0 ? 0 : 1;
+                            return remaining > 0 ? 0 : 10;
                         }
                         return 2;
                     }
@@ -3549,6 +3549,15 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     if (shiftReq.ShiftLabel == ShiftLabel.Evening)
                     {
                         return ShiftManagerRules.IsLevel1(u) ? 1 : 0;
+                    }
+                    return 0;
+                })
+                .ThenByDescending(u =>
+                {
+                    if (shiftReq.ShiftLabel == ShiftLabel.Night && u.HasExactNightQuota)
+                    {
+                        var currentNights = solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+                        return Math.Max(0, (u.ExactNightShiftCount ?? 0) - currentNights);
                     }
                     return 0;
                 })

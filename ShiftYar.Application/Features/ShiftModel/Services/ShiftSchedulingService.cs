@@ -1013,6 +1013,14 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     ApprovedRequestGuard.ForceApply(candidateSolution, constraints);
                     scheduler.RefreshSolutionViolations(candidateSolution);
 
+                    if (!scheduler.AreExactNightQuotasSatisfied(candidateSolution, out _))
+                    {
+                        ExactNightQuotaGuard.ForceSatisfyAllDeficits(candidateSolution, constraints);
+                        ExactNightQuotaGuard.GlobalRebalanceNightQuotas(candidateSolution, constraints);
+                        ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
+                        ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+                    }
+
                     EnsureApprovedRequestsOrThrow(scheduler, candidateSolution, constraints);
                     EnsureExactNightQuotasOrThrow(scheduler, candidateSolution);
                     EnsureExactDayShiftQuotasOrThrow(scheduler, candidateSolution);

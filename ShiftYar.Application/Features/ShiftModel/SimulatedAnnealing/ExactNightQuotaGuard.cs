@@ -667,6 +667,165 @@ public static class ExactNightQuotaGuard
             }
         }
 
+        // ۳) اگر چرخش ۱ و ۲ مرحله‌ای مستقیم جواب نداد، از زنجیره چرخشی چندمرحله‌ای (Augmenting Path) استفاده کن
+        if (TryClaimViaAugmentingPath(solution, constraints, receiver, nightShift))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// ۳) زنجیره چرخشی چندمرحله‌ای (Multi-hop Augmenting Path با BFS)
+    /// برای انتقال شیفت مازاد به گیرنده بدون تغییر در مجموع شیفت‌های شب و بدون نقض ترکیب مسئولین.
+    /// </summary>
+    private static bool TryClaimViaAugmentingPath(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        UserConstraint receiver,
+        ShiftRequirement nightShift)
+    {
+        var receiverBefore = CountNights(solution, receiver.UserId);
+        var receiverMinGap = ResolveNightSpacingGap(constraints, receiver);
+
+        foreach (var (donor, night) in EnumerateSurplusNights(solution, constraints, excludeUserId: receiver.UserId))
+        {
+            var initialDate = night.Date.Date;
+
+            var queue = new Queue<(DateTime Day, int GiverId, List<(int GiverId, DateTime Day, int ReceiverId)> Path, HashSet<DateTime> VisitedDays, HashSet<int> VisitedUsers)>();
+            queue.Enqueue((initialDate, donor.UserId, new(), new() { initialDate }, new() { donor.UserId }));
+
+            var iterations = 0;
+            while (queue.Count > 0 && ++iterations <= 300)
+            {
+                var (dayCur, giverId, path, visDays, visUsers) = queue.Dequeue();
+                if (path.Count >= 4)
+                {
+                    continue;
+                }
+
+                var dayNightAsgs = solution.GetShiftAssignments(nightShift.ShiftId, dayCur).Where(a => !a.IsOnCall).ToList();
+                var (reqTotal, reqL1) = ShiftManagerRules.GetRequirement(nightShift);
+                var mgrsWithoutGiver = dayNightAsgs.Count(a => a.UserId != giverId && ShiftManagerRules.IsManager(constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)));
+                var l1WithoutGiver = dayNightAsgs.Count(a => a.UserId != giverId && ShiftManagerRules.IsLevel1(constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)));
+
+                var needMgr = mgrsWithoutGiver < reqTotal;
+                var needL1 = l1WithoutGiver < reqL1;
+
+                var candidateUsers = constraints.UserConstraints
+                    .Where(u => u.IsActive && u.UserId != giverId && !visUsers.Contains(u.UserId))
+                    .Where(u => !needL1 || ShiftManagerRules.IsLevel1(u))
+                    .Where(u => !needMgr || ShiftManagerRules.IsManager(u))
+                    .OrderBy(u => u.UserId == receiver.UserId ? 0 : 1)
+                    .ToList();
+
+                foreach (var cand in candidateUsers)
+                {
+                    if (solution.HasAssignment(cand.UserId, nightShift.ShiftId, dayCur))
+                    {
+                        continue;
+                    }
+
+                    var candMinGap = ResolveNightSpacingGap(constraints, cand);
+                    if (ViolatesNightSpacing(solution, constraints, cand, dayCur, candMinGap))
+                    {
+                        continue;
+                    }
+
+                    if (!HasSpecialtyCapacityIgnoring(solution, constraints, nightShift, dayCur, cand.SpecialtyId, giverId))
+                    {
+                        continue;
+                    }
+
+                    if (!IsPersonallyFeasibleNightDate(solution, constraints, cand, nightShift, dayCur, holidayOnly: false)
+                        || !CanAcceptNightAfterClearing(solution, constraints, cand, nightShift, dayCur))
+                    {
+                        continue;
+                    }
+
+                    var newPath = new List<(int GiverId, DateTime Day, int ReceiverId)>(path)
+                    {
+                        (giverId, dayCur, cand.UserId)
+                    };
+
+                    if (cand.UserId == receiver.UserId)
+                    {
+                        var appliedChanges = new List<(int GiverId, DateTime Day, int ReceiverId, bool GiverWasSkeleton, List<SaShiftAssignment> ReceiverSnapshot)>();
+                        var success = true;
+
+                        foreach (var (gId, d, rId) in newPath)
+                        {
+                            var rUser = constraints.UserConstraints.FirstOrDefault(u => u.UserId == rId);
+                            if (rUser == null) { success = false; break; }
+
+                            var gAsg = solution.GetShiftAssignments(nightShift.ShiftId, d).FirstOrDefault(a => a.UserId == gId);
+                            var wasSkeleton = gAsg != null && gAsg.IsSkeleton;
+                            var rSnap = Snapshot3DayWindow(solution, rId, d);
+
+                            solution.UnlockSkeletonAssignment(gId, nightShift.ShiftId, d);
+                            solution.RemoveAssignment(gId, nightShift.ShiftId, d, force: true);
+                            ClearConflictingForNight(solution, constraints, rUser, d);
+                            AddNightSafely(solution, constraints, rUser, nightShift, d);
+
+                            appliedChanges.Add((gId, d, rId, wasSkeleton, rSnap));
+                        }
+
+                        if (success)
+                        {
+                            var countOk = CountNights(solution, receiver.UserId) > receiverBefore
+                                && CountNights(solution, donor.UserId) >= (donor.ExactNightShiftCount ?? 0);
+
+                            var allUsersInPathOk = newPath.Select(p => p.ReceiverId).Concat(new[] { donor.UserId }).Distinct()
+                                .All(uid =>
+                                {
+                                    var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == uid);
+                                    if (u == null) return true;
+                                    var minN = u.ExactNightShiftCount ?? 0;
+                                    var nOk = CountNights(solution, uid) >= minN;
+                                    var restOk = !AdjacentShiftRestRules.HasForbiddenAdjacentPair(solution.GetUserAllAssignments(uid), constraints.HardRules);
+                                    var runOk = !constraints.HardRules.EnforceMaxConsecutiveShifts
+                                        || MaxConsecutiveWorkdayRules.GetMaxConsecutiveWorkRun(solution, uid) <= u.MaxConsecutiveShifts;
+                                    return nOk && restOk && runOk;
+                                });
+
+                            var allDatesInPathOk = newPath.Select(p => p.Day).Distinct()
+                                .All(d => IsSlotManagerMixSatisfied(solution, constraints, nightShift, d));
+
+                            var noOverCap = !ShiftCoverageGuard.HasAnyOverCapacity(solution, constraints);
+
+                            if (countOk && allUsersInPathOk && allDatesInPathOk && noOverCap)
+                            {
+                                return true;
+                            }
+                        }
+
+                        // Delta Undo: بازگرداندن تغییرات به ترتیب معکوس
+                        for (var i = appliedChanges.Count - 1; i >= 0; i--)
+                        {
+                            var (gId, d, rId, wasSkeleton, rSnap) = appliedChanges[i];
+                            solution.RemoveAssignment(rId, nightShift.ShiftId, d, force: true);
+                            Rollback3DayWindow(solution, rId, d, rSnap);
+                            solution.AddAssignment(gId, nightShift.ShiftId, d, ShiftLabel.Night, isOnCall: false, isSkeleton: wasSkeleton);
+                        }
+                        continue;
+                    }
+
+                    var candNights = GetNights(solution, cand.UserId);
+                    foreach (var nextNightAsg in candNights)
+                    {
+                        var dNext = nextNightAsg.Date.Date;
+                        if (visDays.Contains(dNext)) continue;
+                        if (IsProtected(constraints, cand.UserId, nextNightAsg)) continue;
+
+                        var newVisDays = new HashSet<DateTime>(visDays) { dNext };
+                        var newVisUsers = new HashSet<int>(visUsers) { cand.UserId };
+                        queue.Enqueue((dNext, cand.UserId, newPath, newVisDays, newVisUsers));
+                    }
+                }
+            }
+        }
+
         return false;
     }
 

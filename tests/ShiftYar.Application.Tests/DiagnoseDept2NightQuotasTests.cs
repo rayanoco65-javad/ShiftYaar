@@ -2659,32 +2659,39 @@ public class DiagnoseDept2NightQuotasTests
         var traceLines = new List<string>();
         var scheduler = new SimulatedAnnealingScheduler(constraints, parameters);
         var candidateSolution = scheduler.Optimize();
-        traceLines.Add($"[After Optimize] U33 Nights: {candidateSolution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night)} ({string.Join(", ", candidateSolution.GetUserAllAssignments(33).Where(a => a.ShiftLabel == ShiftLabel.Night).Select(a => DateConverter.ConvertToPersianDate(a.Date)))})");
+        string NightLog(string stage)
+        {
+            var n17 = candidateSolution.GetUserAllAssignments(17).Where(a => a.ShiftLabel == ShiftLabel.Night).Select(a => DateConverter.ConvertToPersianDate(a.Date)).ToList();
+            var n28 = candidateSolution.GetUserAllAssignments(28).Where(a => a.ShiftLabel == ShiftLabel.Night).Select(a => DateConverter.ConvertToPersianDate(a.Date)).ToList();
+            return $"[{stage}] U17({n17.Count}): [{string.Join(", ", n17)}] | U28({n28.Count}): [{string.Join(", ", n28)}]";
+        }
+
+        traceLines.Add(NightLog("After Optimize"));
 
         ExactNightQuotaGuard.ForceSatisfyAllDeficits(candidateSolution, constraints);
-        traceLines.Add($"[After ForceSatisfyAllDeficits 1] U33 Nights: {candidateSolution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night)}");
+        traceLines.Add(NightLog("After ForceSatisfyAllDeficits 1"));
         ExactNightQuotaGuard.GlobalRebalanceNightQuotas(candidateSolution, constraints);
-        traceLines.Add($"[After GlobalRebalance 1] U33 Nights: {candidateSolution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night)}");
+        traceLines.Add(NightLog("After GlobalRebalance 1"));
         ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
-        traceLines.Add($"[After Enforce 1] U33 Nights: {candidateSolution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night)}");
+        traceLines.Add(NightLog("After Enforce 1"));
 
         scheduler.PerformFinalManagerMixRepairSweep(candidateSolution);
-        traceLines.Add($"[After ManagerMixSweep] U33 Nights: {candidateSolution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night)}");
+        traceLines.Add(NightLog("After ManagerMixSweep"));
 
         if (!scheduler.AreExactNightQuotasSatisfied(candidateSolution, out _))
         {
             ExactNightQuotaGuard.ForceSatisfyAllDeficits(candidateSolution, constraints);
             ExactNightQuotaGuard.GlobalRebalanceNightQuotas(candidateSolution, constraints);
             ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
-            traceLines.Add($"[After Enforce 2] U33 Nights: {candidateSolution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night)}");
+            traceLines.Add(NightLog("After Enforce 2"));
         }
 
         ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
-        traceLines.Add($"[After StripExcessCoverage 1] U33 Nights: {candidateSolution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night)}");
+        traceLines.Add(NightLog("After StripExcessCoverage 1"));
         ShiftCoverageGuard.FillRemainingAfterForceApply(candidateSolution, constraints);
-        traceLines.Add($"[After FillRemainingAfterForceApply 1] U33 Nights: {candidateSolution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night)}");
+        traceLines.Add(NightLog("After FillRemainingAfterForceApply 1"));
         ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
-        traceLines.Add($"[After StripExcessCoverage 2] U33 Nights: {candidateSolution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night)}");
+        traceLines.Add(NightLog("After StripExcessCoverage 2"));
         System.IO.File.WriteAllLines(@"C:\Users\Paria\.gemini\antigravity-ide\brain\ed37ed7b-afd1-467e-bdb4-ec225833f7bf\scratch\trace_u33.txt", traceLines);
 
 
