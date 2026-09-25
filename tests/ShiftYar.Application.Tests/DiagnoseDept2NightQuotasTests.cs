@@ -479,6 +479,7 @@ public class DiagnoseDept2NightQuotasTests
             ["ConnectionStrings:DefaultConnection"] = connStr
         }).Build();
         services.AddSingleton<IConfiguration>(config);
+        services.AddLogging(builder => builder.AddConsole());
         services.AddInfrastructure(config);
         var sp = services.BuildServiceProvider();
         var db = sp.GetRequiredService<ShiftYar.Infrastructure.Persistence.AppDbContext.ShiftYarDbContext>();
@@ -491,6 +492,7 @@ public class DiagnoseDept2NightQuotasTests
         }
 
         _output.WriteLine($"Latest Job ID: {latestJob.Id}, JobId: {latestJob.JobId}, Status: {latestJob.Status}, Completed: {latestJob.CompletedAtUtc}");
+        _output.WriteLine($"Request: {latestJob.RequestJson}");
         _output.WriteLine($"Message: {latestJob.Message}");
 
         if (!string.IsNullOrEmpty(latestJob.ResultJson))

@@ -149,17 +149,25 @@ public static class AdjacentShiftRestRules
             .Where(a => !(ignoreShiftId.HasValue &&
                           a.ShiftId == ignoreShiftId.Value &&
                           a.Date.Date == date.Date))
-            .Select(a => (a.Date.Date, a.ShiftLabel, a.ShiftId))
-            .Append((date.Date, label, ignoreShiftId ?? -1))
-            .OrderBy(x => x.Item1)
-            .ThenBy(x => LabelOrder(x.Item2))
+            .Select(a => (Date: a.Date.Date, ShiftLabel: a.ShiftLabel, ShiftId: a.ShiftId, IsNew: false))
+            .Append((Date: date.Date, ShiftLabel: label, ShiftId: ignoreShiftId ?? -1, IsNew: true))
+            .OrderBy(x => x.Date)
+            .ThenBy(x => LabelOrder(x.ShiftLabel))
             .ToList();
 
         for (var i = 1; i < proposed.Count; i++)
         {
+            // Only check pairs that involve the newly proposed assignment!
+            // Pre-existing pairs (such as approved requests that legitimately bypass settings-controlled rules)
+            // were already present and must not block other assignments on unrelated dates.
+            if (!proposed[i - 1].IsNew && !proposed[i].IsNew)
+            {
+                continue;
+            }
+
             if (IsForbiddenBackToBack(
-                    proposed[i - 1].Item2, proposed[i - 1].Item1,
-                    proposed[i].Item2, proposed[i].Item1,
+                    proposed[i - 1].ShiftLabel, proposed[i - 1].Date,
+                    proposed[i].ShiftLabel, proposed[i].Date,
                     allowEveningAfterNightShift,
                     allowNightShiftAfterNightShift))
             {

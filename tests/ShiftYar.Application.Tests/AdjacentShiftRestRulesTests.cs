@@ -480,6 +480,27 @@ public class AdjacentShiftRestRulesTests
         }
     }
 
+    [Fact]
+    public void WouldConflict_PreExistingConsecutiveNights_DoesNotBlockIndependentValidDate()
+    {
+        // A user has approved consecutive nights on Day 1 and Day 2 (e.g. approved requests)
+        var existing = new List<SaShiftAssignment>
+        {
+            new SaShiftAssignment { UserId = 1, ShiftId = 1, Date = new DateTime(2026, 9, 23), ShiftLabel = ShiftLabel.Night },
+            new SaShiftAssignment { UserId = 1, ShiftId = 1, Date = new DateTime(2026, 9, 24), ShiftLabel = ShiftLabel.Night }
+        };
+
+        // Checking an independent valid date (e.g. Day 10) must NOT conflict just because Day 1-2 was consecutive!
+        var wouldConflict = AdjacentShiftRestRules.WouldConflict(
+            existing,
+            new DateTime(2026, 10, 3),
+            ShiftLabel.Night,
+            allowEveningAfterNightShift: false,
+            allowNightShiftAfterNightShift: false);
+
+        Assert.False(wouldConflict);
+    }
+
     private static SpecialtyRequirement Clone(SpecialtyRequirement s) => new()
     {
         SpecialtyId = s.SpecialtyId,
