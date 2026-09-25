@@ -136,9 +136,7 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
                                         !user.AllowedShiftPermissions.Value.HasFlag(Domain.Enums.ShiftModel.ShiftEnums.UserShiftPermission.Morning) &&
                                         !user.AllowedShiftPermissions.Value.HasFlag(Domain.Enums.ShiftModel.ShiftEnums.UserShiftPermission.Evening);
 
-            if (isFixedNightSubType ||
-                (user.ShiftType == Domain.Enums.ShiftModel.ShiftEnums.ShiftTypes.FixedShift && hasNightPermission) ||
-                isOnlyNightPermission)
+            if (isFixedNightSubType || isOnlyNightPermission)
             {
                 return ShiftPatternType.FixedNight;
             }
@@ -161,7 +159,7 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
             // ۴. بررسی شیفت ثابت روز
             if (user.ShiftType == Domain.Enums.ShiftModel.ShiftEnums.ShiftTypes.FixedShift)
             {
-                return hasNightPermission ? ShiftPatternType.FixedNight : ShiftPatternType.FixedDay;
+                return isFixedNightSubType || isOnlyNightPermission ? ShiftPatternType.FixedNight : ShiftPatternType.FixedDay;
             }
 
             return ShiftPatternType.FixedDay;
