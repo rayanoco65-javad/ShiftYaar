@@ -2642,7 +2642,153 @@ public class DiagnoseDept2NightQuotasTests
         Assert.Empty(finalAdj);
         Assert.Empty(finalDaily);
     }
+
+    [Fact]
+    public void Test_DiagnoseMehr1405_DailyCapacities()
+    {
+        var path = @"C:\Users\Paria\.gemini\antigravity-ide\brain\ed37ed7b-afd1-467e-bdb4-ec225833f7bf\scratch\dept2_1405_07_constraints.json";
+        var json = System.IO.File.ReadAllText(path);
+        var constraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(json)!;
+
+        var parameters = new SimulatedAnnealingParameters
+        {
+            MaxIterations = 4000,
+            MaxIterationsWithoutImprovement = 600
+        };
+
+        var traceLines = new List<string>();
+        var scheduler = new SimulatedAnnealingScheduler(constraints, parameters);
+        var candidateSolution = scheduler.Optimize();
+        traceLines.Add($"[After Optimize] U33 Nights: {candidateSolution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night)} ({string.Join(", ", candidateSolution.GetUserAllAssignments(33).Where(a => a.ShiftLabel == ShiftLabel.Night).Select(a => DateConverter.ConvertToPersianDate(a.Date)))})");
+
+        ExactNightQuotaGuard.ForceSatisfyAllDeficits(candidateSolution, constraints);
+        traceLines.Add($"[After ForceSatisfyAllDeficits 1] U33 Nights: {candidateSolution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night)}");
+        ExactNightQuotaGuard.GlobalRebalanceNightQuotas(candidateSolution, constraints);
+        traceLines.Add($"[After GlobalRebalance 1] U33 Nights: {candidateSolution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night)}");
+        ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
+        traceLines.Add($"[After Enforce 1] U33 Nights: {candidateSolution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night)}");
+
+        scheduler.PerformFinalManagerMixRepairSweep(candidateSolution);
+        traceLines.Add($"[After ManagerMixSweep] U33 Nights: {candidateSolution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night)}");
+
+        if (!scheduler.AreExactNightQuotasSatisfied(candidateSolution, out _))
+        {
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(candidateSolution, constraints);
+            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(candidateSolution, constraints);
+            ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
+            traceLines.Add($"[After Enforce 2] U33 Nights: {candidateSolution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night)}");
+        }
+
+        ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+        traceLines.Add($"[After StripExcessCoverage 1] U33 Nights: {candidateSolution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night)}");
+        ShiftCoverageGuard.FillRemainingAfterForceApply(candidateSolution, constraints);
+        traceLines.Add($"[After FillRemainingAfterForceApply 1] U33 Nights: {candidateSolution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night)}");
+        ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+        traceLines.Add($"[After StripExcessCoverage 2] U33 Nights: {candidateSolution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night)}");
+        System.IO.File.WriteAllLines(@"C:\Users\Paria\.gemini\antigravity-ide\brain\ed37ed7b-afd1-467e-bdb4-ec225833f7bf\scratch\trace_u33.txt", traceLines);
+
+
+        MorningEveningBalanceGuard.Enforce(candidateSolution, constraints);
+        OvertimeBalanceGuard.Enforce(candidateSolution, constraints);
+        AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
+        MaxConsecutiveWorkdayGuard.Enforce(candidateSolution, constraints);
+        ShiftCoverageGuard.FillRemainingAfterForceApply(candidateSolution, constraints);
+        ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+        ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
+        scheduler.PerformFinalManagerMixRepairSweep(candidateSolution, throwIfUnsatisfied: false);
+        AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
+        MaxConsecutiveWorkdayGuard.Enforce(candidateSolution, constraints);
+        for (var pass = 0; pass < 3; pass++)
+        {
+            DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
+            ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(candidateSolution, constraints);
+            scheduler.PerformFinalManagerMixRepairSweep(candidateSolution, throwIfUnsatisfied: false);
+            ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
+            ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+
+            if (DailyDuplicateAssignmentGuard.GetViolations(candidateSolution, constraints).Count == 0
+                && ShiftEligibilityGuard.GetViolations(candidateSolution, constraints).Count == 0
+                && AdjacentShiftRestGuard.GetViolations(candidateSolution, constraints).Count == 0
+                && MaxConsecutiveWorkdayRules.GetViolations(candidateSolution, constraints).Count == 0
+                && ShiftCoverageGuard.GetUnderCapacityViolations(candidateSolution, constraints).Count == 0)
+            {
+                break;
+            }
+        }
+        if (ShiftCoverageGuard.GetUnderCapacityViolations(candidateSolution, constraints).Count > 0)
+        {
+            ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
+            ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+        }
+        DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
+        ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
+        AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
+        ApprovedRequestGuard.ForceApply(candidateSolution, constraints);
+        scheduler.RefreshSolutionViolations(candidateSolution);
+
+        var lines = new List<string>();
+        lines.Add("=== DAILY CAPACITY ANALYSIS FOR MEHR 1405 ===");
+        var dates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
+            .Select(i => constraints.StartDate.Date.AddDays(i))
+            .ToList();
+
+        int dayIndex = 0;
+        foreach (var date in dates)
+        {
+            dayIndex++;
+            var pDate = DateConverter.ConvertToPersianDate(date);
+            var isHoliday = constraints.IsHoliday(date);
+            var dayAsgs = candidateSolution.Assignments.Values.Where(a => a.Date.Date == date.Date && !a.IsOnCall).ToList();
+
+            foreach (var shiftReq in constraints.ShiftRequirements.OrderBy(s => s.ShiftLabel))
+            {
+                var spec = shiftReq.SpecialtyRequirements.FirstOrDefault();
+                var reqCount = spec?.ForDay(isHoliday).RequiredTotalCount ?? 0;
+                var assignedCount = dayAsgs.Count(a => a.ShiftId == shiftReq.ShiftId);
+                var diff = assignedCount - reqCount;
+                var diffStr = diff == 0 ? "OK" : (diff > 0 ? $"+{diff} (OVER)" : $"{diff} (UNDER)");
+
+                var userNames = dayAsgs.Where(a => a.ShiftId == shiftReq.ShiftId)
+                    .Select(a => {
+                        var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
+                        var reqFlag = (u != null && ApprovedRequestGuard.IsApprovedRequiredSlot(u, date, a.ShiftLabel, a.ShiftId)) ? "[REQ]" : "";
+                        var fixedFlag = (u != null && u.ShiftType == Domain.Enums.ShiftModel.ShiftEnums.ShiftTypes.FixedShift) ? "[FIXED]" : "";
+                        return $"{a.UserId}:{u?.UserName}{reqFlag}{fixedFlag}";
+                    });
+
+                var line = $"Day {dayIndex:D2} ({pDate}) {shiftReq.ShiftLabel,-7} | Req={reqCount} Ass={assignedCount} | {diffStr,-14} | Users: {string.Join(", ", userNames)}";
+                lines.Add(line);
+                _output.WriteLine(line);
+            }
+        }
+
+        if (System.IO.File.Exists(path))
+        {
+            try
+            {
+                System.IO.File.WriteAllLines(@"C:\Users\Paria\.gemini\antigravity-ide\brain\ed37ed7b-afd1-467e-bdb4-ec225833f7bf\scratch\capacity_analysis.txt", lines);
+            }
+            catch { }
+        }
+
+        Assert.Empty(ShiftCoverageGuard.GetOverCapacityViolations(candidateSolution, constraints));
+        foreach (var date in dates)
+        {
+            var isHoliday = constraints.IsHoliday(date);
+            var dayAsgs = candidateSolution.Assignments.Values.Where(a => a.Date.Date == date.Date && !a.IsOnCall).ToList();
+            foreach (var shiftReq in constraints.ShiftRequirements)
+            {
+                var spec = shiftReq.SpecialtyRequirements.FirstOrDefault();
+                var reqCount = spec?.ForDay(isHoliday).RequiredTotalCount ?? 0;
+                var assignedCount = dayAsgs.Count(a => a.ShiftId == shiftReq.ShiftId);
+                Assert.Equal(reqCount, assignedCount);
+            }
+        }
+    }
 }
+
 
 
 

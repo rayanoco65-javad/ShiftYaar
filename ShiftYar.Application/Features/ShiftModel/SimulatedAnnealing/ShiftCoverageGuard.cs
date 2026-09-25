@@ -94,6 +94,8 @@ public static class ShiftCoverageGuard
                 {
                     StripSpecialtyExcess(solution, constraints, shiftReq, date, specialtyReq);
                 }
+
+                StripTotalShiftExcess(solution, constraints, shiftReq, date);
             }
         }
     }
@@ -111,11 +113,18 @@ public static class ShiftCoverageGuard
 
         foreach (var date in dates)
         {
+            var isHoliday = constraints.IsHoliday(date);
+
             foreach (var shiftReq in constraints.ShiftRequirements)
             {
+                var totalRegular = solution.GetShiftAssignments(shiftReq.ShiftId, date).Count(a => !a.IsOnCall);
+                var totalOnCall = solution.GetShiftAssignments(shiftReq.ShiftId, date).Count(a => a.IsOnCall);
+                var totalRegularAllowed = 0;
+                var totalOnCallAllowed = 0;
+
                 foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
                 {
-                    var day = specialtyReq.ForDay(constraints.IsHoliday(date));
+                    var day = specialtyReq.ForDay(isHoliday);
                     var regular = GetSpecialtyAssignments(
                         solution, constraints, shiftReq, date, specialtyReq.SpecialtyId, isOnCall: false);
                     var onCall = GetSpecialtyAssignments(
@@ -127,6 +136,8 @@ public static class ShiftCoverageGuard
                         return u != null && ApprovedRequestGuard.IsApprovedRequiredSlot(u, a.Date, a.ShiftLabel, a.ShiftId);
                     });
                     var effectiveRequiredTotal = Math.Max(day.RequiredTotalCount, approvedRegularCount);
+                    totalRegularAllowed += effectiveRequiredTotal;
+                    totalOnCallAllowed += day.OnCallTotalCount;
 
                     if (regular.Count > effectiveRequiredTotal)
                     {
@@ -140,6 +151,24 @@ public static class ShiftCoverageGuard
                         violations.Add(
                             $"Over capacity on {date:yyyy-MM-dd} shift {shiftReq.ShiftLabel} specialty {specialtyReq.SpecialtyId}: " +
                             $"{onCall.Count}/{day.OnCallTotalCount} on-call.");
+                    }
+                }
+
+                if (totalRegular > totalRegularAllowed)
+                {
+                    var msg = $"Over capacity on {date:yyyy-MM-dd} shift {shiftReq.ShiftLabel}: {totalRegular}/{totalRegularAllowed} total regular.";
+                    if (!violations.Contains(msg))
+                    {
+                        violations.Add(msg);
+                    }
+                }
+
+                if (totalOnCall > totalOnCallAllowed)
+                {
+                    var msg = $"Over capacity on {date:yyyy-MM-dd} shift {shiftReq.ShiftLabel}: {totalOnCall}/{totalOnCallAllowed} total on-call.";
+                    if (!violations.Contains(msg))
+                    {
+                        violations.Add(msg);
                     }
                 }
             }
@@ -450,6 +479,75 @@ public static class ShiftCoverageGuard
         }
     }
 
+    private static void StripTotalShiftExcess(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        ShiftRequirement shiftReq,
+        DateTime date)
+    {
+        var isHoliday = constraints.IsHoliday(date);
+        var totalRegularAllowed = shiftReq.SpecialtyRequirements
+            .Sum(sr =>
+            {
+                var day = sr.ForDay(isHoliday);
+                var regular = GetSpecialtyAssignments(solution, constraints, shiftReq, date, sr.SpecialtyId, isOnCall: false);
+                var approved = regular.Count(a =>
+                {
+                    var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
+                    return u != null && ApprovedRequestGuard.IsApprovedRequiredSlot(u, a.Date, a.ShiftLabel, a.ShiftId);
+                });
+                return Math.Max(day.RequiredTotalCount, approved);
+            });
+
+        for (var pass = 0; pass < 10; pass++)
+        {
+            var regularAssignments = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                .Where(a => !a.IsOnCall)
+                .ToList();
+
+            if (regularAssignments.Count <= totalRegularAllowed)
+            {
+                break;
+            }
+
+            var excess = regularAssignments.Count - totalRegularAllowed;
+            var unprot = RankForRemoval(solution, constraints, shiftReq, date, regularAssignments)
+                .Where(a => !IsProtectedAssignment(constraints, solution, a))
+                .ToList();
+
+            if (unprot.Count == 0)
+            {
+                break;
+            }
+
+            var removable = unprot
+                .Where(a => !WouldBreakManagerMix(solution, constraints, shiftReq, date, a))
+                .Take(excess)
+                .ToList();
+
+            if (removable.Count < excess)
+            {
+                var remainingNeeded = excess - removable.Count;
+                var additional = unprot
+                    .Where(a => !removable.Contains(a))
+                    .Take(remainingNeeded)
+                    .ToList();
+                removable.AddRange(additional);
+            }
+
+            if (removable.Count == 0)
+            {
+                break;
+            }
+
+            foreach (var assignment in removable)
+            {
+                solution.UnlockSkeletonAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
+                solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date, force: true);
+            }
+        }
+    }
+
     private static bool WouldBreakManagerMix(
         ShiftSolution solution,
         ShiftConstraints constraints,
@@ -482,7 +580,12 @@ public static class ShiftCoverageGuard
         bool isOnCall) =>
         solution.GetShiftAssignments(shiftReq.ShiftId, date)
             .Where(a => a.IsOnCall == isOnCall)
-            .Where(a => constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)?.SpecialtyId == specialtyId)
+            .Where(a =>
+            {
+                var userSpecialty = constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)?.SpecialtyId ?? 0;
+                return userSpecialty == specialtyId ||
+                       (shiftReq.SpecialtyRequirements.Count == 1 && userSpecialty <= 0);
+            })
             .ToList();
 
     private static IEnumerable<SaShiftAssignment> RankForRemoval(

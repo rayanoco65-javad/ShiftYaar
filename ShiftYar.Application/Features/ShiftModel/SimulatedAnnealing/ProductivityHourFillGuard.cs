@@ -1287,6 +1287,16 @@ public static class ProductivityHourFillGuard
         DateTime date,
         int specialtyId)
     {
+        var isHoliday = constraints.IsHoliday(date);
+        var totalRegular = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+            .Count(a => !a.IsOnCall && a.UserId > 0);
+        var totalCapacity = shiftReq.SpecialtyRequirements
+            .Sum(r => r.ForDay(isHoliday).RequiredTotalCount);
+        if (totalRegular >= Math.Max(totalCapacity, 1))
+        {
+            return false;
+        }
+
         var specialtyReq = shiftReq.SpecialtyRequirements.FirstOrDefault(r => r.SpecialtyId == specialtyId)
                            ?? shiftReq.SpecialtyRequirements.FirstOrDefault();
         if (specialtyReq == null)
@@ -1294,10 +1304,11 @@ public static class ProductivityHourFillGuard
             return true;
         }
 
-        var day = specialtyReq.ForDay(constraints.IsHoliday(date));
+        var day = specialtyReq.ForDay(isHoliday);
         var current = solution.GetShiftAssignments(shiftReq.ShiftId, date)
             .Count(a => !a.IsOnCall && a.UserId > 0 &&
-                        constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)?.SpecialtyId == specialtyId);
+                        (constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)?.SpecialtyId == specialtyId ||
+                         (shiftReq.SpecialtyRequirements.Count == 1 && (constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)?.SpecialtyId ?? 0) <= 0)));
         return current < Math.Max(day.RequiredTotalCount, 1);
     }
 

@@ -31,6 +31,22 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             _parameters = parameters;
             _random = new Random();
             _statistics = new AlgorithmStatistics();
+
+            var distinctShiftSpecialties = constraints.ShiftRequirements
+                .SelectMany(s => s.SpecialtyRequirements)
+                .Where(sr => sr.SpecialtyId > 0)
+                .Select(sr => sr.SpecialtyId)
+                .Distinct()
+                .ToList();
+            if (distinctShiftSpecialties.Count == 1)
+            {
+                var singleSpecId = distinctShiftSpecialties[0];
+                foreach (var uc in constraints.UserConstraints.Where(u => u.SpecialtyId <= 0))
+                {
+                    uc.SpecialtyId = singleSpecId;
+                }
+            }
+
             _shiftInfoLookup = ProductivityWorkedHoursCalculator.BuildShiftInfoLookup(constraints.ShiftRequirements);
             _shiftDurationLookup = _shiftInfoLookup.ToDictionary(
                 kvp => kvp.Key,
@@ -62,6 +78,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ExactNightQuotaGuard.ForceSatisfyAllDeficits(bestSolution, _constraints);
             ExactNightQuotaGuard.GlobalRebalanceNightQuotas(bestSolution, _constraints);
             ExactNightQuotaGuard.Enforce(bestSolution, _constraints);
+            ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
 
             LastSolution = bestSolution;
             PerformFinalManagerMixRepairSweep(bestSolution, throwIfUnsatisfied: true);
@@ -525,11 +542,26 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             double penalty = 0;
             foreach (var date in GetDateRange())
             {
+                var isHoliday = _constraints.IsHoliday(date);
                 foreach (var shiftReq in _constraints.ShiftRequirements)
                 {
+                    var shiftRegular = solution.GetShiftAssignments(shiftReq.ShiftId, date).Where(a => !a.IsOnCall).ToList();
+                    var shiftOnCall = solution.GetShiftAssignments(shiftReq.ShiftId, date).Where(a => a.IsOnCall).ToList();
+                    var totalRegularReq = shiftReq.SpecialtyRequirements.Sum(sr => sr.ForDay(isHoliday).RequiredTotalCount);
+                    var totalOnCallReq = shiftReq.SpecialtyRequirements.Sum(sr => sr.ForDay(isHoliday).OnCallTotalCount);
+
+                    if (shiftRegular.Count > totalRegularReq)
+                    {
+                        penalty += (shiftRegular.Count - totalRegularReq) * 400;
+                    }
+                    if (shiftOnCall.Count > totalOnCallReq)
+                    {
+                        penalty += (shiftOnCall.Count - totalOnCallReq) * 350;
+                    }
+
                     foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
                     {
-                        var day = specialtyReq.ForDay(_constraints.IsHoliday(date));
+                        var day = specialtyReq.ForDay(isHoliday);
                         var regularCount = CountSpecialtyAssignments(
                             solution, shiftReq.ShiftId, date, specialtyReq.SpecialtyId, isOnCall: false);
                         var onCallCount = CountSpecialtyAssignments(
@@ -1858,8 +1890,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// </summary>
         private void MakeRoomInShift(ShiftSolution solution, ShiftRequirement shiftReq, DateTime date, UserConstraint incomingUser)
         {
+            var userSpec = incomingUser.SpecialtyId > 0 ? incomingUser.SpecialtyId : GetUserSpecialty(incomingUser.UserId);
             var specialtyReq = shiftReq.SpecialtyRequirements
-                .FirstOrDefault(r => r.SpecialtyId == incomingUser.SpecialtyId);
+                .FirstOrDefault(r => r.SpecialtyId == userSpec)
+                ?? (shiftReq.SpecialtyRequirements.Count == 1 ? shiftReq.SpecialtyRequirements.First() : null);
             var day = specialtyReq?.ForDay(_constraints.IsHoliday(date));
             if (specialtyReq == null || day == null || day.Value.RequiredTotalCount <= 0)
             {
@@ -1867,10 +1901,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             var dayCounts = day.Value;
+            var isSingleSpecialty = shiftReq.SpecialtyRequirements.Count == 1;
+            var targetSpecialtyId = specialtyReq.SpecialtyId;
             var regulars = solution.GetShiftAssignments(shiftReq.ShiftId, date)
                 .Where(a => !a.IsOnCall &&
                             a.UserId != incomingUser.UserId &&
-                            GetUserSpecialty(a.UserId) == incomingUser.SpecialtyId)
+                            (GetUserSpecialty(a.UserId) == targetSpecialtyId || (isSingleSpecialty && GetUserSpecialty(a.UserId) <= 0)))
                 .ToList();
 
             if (regulars.Count < dayCounts.RequiredTotalCount)
@@ -1883,51 +1919,59 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             // ۱) مازاد شب یا غیرمحافظت‌شده
             // ۲) فقط محافظت حضور کل‌روز (نه شیفت مشخص)
             // ۳) در نهایت هر کسی به‌جز دارندهٔ همین RequiredShiftSlot
-            var removable = regulars
-                .OrderBy(a =>
-                {
-                    var u = _constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
-                    if (u != null && ApprovedRequestGuard.IsApprovedRequiredSlot(u, a.Date, a.ShiftLabel, a.ShiftId))
-                    {
-                        return 4; // محافظت شیفت مشخص — ترجیحاً دست نخور
-                    }
-
-                    if (ShiftManagerRules.RequiresAnyManager(shiftReq) && u != null && ShiftManagerRules.IsManager(u))
-                    {
-                        return 3; // اگر شیفت نیازمند مسئول است، مسئولین موجود در شیفت نباید قبل از پرسنل عادی حذف شوند
-                    }
-
-                    if (ShiftManagerRules.IsCriticalForManagerMix(_constraints, solution, a))
-                    {
-                        return 3; // مسئول حیاتی
-                    }
-
-                    if (shiftReq.ShiftLabel == ShiftLabel.Night && u?.ExactNightShiftCount.HasValue == true)
-                    {
-                        var nights = solution.GetUserAllAssignments(u.UserId).Count(x => x.ShiftLabel == ShiftLabel.Night && !x.IsOnCall);
-                        if (nights > u.ExactNightShiftCount.Value)
-                        {
-                            return 0; // دارای مازاد شب — اولویت اول برای حذف
-                        }
-                        return 2; // در سقف یا کسری شب — ترجیحاً حذف نشود
-                    }
-
-                    if (!IsProtectedAssignment(solution, a)) return 0;
-
-                    return 1; // فقط حضور کل‌روز
-                })
-                .ThenByDescending(a => !hasExplicitGender || GetUserGender(a.UserId) == incomingUser.Gender)
-                .FirstOrDefault(a =>
-                {
-                    var u = _constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
-                    return u == null ||
-                           !u.RequiredShiftSlots.Any(s => s.Date.Date == a.Date.Date && s.ShiftLabel == a.ShiftLabel);
-                });
-
-            if (removable != null)
+            while (regulars.Count >= dayCounts.RequiredTotalCount)
             {
-                solution.UnlockSkeletonAssignment(removable.UserId, removable.ShiftId, removable.Date);
-                solution.RemoveAssignment(removable.UserId, removable.ShiftId, removable.Date, force: true);
+                var removable = regulars
+                    .OrderBy(a =>
+                    {
+                        var u = _constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
+                        if (u != null && ApprovedRequestGuard.IsApprovedRequiredSlot(u, a.Date, a.ShiftLabel, a.ShiftId))
+                        {
+                            return 4; // محافظت شیفت مشخص — ترجیحاً دست نخور
+                        }
+
+                        if (ShiftManagerRules.RequiresAnyManager(shiftReq) && u != null && ShiftManagerRules.IsManager(u))
+                        {
+                            return 3; // اگر شیفت نیازمند مسئول است، مسئولین موجود در شیفت نباید قبل از پرسنل عادی حذف شوند
+                        }
+
+                        if (ShiftManagerRules.IsCriticalForManagerMix(_constraints, solution, a))
+                        {
+                            return 3; // مسئول حیاتی
+                        }
+
+                        if (shiftReq.ShiftLabel == ShiftLabel.Night && u?.ExactNightShiftCount.HasValue == true)
+                        {
+                            var nights = solution.GetUserAllAssignments(u.UserId).Count(x => x.ShiftLabel == ShiftLabel.Night && !x.IsOnCall);
+                            if (nights > u.ExactNightShiftCount.Value)
+                            {
+                                return 0; // دارای مازاد شب — اولویت اول برای حذف
+                            }
+                            return 2; // در سقف یا کسری شب — ترجیحاً حذف نشود
+                        }
+
+                        if (!IsProtectedAssignment(solution, a)) return 0;
+
+                        return 1; // فقط حضور کل‌روز
+                    })
+                    .ThenByDescending(a => !hasExplicitGender || GetUserGender(a.UserId) == incomingUser.Gender)
+                    .FirstOrDefault(a =>
+                    {
+                        var u = _constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
+                        return u == null ||
+                               !u.RequiredShiftSlots.Any(s => s.Date.Date == a.Date.Date && s.ShiftLabel == a.ShiftLabel);
+                    });
+
+                if (removable != null)
+                {
+                    solution.UnlockSkeletonAssignment(removable.UserId, removable.ShiftId, removable.Date);
+                    solution.RemoveAssignment(removable.UserId, removable.ShiftId, removable.Date, force: true);
+                    regulars.Remove(removable);
+                }
+                else
+                {
+                    break;
+                }
             }
         }
 
@@ -4497,16 +4541,32 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return;
             }
 
+            var shift = _constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftId == shiftReq.ShiftId);
+            var isSingleSpecialty = shift?.SpecialtyRequirements.Count == 1;
+
+            var isHoliday = _constraints.IsHoliday(date);
+            var shiftTarget = isOnCall
+                ? shiftReq.SpecialtyRequirements.Sum(sr => sr.ForDay(isHoliday).OnCallTotalCount)
+                : shiftReq.SpecialtyRequirements.Sum(sr => sr.ForDay(isHoliday).RequiredTotalCount);
+
+            var totalAssignedForShift = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                .Count(a => a.IsOnCall == isOnCall);
+
+            if (totalAssignedForShift >= shiftTarget)
+            {
+                return;
+            }
+
             // انتساب‌های ازپیش‌اعمال‌شده (مثلاً درخواست‌های تأییدشده) شمرده می‌شوند
             var assigned = solution.GetShiftAssignments(shiftReq.ShiftId, date)
                 .Count(a => a.IsOnCall == isOnCall &&
-                            GetUserSpecialty(a.UserId) == specialtyId &&
+                            (GetUserSpecialty(a.UserId) == specialtyId || (isSingleSpecialty && GetUserSpecialty(a.UserId) <= 0)) &&
                             GetUserGender(a.UserId) == gender);
 
             var orderedUsers = OrderUsersForShiftAssignment(solution, eligibleUsers, shiftReq.ShiftLabel, isOnCall, date);
             foreach (var user in orderedUsers.Where(u => u.Gender == gender))
             {
-                if (assigned >= requiredCount)
+                if (assigned >= requiredCount || totalAssignedForShift >= shiftTarget)
                 {
                     break;
                 }
@@ -4520,6 +4580,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 {
                     solution.AddAssignment(user.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall);
                     assigned++;
+                    totalAssignedForShift++;
                 }
             }
         }
@@ -4533,10 +4594,23 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             int targetCount,
             bool isOnCall)
         {
+            var isHoliday = _constraints.IsHoliday(date);
+            var shiftTarget = isOnCall
+                ? shiftReq.SpecialtyRequirements.Sum(sr => sr.ForDay(isHoliday).OnCallTotalCount)
+                : shiftReq.SpecialtyRequirements.Sum(sr => sr.ForDay(isHoliday).RequiredTotalCount);
+
+            var totalAssignedForShift = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                .Count(a => a.IsOnCall == isOnCall);
+
+            if (totalAssignedForShift >= shiftTarget)
+            {
+                return;
+            }
+
             var current = CountSpecialtyAssignments(solution, shiftReq.ShiftId, date, specialtyId, isOnCall);
             foreach (var user in OrderUsersForShiftAssignment(solution, eligibleUsers, shiftReq.ShiftLabel, isOnCall, date))
             {
-                if (current >= targetCount)
+                if (current >= targetCount || totalAssignedForShift >= shiftTarget)
                 {
                     break;
                 }
@@ -4550,6 +4624,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 {
                     solution.AddAssignment(user.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel, isOnCall);
                     current++;
+                    totalAssignedForShift++;
                 }
             }
         }
@@ -4573,8 +4648,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private int CountSpecialtyAssignments(ShiftSolution solution, int shiftId, DateTime date, int specialtyId, bool isOnCall)
         {
+            var shift = _constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftId == shiftId);
+            var isSingleSpecialty = shift?.SpecialtyRequirements.Count == 1;
+
             return solution.GetShiftAssignments(shiftId, date)
-                .Count(a => a.IsOnCall == isOnCall && GetUserSpecialty(a.UserId) == specialtyId);
+                .Count(a => a.IsOnCall == isOnCall &&
+                            (GetUserSpecialty(a.UserId) == specialtyId ||
+                             (isSingleSpecialty && GetUserSpecialty(a.UserId) <= 0)));
         }
 
         private int CountGenderAssignments(IEnumerable<SaShiftAssignment> assignments, UserGender gender)
@@ -5159,14 +5239,19 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 var isHoliday = _constraints.IsHoliday(date);
                 foreach (var shiftReq in _constraints.ShiftRequirements)
                 {
+                    var isSingleSpecialty = shiftReq.SpecialtyRequirements.Count == 1;
                     foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
                     {
                         var day = specialtyReq.ForDay(isHoliday);
                         var regular = solution.GetShiftAssignments(shiftReq.ShiftId, date)
-                            .Where(a => !a.IsOnCall && GetUserSpecialty(a.UserId) == specialtyReq.SpecialtyId)
+                            .Where(a => !a.IsOnCall &&
+                                        (GetUserSpecialty(a.UserId) == specialtyReq.SpecialtyId ||
+                                         (isSingleSpecialty && GetUserSpecialty(a.UserId) <= 0)))
                             .ToList();
                         var onCall = solution.GetShiftAssignments(shiftReq.ShiftId, date)
-                            .Where(a => a.IsOnCall && GetUserSpecialty(a.UserId) == specialtyReq.SpecialtyId)
+                            .Where(a => a.IsOnCall &&
+                                        (GetUserSpecialty(a.UserId) == specialtyReq.SpecialtyId ||
+                                         (isSingleSpecialty && GetUserSpecialty(a.UserId) <= 0)))
                             .ToList();
 
                         if (regular.Count > day.RequiredTotalCount)
@@ -5178,6 +5263,27 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         {
                             removable.AddRange(onCall.OrderByDescending(_ => _random.Next()).Take(onCall.Count - day.OnCallTotalCount));
                         }
+                    }
+
+                    // مازاد کل شیفت فارغ از تفکیک تخصص
+                    var shiftRegular = solution.GetShiftAssignments(shiftReq.ShiftId, date).Where(a => !a.IsOnCall).ToList();
+                    var shiftRegularCap = shiftReq.SpecialtyRequirements.Sum(sr => sr.ForDay(isHoliday).RequiredTotalCount);
+                    if (shiftRegular.Count > shiftRegularCap)
+                    {
+                        var excess = shiftRegular.Where(a => !removable.Contains(a))
+                            .OrderByDescending(_ => _random.Next())
+                            .Take(shiftRegular.Count - shiftRegularCap);
+                        removable.AddRange(excess);
+                    }
+
+                    var shiftOnCall = solution.GetShiftAssignments(shiftReq.ShiftId, date).Where(a => a.IsOnCall).ToList();
+                    var shiftOnCallCap = shiftReq.SpecialtyRequirements.Sum(sr => sr.ForDay(isHoliday).OnCallTotalCount);
+                    if (shiftOnCall.Count > shiftOnCallCap)
+                    {
+                        var excess = shiftOnCall.Where(a => !removable.Contains(a))
+                            .OrderByDescending(_ => _random.Next())
+                            .Take(shiftOnCall.Count - shiftOnCallCap);
+                        removable.AddRange(excess);
                     }
                 }
             }
@@ -5212,7 +5318,22 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private int GetUserSpecialty(int userId)
         {
-            return _constraints.UserConstraints.FirstOrDefault(u => u.UserId == userId)?.SpecialtyId ?? 0;
+            var u = _constraints.UserConstraints.FirstOrDefault(u => u.UserId == userId);
+            if (u == null) return 0;
+            if (u.SpecialtyId > 0) return u.SpecialtyId;
+
+            var distinctShiftSpecialties = _constraints.ShiftRequirements
+                .SelectMany(s => s.SpecialtyRequirements)
+                .Where(sr => sr.SpecialtyId > 0)
+                .Select(sr => sr.SpecialtyId)
+                .Distinct()
+                .ToList();
+            if (distinctShiftSpecialties.Count == 1)
+            {
+                return distinctShiftSpecialties[0];
+            }
+
+            return 0;
         }
 
         private double CheckConsecutiveShifts(List<SaShiftAssignment> assignments, int maxConsecutive, List<string> violations)

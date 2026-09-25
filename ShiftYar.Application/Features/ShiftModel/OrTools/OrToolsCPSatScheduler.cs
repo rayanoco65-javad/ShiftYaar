@@ -306,7 +306,7 @@ namespace ShiftYar.Application.Features.ShiftModel.OrTools
                         if (totalAssignments.Count > 0)
                         {
                             model.Add(LinearExpr.Sum(totalAssignments) >= day.RequiredTotalCount);
-                            model.Add(LinearExpr.Sum(totalAssignments) <= day.RequiredTotalCount + 2); // انعطاف‌پذیری
+                            model.Add(LinearExpr.Sum(totalAssignments) <= day.RequiredTotalCount);
                         }
 
                         // محدودیت جنسیت

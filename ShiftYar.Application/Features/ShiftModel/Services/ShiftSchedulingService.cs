@@ -2221,19 +2221,23 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         monthlyQuotasByUserId.Count, monthlyDayShiftQuotasByUserId.Count, monthlyComboShiftQuotasByUserId.Count, quotaPersianYear, quotaPersianMonth);
                 }
 
+                var defaultDeptSpecialty = departmentUsers.FirstOrDefault(u => (u.SpecialtyId ?? 0) > 0)?.Specialty;
+                var defaultDeptSpecialtyId = defaultDeptSpecialty?.Id ?? 0;
+
                 foreach (var user in departmentUsers)
                 {
                     monthlyQuotasByUserId.TryGetValue(user.Id ?? 0, out var monthQuota);
                     monthlyDayShiftQuotasByUserId.TryGetValue(user.Id ?? 0, out var dayShiftQuota);
                     monthlyComboShiftQuotasByUserId.TryGetValue(user.Id ?? 0, out var comboShiftQuota);
 
+                    var hasValidSpec = user.SpecialtyId.HasValue && user.SpecialtyId.Value > 0;
                     var userConstraint = new UserConstraint
                     {
                         UserId = user.Id ?? 0,
                         UserName = user.FullName ?? "",
                         Gender = user.Gender ?? UserGender.Male,
-                        SpecialtyId = user.SpecialtyId ?? 0,
-                        SpecialtyName = user.Specialty?.SpecialtyName ?? "",
+                        SpecialtyId = hasValidSpec ? user.SpecialtyId.Value : defaultDeptSpecialtyId,
+                        SpecialtyName = hasValidSpec ? (user.Specialty?.SpecialtyName ?? "") : (defaultDeptSpecialty?.SpecialtyName ?? ""),
                         CanBeShiftManager = (user.CanBeShiftManager ?? false)
                             || ShiftManagerRules.NormalizeLevel(user.ShiftManagerLevel).HasValue,
                         ShiftManagerLevel = ShiftManagerRules.NormalizeLevel(user.ShiftManagerLevel)
@@ -2484,6 +2488,26 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                     var productivitySnapshot = CalculateProductivitySnapshot(userEntity, userConstraint, constraints, deptSettingEarly, nightShiftDuration);
                     ProductivityRequiredHoursResolver.ApplyToUserConstraint(userEntity, userConstraint, productivitySnapshot);
+                }
+
+                // تطبیق تخصص کاربران فاقد تخصص در صورتی که شیفت‌های بخش دارای یک تخصص مشخص هستند
+                var distinctShiftSpecialties = constraints.ShiftRequirements
+                    .SelectMany(s => s.SpecialtyRequirements)
+                    .Where(sr => sr.SpecialtyId > 0)
+                    .GroupBy(sr => sr.SpecialtyId)
+                    .ToList();
+
+                if (distinctShiftSpecialties.Count == 1)
+                {
+                    var fallback = distinctShiftSpecialties.First().First();
+                    foreach (var uc in constraints.UserConstraints.Where(u => u.SpecialtyId <= 0))
+                    {
+                        uc.SpecialtyId = fallback.SpecialtyId;
+                        if (string.IsNullOrEmpty(uc.SpecialtyName))
+                        {
+                            uc.SpecialtyName = fallback.SpecialtyName;
+                        }
+                    }
                 }
 
                 // اعمال درخواست‌های شیفت تأییدشده (ShiftRequest) به قیود کاربر

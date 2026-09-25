@@ -1813,6 +1813,16 @@ public static class ExactNightQuotaGuard
         int specialtyId,
         int ignoreUserId)
     {
+        var isHoliday = constraints.IsHoliday(date);
+        var totalRegular = solution.GetShiftAssignments(nightShift.ShiftId, date)
+            .Count(a => !a.IsOnCall && a.UserId != ignoreUserId);
+        var totalCapacity = nightShift.SpecialtyRequirements
+            .Sum(r => r.ForDay(isHoliday).RequiredTotalCount);
+        if (totalRegular >= Math.Max(totalCapacity, 1))
+        {
+            return false;
+        }
+
         var specialtyReq = nightShift.SpecialtyRequirements.FirstOrDefault(r => r.SpecialtyId == specialtyId)
                            ?? nightShift.SpecialtyRequirements.FirstOrDefault();
         if (specialtyReq == null)
@@ -1820,11 +1830,12 @@ public static class ExactNightQuotaGuard
             return true;
         }
 
-        var day = specialtyReq.ForDay(constraints.IsHoliday(date));
+        var day = specialtyReq.ForDay(isHoliday);
         var current = solution.GetShiftAssignments(nightShift.ShiftId, date)
             .Count(a => !a.IsOnCall
                         && a.UserId != ignoreUserId
-                        && GetSpecialty(constraints, a.UserId) == specialtyReq.SpecialtyId);
+                        && (GetSpecialty(constraints, a.UserId) == specialtyReq.SpecialtyId ||
+                            (nightShift.SpecialtyRequirements.Count == 1 && GetSpecialty(constraints, a.UserId) <= 0)));
         return current < Math.Max(day.RequiredTotalCount, 1);
     }
 
@@ -2642,6 +2653,16 @@ public static class ExactNightQuotaGuard
         DateTime date,
         int specialtyId)
     {
+        var isHoliday = constraints.IsHoliday(date);
+        var totalRegular = solution.GetShiftAssignments(nightShift.ShiftId, date)
+            .Count(a => !a.IsOnCall);
+        var totalCapacity = nightShift.SpecialtyRequirements
+            .Sum(r => r.ForDay(isHoliday).RequiredTotalCount);
+        if (totalRegular >= Math.Max(totalCapacity, 1))
+        {
+            return false;
+        }
+
         var specialtyReq = nightShift.SpecialtyRequirements.FirstOrDefault(r => r.SpecialtyId == specialtyId)
                            ?? nightShift.SpecialtyRequirements.FirstOrDefault();
         if (specialtyReq == null)
@@ -2649,9 +2670,11 @@ public static class ExactNightQuotaGuard
             return true;
         }
 
-        var day = specialtyReq.ForDay(constraints.IsHoliday(date));
+        var day = specialtyReq.ForDay(isHoliday);
         var current = solution.GetShiftAssignments(nightShift.ShiftId, date)
-            .Count(a => !a.IsOnCall && GetSpecialty(constraints, a.UserId) == specialtyReq.SpecialtyId);
+            .Count(a => !a.IsOnCall &&
+                        (GetSpecialty(constraints, a.UserId) == specialtyReq.SpecialtyId ||
+                         (nightShift.SpecialtyRequirements.Count == 1 && GetSpecialty(constraints, a.UserId) <= 0)));
         return current < Math.Max(day.RequiredTotalCount, 1);
     }
 
