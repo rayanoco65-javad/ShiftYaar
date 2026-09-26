@@ -696,6 +696,18 @@ public static class ExactNightQuotaGuard
         var receiverBefore = CountNights(solution, receiver.UserId);
         var receiverMinGap = ResolveNightSpacingGap(constraints, receiver);
 
+        var receiverFeasibleDates = GetFeasibleNightDates(constraints, receiver)
+            .Where(d => !ViolatesNightSpacing(solution, constraints, receiver, d, receiverMinGap))
+            .Where(d => !solution.HasAssignment(receiver.UserId, nightShift.ShiftId, d))
+            .Where(d => IsPersonallyFeasibleNightDate(solution, constraints, receiver, nightShift, d, holidayOnly: false))
+            .Where(d => CanAcceptNightAfterClearing(solution, constraints, receiver, nightShift, d))
+            .ToHashSet();
+
+        if (receiverFeasibleDates.Count == 0)
+        {
+            return false;
+        }
+
         foreach (var (donor, night) in EnumerateSurplusNights(solution, constraints, excludeUserId: receiver.UserId))
         {
             var date1 = night.Date.Date;
@@ -779,6 +791,7 @@ public static class ExactNightQuotaGuard
                         var yNights = GetNights(solution, userY.UserId).Select(a => a.Date.Date).ToList();
                         foreach (var date3 in yNights)
                         {
+                            if (!receiverFeasibleDates.Contains(date3)) continue;
                             if (date3 == date2 || date3 == date1) continue;
 
                             var hasYAsg = solution.TryGetAssignment(userY.UserId, nightShift.ShiftId, date3, out var yAsg);
@@ -906,6 +919,16 @@ public static class ExactNightQuotaGuard
     {
         var receiverBefore = CountNights(solution, receiver.UserId);
         var receiverMinGap = ResolveNightSpacingGap(constraints, receiver);
+
+        var receiverFeasibleDates = GetFeasibleNightDates(constraints, receiver)
+            .Where(d => !ViolatesNightSpacing(solution, constraints, receiver, d, receiverMinGap))
+            .Where(d => !solution.HasAssignment(receiver.UserId, nightShift.ShiftId, d))
+            .ToHashSet();
+
+        if (receiverFeasibleDates.Count == 0)
+        {
+            return false;
+        }
 
         foreach (var (donor, night) in EnumerateSurplusNights(solution, constraints, excludeUserId: receiver.UserId))
         {
@@ -1373,6 +1396,12 @@ public static class ExactNightQuotaGuard
         for (int i = 0; i < allDates.Count; i++)
         {
             var date = allDates[i].Date;
+            if (approvedNightDates.Contains(date))
+            {
+                feasible.Add(date);
+                continue;
+            }
+
             if (unavailDates.Contains(date)) continue;
             if (unavailNightSlots.Contains(date)) continue;
             if (approvedNonNightSlots.Contains(date)) continue;
@@ -1419,13 +1448,14 @@ public static class ExactNightQuotaGuard
             return int.MaxValue;
         }
 
-        var feasibleDates = GetFeasibleNightDates(constraints, user);
-        if (feasibleDates.Count < user.ExactNightShiftCount.Value)
+        var totalDays = (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1;
+        if (totalDays < user.ExactNightShiftCount.Value)
         {
             return int.MaxValue;
         }
 
-        return feasibleDates.Count - user.ExactNightShiftCount.Value;
+        var feasibleDates = GetFeasibleNightDates(constraints, user);
+        return Math.Max(0, feasibleDates.Count - user.ExactNightShiftCount.Value);
     }
 
     /// <summary>
@@ -1440,10 +1470,11 @@ public static class ExactNightQuotaGuard
             return;
         }
 
-        foreach (var user in constraints.UserConstraints.Where(u => u.ExactNightShiftCount.HasValue))
+        var totalDays = (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1;
+        foreach (var user in constraints.UserConstraints.Where(u => u.ExactNightShiftCount.HasValue && totalDays >= u.ExactNightShiftCount.Value))
         {
             var feasible = GetFeasibleNightDates(constraints, user);
-            if (feasible.Count == user.ExactNightShiftCount!.Value)
+            if (feasible.Count <= user.ExactNightShiftCount!.Value)
             {
                 foreach (var date in feasible)
                 {

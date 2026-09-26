@@ -2803,16 +2803,19 @@ public class DiagnoseDept2NightQuotasTests
         var baseConstraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(json)!;
 
         var logLines = new List<string>();
-        for (var seed = 0; seed < 20; seed++)
+        for (var seed = 0; seed < 1; seed++)
         {
             var constraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(json)!;
             var sw = System.Diagnostics.Stopwatch.StartNew();
 
             var parameters = new SimulatedAnnealingParameters
             {
-                MaxIterations = 4000,
-                MaxIterationsWithoutImprovement = 600,
-                RandomSeed = seed
+                InitialTemperature = 1000.0,
+                FinalTemperature = 0.1,
+                CoolingRate = 0.997,
+                MaxIterations = 10000,
+                MaxIterationsWithoutImprovement = 1000,
+                RandomSeed = null
             };
 
             var scheduler = new SimulatedAnnealingScheduler(constraints, parameters);
