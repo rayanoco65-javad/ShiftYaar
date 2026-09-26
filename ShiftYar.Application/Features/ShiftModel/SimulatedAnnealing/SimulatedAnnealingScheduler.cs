@@ -29,7 +29,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         {
             _constraints = constraints;
             _parameters = parameters;
-            _random = new Random();
+            _random = parameters.RandomSeed.HasValue ? new Random(parameters.RandomSeed.Value) : new Random();
             _statistics = new AlgorithmStatistics();
 
             var distinctShiftSpecialties = constraints.ShiftRequirements
@@ -247,6 +247,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     continue;
                 }
 
+                neighborSolution.Score = CalculateSolutionScore(neighborSolution);
                 double deltaScore = neighborSolution.Score - currentSolution.Score;
                 bool acceptMove = deltaScore < 0 || _random.NextDouble() < Math.Exp(-deltaScore / temperature);
 
@@ -288,7 +289,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private ShiftSolution GenerateFeasibleInitialSolution()
         {
-            const int maxAttempts = 8;
+            const int maxAttempts = 3;
             ShiftSolution best = null;
 
             for (int attempt = 0; attempt < maxAttempts; attempt++)
@@ -318,6 +319,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             ShiftEligibilityGuard.StripIneligibleAssignments(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+
+            // رزرو قطعی شب‌های کاربران بدون حاشیه مانور (Slack == 0) قبل از پر شدن توسط دیگران یا تداخل شیفت‌های روزانه
+            ExactNightQuotaGuard.PreassignZeroSlackNights(solution, _constraints);
 
             // فاز ۱ (اسکلت مسئول): قبل از پر کردن ظرفیت با نیروی عادی، L1/مسئول روی Evening/Night قفل شود
             BuildReservedManagerSkeleton(solution);
@@ -415,8 +419,6 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             {
                 PerformRemoveMove(neighbor);
             }
-            
-            CalculateSolutionScore(neighbor);
 
             return neighbor;
         }
@@ -3533,6 +3535,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => !HasConflictingApprovedRequiredOnDate(u, date, shiftReq.ShiftLabel))
                 .Where(u => ShiftEligibilityResolver.MayTakeLabelOnDate(u, shiftReq.ShiftLabel, date))
                 .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
+                .Where(u => !strictPhase
+                            || shiftReq.ShiftLabel != ShiftLabel.Night
+                            || !u.HasExactNightQuota
+                            || solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall) < (u.ExactNightShiftCount ?? int.MaxValue))
                 .OrderBy(u =>
                 {
                     if (shiftReq.ShiftLabel == ShiftLabel.Night)
@@ -4293,6 +4299,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             // شب‌هایی که حذف‌شان کاربر را زیر حداقل سهمیه می‌برد محافظت شوند
             if (assignment.ShiftLabel == ShiftLabel.Night && !assignment.IsOnCall)
             {
+                if (user.ExactNightShiftCount.HasValue
+                    && ExactNightQuotaGuard.CalculateNightSlack(_constraints, user) == 0
+                    && solution.GetUserAllAssignments(user.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall) <= user.ExactNightShiftCount.Value)
+                {
+                    return true;
+                }
                 return !ExactNightQuotaGuard.CanDonateNight(solution, _constraints, user, assignment);
             }
 

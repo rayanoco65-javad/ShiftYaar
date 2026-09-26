@@ -2791,11 +2791,158 @@ public class DiagnoseDept2NightQuotasTests
                 var reqCount = spec?.ForDay(isHoliday).RequiredTotalCount ?? 0;
                 var assignedCount = dayAsgs.Count(a => a.ShiftId == shiftReq.ShiftId);
                 Assert.Equal(reqCount, assignedCount);
+            }
+    }
+    }
+
+    [Fact]
+    public void Test_Mehr1405_MultipleSeedsSpeedAndQuotas()
+    {
+        var path = @"C:\Users\Paria\.gemini\antigravity-ide\brain\ed37ed7b-afd1-467e-bdb4-ec225833f7bf\scratch\dept2_1405_07_constraints.json";
+        var json = System.IO.File.ReadAllText(path);
+        var baseConstraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(json)!;
+
+        var logLines = new List<string>();
+        for (var seed = 0; seed < 20; seed++)
+        {
+            var constraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(json)!;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            var parameters = new SimulatedAnnealingParameters
+            {
+                MaxIterations = 4000,
+                MaxIterationsWithoutImprovement = 600,
+                RandomSeed = seed
+            };
+
+            var scheduler = new SimulatedAnnealingScheduler(constraints, parameters);
+            ShiftSolution? solution = null;
+            string status = "OK";
+            try
+            {
+                solution = scheduler.Optimize();
+                var datesList = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
+                    .Select(i => constraints.StartDate.Date.AddDays(i)).ToList();
+                foreach (var day in new[] { 9, 10, 11, 19 })
+                {
+                    var dt = constraints.StartDate.Date.AddDays(day - 1);
+                    var nights = solution.Assignments.Values.Where(a => a.Date.Date == dt.Date && a.ShiftLabel == ShiftLabel.Night)
+                        .Select(a => $"U{a.UserId}(Mgr={constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)?.ShiftManagerLevel},Q={constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)?.ExactNightShiftCount})");
+                    _output.WriteLine($"Day {day} ({DateConverter.ConvertToPersianDate(dt)}) Night: {string.Join(", ", nights)}");
+                }
+
+                ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+                ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+                ExactNightQuotaGuard.Enforce(solution, constraints);
+                scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
+
+                if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
+                {
+                    ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+                    ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+                    ExactNightQuotaGuard.Enforce(solution, constraints);
+                }
+
+                ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+                ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
+                ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+                MorningEveningBalanceGuard.Enforce(solution, constraints);
+                OvertimeBalanceGuard.Enforce(solution, constraints);
+                AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+                MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
+                ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+                ExactNightQuotaGuard.Enforce(solution, constraints);
+
+                for (var pass = 0; pass < 3; pass++)
+                {
+                    DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
+                    ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
+                    AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+                    MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
+                    scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
+                    ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
+                    ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+
+                    if (DailyDuplicateAssignmentGuard.GetViolations(solution, constraints).Count == 0
+                        && ShiftEligibilityGuard.GetViolations(solution, constraints).Count == 0
+                        && AdjacentShiftRestGuard.GetViolations(solution, constraints).Count == 0
+                        && MaxConsecutiveWorkdayRules.GetViolations(solution, constraints).Count == 0
+                        && ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints).Count == 0)
+                    {
+                        break;
+                    }
+                }
+
+                if (ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints).Count > 0)
+                {
+                    ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
+                    ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+                }
+
+                DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
+                ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
+                AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+                ApprovedRequestGuard.ForceApply(solution, constraints);
+                scheduler.RefreshSolutionViolations(solution);
+
+                if (!scheduler.AreExactNightQuotasSatisfied(solution, out var deficits))
+                {
+                    ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+                    ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+                    ExactNightQuotaGuard.Enforce(solution, constraints);
+                    ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+                }
+
+                if (!scheduler.AreExactNightQuotasSatisfied(solution, out var deficits2))
+                {
+                    status = $"FAIL QUOTAS: {string.Join(", ", deficits2)}";
+                }
+                else if (ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints).Count > 0)
+                {
+                    status = "FAIL UNDER-CAPACITY";
+                }
+                else if (ShiftCoverageGuard.GetOverCapacityViolations(solution, constraints).Count > 0)
+                {
+                    status = "FAIL OVER-CAPACITY";
+                }
+                ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
+            }
+            catch (Exception ex)
+            {
+                status = $"EXCEPTION: {ex.Message.Split('\n').FirstOrDefault()}";
+            }
+            sw.Stop();
+
+            var u24Nights = solution != null ? solution.GetUserAllAssignments(24).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall) : 0;
+            var u24Dates = solution != null ? string.Join(", ", solution.GetUserAllAssignments(24).Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall).Select(a => DateConverter.ConvertToPersianDate(a.Date))) : "";
+            var u33Nights = solution != null ? solution.GetUserAllAssignments(33).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall) : 0;
+            var u33Dates = solution != null ? string.Join(", ", solution.GetUserAllAssignments(33).Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall).Select(a => DateConverter.ConvertToPersianDate(a.Date))) : "";
+            var line = $"Seed {seed}: {status} in {sw.ElapsedMilliseconds}ms | U24={u24Nights}/8 ({u24Dates}) | U33={u33Nights}/9 ({u33Dates})";
+            _output.WriteLine(line);
+            logLines.Add(line);
+
+            if (solution != null)
+            {
+                var summary = new List<string>();
+                foreach (var u in constraints.UserConstraints.Where(u => u.HasExactNightQuota))
+                {
+                    var actual = solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+                    var diff = actual - u.ExactNightShiftCount!.Value;
+                    if (diff != 0)
+                    {
+                        var datesWorking = string.Join(", ", solution.GetUserAllAssignments(u.UserId).Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall).Select(a => DateConverter.ConvertToPersianDate(a.Date)));
+                        summary.Add($"User {u.UserId} (Mgr={u.ShiftManagerLevel}): Actual={actual}, Quota={u.ExactNightShiftCount.Value}, Diff={diff:+#;-#;0} | Dates: {datesWorking}");
+                    }
+                }
+
+                foreach (var s in summary)
+                {
+                    _output.WriteLine("  " + s);
+                    logLines.Add("  " + s);
+                }
             }
         }
+
+        System.IO.File.WriteAllLines(@"C:\Users\Paria\.gemini\antigravity-ide\brain\ed37ed7b-afd1-467e-bdb4-ec225833f7bf\scratch\multi_seed_results.txt", logLines);
     }
 }
-
-
-
-

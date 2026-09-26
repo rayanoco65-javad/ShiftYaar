@@ -406,6 +406,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public int MaxIterationsWithoutImprovement { get; set; } = 1000;
         public int MaxNeighborsPerIteration { get; set; } = 10;
         public double PenaltyWeight { get; set; } = 1000.0; // وزن جریمه برای نقض محدودیت‌ها
+        public int? RandomSeed { get; set; }
     }
 
     /// <summary>
