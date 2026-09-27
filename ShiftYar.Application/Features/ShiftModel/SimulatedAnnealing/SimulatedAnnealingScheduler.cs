@@ -127,6 +127,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 ShiftCoverageGuard.ForceFillAllMissingCoverage(bestSolution, _constraints);
                 ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
             }
+            OvertimeBalanceGuard.Enforce(bestSolution, _constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSolution, _constraints);
+            ApprovedRequestGuard.ForceApply(bestSolution, _constraints);
             RefreshSolutionViolations(bestSolution);
             stopwatch.Stop();
             _statistics.ExecutionTime = stopwatch.Elapsed;
@@ -309,7 +312,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             return best ?? GenerateInitialSolution();
         }
 
-        private ShiftSolution GenerateInitialSolution()
+        public ShiftSolution GenerateInitialSolution()
         {
             var solution = new ShiftSolution();
 
@@ -357,7 +360,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             foreach (var date in dateRange)
             {
-                foreach (var shiftReq in _constraints.ShiftRequirements.Where(s => s.ShiftLabel != ShiftLabel.Night))
+                foreach (var shiftReq in _constraints.ShiftRequirements
+                    .Where(s => s.ShiftLabel != ShiftLabel.Night)
+                    .OrderByDescending(ShiftManagerRules.RequiresAnyManager))
                 {
                     foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
                     {
@@ -438,11 +443,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var assignees = GetRegularAssignees(solution, shiftReq, date);
             if (assignees.Count > 0 && !ShiftManagerRules.IsSatisfied(assignees, shiftReq))
             {
-                EnsureShiftManagerMixForSlot(solution, shiftReq, date, strictPhase: false, markSkeleton: true);
-                if (IsSlotManagerMixSatisfied(solution, shiftReq, date))
-                {
-                    SkeletonAssignmentGuard.LockSlotManagerAssignments(solution, _constraints, shiftReq, date);
-                }
+                EnsureShiftManagerMixForSlot(solution, shiftReq, date, strictPhase: false, markSkeleton: false);
             }
         }
 
@@ -2538,6 +2539,35 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         }
                         return 2;
                     }
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                    {
+                        var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                        var req = (double)(u.ProductivityRequiredHours ?? 0);
+                        if (req > 0 && worked >= req)
+                        {
+                            return 10;
+                        }
+                    }
+                    return 0;
+                })
+                .ThenBy(u =>
+                {
+                    if (shiftReq.ShiftLabel == ShiftLabel.Evening && !needL1)
+                    {
+                        return ShiftManagerRules.IsLevel1(u) ? 1 : 0;
+                    }
+                    return 0;
+                })
+                .ThenBy(u =>
+                {
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                    {
+                        return u.ExperienceYears;
+                    }
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 0)
+                    {
+                        return -u.ExperienceYears;
+                    }
                     return 0;
                 })
                 .ThenByDescending(u =>
@@ -2607,9 +2637,46 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         .Where(u => !HasDailyConflict(solution, u.UserId, date, shiftReq.ShiftLabel))
                         .Where(u => !AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(u.UserId), date, shiftReq.ShiftLabel, _constraints))
                         .Where(u => relaxSoftRest || !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(solution, _constraints, u, date))
-                        .OrderByDescending(u => u.ExactNightShiftCount.HasValue && shiftReq.ShiftLabel == ShiftLabel.Night
-                            ? (u.ExactNightShiftCount.Value - solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall))
-                            : 0)
+                        .OrderBy(u =>
+                        {
+                            if (shiftReq.ShiftLabel == ShiftLabel.Night && u.HasExactNightQuota)
+                            {
+                                var currentNights = solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+                                var rem = (u.ExactNightShiftCount ?? 0) - currentNights;
+                                return rem > 0 ? 0 : 5;
+                            }
+                            if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                            {
+                                var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                                var req = (double)(u.ProductivityRequiredHours ?? 0);
+                                if (req > 0 && worked >= req)
+                                {
+                                    return 10;
+                                }
+                            }
+                            return 0;
+                        })
+                        .ThenBy(u =>
+                        {
+                            if (shiftReq.ShiftLabel == ShiftLabel.Evening)
+                            {
+                                return ShiftManagerRules.IsLevel1(u) ? 1 : 0;
+                            }
+                            return 0;
+                        })
+                        .ThenBy(u =>
+                        {
+                            if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                            {
+                                return u.ExperienceYears;
+                            }
+                            if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 0)
+                            {
+                                return -u.ExperienceYears;
+                            }
+                            return 0;
+                        })
+                        .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
                         .FirstOrDefault();
 
                     if (secondMgr != null)
@@ -3073,7 +3140,38 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         var otherReq = u.RequiredShiftSlots.Count(r => r.ShiftLabel == ShiftLabel.Night && r.Date.Date != date.Date);
                         var nonReq = solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall && a.Date.Date != date.Date && !u.RequiredShiftSlots.Any(r => r.ShiftLabel == ShiftLabel.Night && r.Date.Date == a.Date.Date));
                         var remainingCap = u.ExactNightShiftCount.Value - (otherReq + nonReq);
-                        return remainingCap > 0 ? 0 : 1;
+                        if (remainingCap <= 0) return 20;
+                    }
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                    {
+                        var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                        var req = (double)(u.ProductivityRequiredHours ?? 0);
+                        if (req > 0 && worked >= req)
+                        {
+                            return 10;
+                        }
+                    }
+                    return 0;
+                })
+                .ThenBy(u =>
+                {
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                    {
+                        var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                        var req = (double)(u.ProductivityRequiredHours ?? 0);
+                        return worked - req;
+                    }
+                    return 0.0;
+                })
+                .ThenBy(u =>
+                {
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                    {
+                        return u.ExperienceYears;
+                    }
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 0)
+                    {
+                        return -u.ExperienceYears;
                     }
                     return 0;
                 })
@@ -3569,29 +3667,71 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 })
                 .ThenBy(u =>
                 {
-                    // اولویت بسیار پایین برای پرسنلی که OvertimeConsent ندارند و موظفی‌شان پر شده است
+                    // ۱) اولویت بسیار پایین برای پرسنلی که OvertimeConsent ندارند و موظفی‌شان پر شده است
                     if (!u.OvertimeConsent && u.ProductivityRequiredHours.HasValue && u.ProductivityRequiredHours.Value > 0)
                     {
                         var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
                         if (worked >= (double)u.ProductivityRequiredHours.Value)
                         {
-                            return 3;
+                            return 40;
                         }
                     }
 
-                    // اولویت پایین برای پرسنلی که از سقف مجاز ماهانه (مثلاً ۸۰ ساعت) گذشته‌اند
+                    // ۲) پرسنلی که از سقف مجاز ماهانه گذشته‌اند
                     if (u.ProductivityRequiredHours.HasValue && u.ProductivityRequiredHours.Value > 0)
                     {
                         var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
                         var ot = worked - (double)u.ProductivityRequiredHours.Value;
                         if (ot >= (double)u.MaxMonthlyOvertimeHours)
                         {
-                            return 2;
+                            return 30;
                         }
+                    }
+
+                    // ۳) در حالت گریزان از اضافه کار، پرسنلی که به موظفی رسیده‌اند
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1
+                        && u.ProductivityRequiredHours.HasValue && u.ProductivityRequiredHours.Value > 0)
+                    {
+                        var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                        if (worked >= (double)u.ProductivityRequiredHours.Value)
+                        {
+                            return 20;
+                        }
+                    }
+
+                    // ۴) پرسنل دارای اضافه‌کار در حالت‌های عادی
+                    if (u.ProductivityRequiredHours.HasValue && u.ProductivityRequiredHours.Value > 0)
+                    {
+                        var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                        var ot = worked - (double)u.ProductivityRequiredHours.Value;
                         if (ot > 0)
                         {
-                            return 1;
+                            return 10;
                         }
+                    }
+
+                    return 0;
+                })
+                .ThenBy(u =>
+                {
+                    // در حالت گریزان از اضافه کار، بین کسانی که اضافه کار دارند، فردی با ساعت کارکرد کمتر اولویت دارد
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1
+                        && u.ProductivityRequiredHours.HasValue && u.ProductivityRequiredHours.Value > 0)
+                    {
+                        var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                        return worked - (double)u.ProductivityRequiredHours.Value;
+                    }
+                    return 0.0;
+                })
+                .ThenBy(u =>
+                {
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                    {
+                        return u.ExperienceYears;
+                    }
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 0)
+                    {
+                        return -u.ExperienceYears;
                     }
                     return 0;
                 })
@@ -3814,6 +3954,15 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 })
                 .ThenBy(u =>
                 {
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1
+                        && u.ProductivityRequiredHours.HasValue && u.ProductivityRequiredHours.Value > 0)
+                    {
+                        var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                        if (worked >= (double)u.ProductivityRequiredHours.Value)
+                        {
+                            return 10;
+                        }
+                    }
                     if (shiftReq.ShiftLabel == ShiftLabel.Night && u.ExactNightShiftCount.HasValue)
                     {
                         var nights = solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
@@ -3825,6 +3974,18 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         var nights = solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
                         var deficit = u.ExactNightShiftCount.Value - nights;
                         return deficit > 0 ? 1 : 0;
+                    }
+                    return 0;
+                })
+                .ThenBy(u =>
+                {
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                    {
+                        return u.ExperienceYears;
+                    }
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 0)
+                    {
+                        return -u.ExperienceYears;
                     }
                     return 0;
                 })
@@ -4342,10 +4503,39 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 var stillNeedMgr = !isOnCall && mgrCount < reqTotal;
 
                 return users
-                    .OrderBy(u => stillNeedL1 ? (ShiftManagerRules.IsLevel1(u) ? 0 : 1) : 0)
-                    .ThenBy(u => stillNeedMgr ? (ShiftManagerRules.IsLevel1(u) ? 1 : ShiftManagerRules.IsManager(u) ? 0 : 2) : 0)
+                    .OrderBy(u => stillNeedL1 
+                        ? (ShiftManagerRules.IsLevel1(u) ? (u.HasExactNightQuota && CountUserNightShifts(solution, u.UserId) >= (u.ExactNightShiftCount ?? 0) ? 1 : 0) : 2)
+                        : 0)
+                    .ThenBy(u => stillNeedMgr 
+                        ? (ShiftManagerRules.IsManager(u) ? (u.HasExactNightQuota && CountUserNightShifts(solution, u.UserId) >= (u.ExactNightShiftCount ?? 0) ? 1 : 0) : 2)
+                        : 0)
+                    .ThenBy(u =>
+                    {
+                        if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                        {
+                            var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                            var req = (double)(u.ProductivityRequiredHours ?? 0);
+                            if (req > 0 && worked >= req && (!u.HasExactNightQuota || CountUserNightShifts(solution, u.UserId) >= (u.ExactNightShiftCount ?? 0)))
+                            {
+                                return 10;
+                            }
+                        }
+                        return 0;
+                    })
                     .ThenBy(u => NightQuotaPriority(solution, u, isHolidayWeekendNight))
                     .ThenBy(u => CountUserNightShifts(solution, u.UserId))
+                    .ThenBy(u =>
+                    {
+                        if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                        {
+                            return u.ExperienceYears;
+                        }
+                        if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 0)
+                        {
+                            return -u.ExperienceYears;
+                        }
+                        return 0;
+                    })
                     .ThenBy(u => CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)))
                     .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
                     .ThenBy(u => u.RecentTotalShifts)
@@ -4375,6 +4565,32 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return users
                     .OrderBy(u => stillNeedL1 ? (ShiftManagerRules.IsLevel1(u) ? 0 : 1) : 0)
                     .ThenBy(u => stillNeedMgr ? (ShiftManagerRules.IsManager(u) ? 0 : 1) : 0)
+                    .ThenBy(u => !stillNeedMgr ? (ShiftManagerRules.IsLevel1(u) ? 2 : ShiftManagerRules.IsManager(u) ? 1 : 0) : 0)
+                    .ThenBy(u =>
+                    {
+                        if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                        {
+                            var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                            var req = (double)(u.ProductivityRequiredHours ?? 0);
+                            if (req > 0 && worked >= req)
+                            {
+                                return 10;
+                            }
+                        }
+                        return 0;
+                    })
+                    .ThenBy(u =>
+                    {
+                        if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                        {
+                            return u.ExperienceYears;
+                        }
+                        if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 0)
+                        {
+                            return -u.ExperienceYears;
+                        }
+                        return 0;
+                    })
                     .ThenBy(u =>
                     {
                         if (shiftLabel == ShiftLabel.Evening && u.ExactNightShiftCount.HasValue)
@@ -4392,7 +4608,35 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
 
             return users
-                .OrderBy(u => isHoliday
+                .OrderBy(u =>
+                {
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                    {
+                        var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                        var req = (double)(u.ProductivityRequiredHours ?? 0);
+                        if (req > 0 && worked >= req)
+                        {
+                            return 10;
+                        }
+                    }
+                    return 0;
+                })
+                .ThenBy(u => _constraints.ShiftRequirements.Any(ShiftManagerRules.RequiresAnyManager)
+                    ? (ShiftManagerRules.IsLevel1(u) ? 2 : ShiftManagerRules.IsManager(u) ? 1 : 0)
+                    : 0)
+                .ThenBy(u =>
+                {
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                    {
+                        return u.ExperienceYears;
+                    }
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 0)
+                    {
+                        return -u.ExperienceYears;
+                    }
+                    return 0;
+                })
+                .ThenBy(u => isHoliday
                     ? HolidayMorningEveningFairnessGuard.CountHolidayLabel(solution, _constraints, u.UserId, shiftLabel)
                     : CountUserLabelShifts(solution, u.UserId, shiftLabel))
                 .ThenBy(u => CountUserLabelShifts(solution, u.UserId, shiftLabel))
@@ -4796,17 +5040,48 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => IsUserAvailableForShift(u, assignment.Date, assignment.ShiftLabel, solution))
                 .Where(u => !IsRequiredShiftSlotForOtherUser(u.UserId, assignment.Date, assignment.ShiftLabel))
                 .Where(u => !solution.HasAssignment(u.UserId, assignment.ShiftId, assignment.Date))
-                .OrderBy(u => GetProductivityHourDeficit(u, solution))
+                .OrderBy(u =>
+                {
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                    {
+                        var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                        var req = (double)(u.ProductivityRequiredHours ?? 0);
+                        if (req > 0 && worked >= req)
+                        {
+                            return 10;
+                        }
+                    }
+                    return 0;
+                })
+                .ThenBy(u =>
+                {
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                    {
+                        return u.ExperienceYears;
+                    }
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 0)
+                    {
+                        return -u.ExperienceYears;
+                    }
+                    return 0;
+                })
+                .ThenByDescending(u => GetProductivityHourDeficit(u, solution))
                 .ThenBy(u => CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)))
                 .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
                 .ThenBy(_ => _random.Next())
                 .ToList();
 
-            if (eligibleUsers.Count > 0)
+            foreach (var newUser in eligibleUsers)
             {
-                var newUser = eligibleUsers[0];
+                if (shiftReq != null && ShiftManagerRules.RequiresAnyManager(shiftReq) &&
+                    !OvertimeBalanceGuard.WouldPreserveManagerMix(solution, _constraints, assignment.ShiftId, assignment.Date, assignment.UserId, newUser.UserId))
+                {
+                    continue;
+                }
+
                 solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
                 solution.AddAssignment(newUser.UserId, assignment.ShiftId, assignment.Date, assignment.ShiftLabel, assignment.IsOnCall);
+                break;
             }
         }
 
@@ -4830,7 +5105,32 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Where(u => !slot.RequireMale || u.Gender == UserGender.Male)
                 .Where(u => !slot.RequireFemale || u.Gender == UserGender.Female)
                 .Where(u => !ProjectPersonnelAtRequiredCap(u, solution))
-                .OrderBy(u => ProjectPersonnelProductivityPriority.FillTier(u))
+                .OrderBy(u =>
+                {
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                    {
+                        var worked = CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId));
+                        var req = (double)(u.ProductivityRequiredHours ?? 0);
+                        if (req > 0 && worked >= req)
+                        {
+                            return 10;
+                        }
+                    }
+                    return 0;
+                })
+                .ThenBy(u =>
+                {
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 1)
+                    {
+                        return u.ExperienceYears;
+                    }
+                    if (_constraints.EnableOvertimeDistributionBySeniority && _constraints.OvertimePreferenceType == 0)
+                    {
+                        return -u.ExperienceYears;
+                    }
+                    return 0;
+                })
+                .ThenBy(u => ProjectPersonnelProductivityPriority.FillTier(u))
                 .ThenByDescending(u => GetProductivityHourDeficit(u, solution))
                 .ThenBy(u => CalculateUserWorkedHours(solution.GetUserAllAssignments(u.UserId)))
                 .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
@@ -4929,19 +5229,60 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     return;
                 }
 
-                var receiverOt = userStats
+                var candidates = userStats
                     .Where(x => x.User.UserId != donorOt.User.UserId && x.Consent && x.User.SpecialtyId == donorOt.User.SpecialtyId)
                     .Where(x => x.Overtime + 7.0 <= (double)x.User.MaxMonthlyOvertimeHours && (donorOt.Delta - x.Delta) > 7.0)
                     .OrderBy(x => x.Delta)
-                    .FirstOrDefault();
+                    .ToList();
 
-                if (receiverOt == null)
+                if (candidates.Count == 0)
                 {
                     return;
                 }
 
-                receiver = receiverOt.User;
                 donor = donorOt.User;
+                var donorAssignments = solution.GetUserAllAssignments(donor.UserId)
+                    .Where(a => !a.IsOnCall)
+                    .Where(a => !ApprovedRequestGuard.IsApprovedRequiredSlot(donor, a.Date, a.ShiftLabel, a.ShiftId))
+                    .Where(a => a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening)
+                    .OrderBy(a => a.ShiftLabel == ShiftLabel.Morning ? 0 : 1)
+                    .ThenByDescending(a => GetShiftEffectiveHours(a))
+                    .ToList();
+
+                foreach (var assignment in donorAssignments)
+                {
+                    foreach (var receiverCand in candidates)
+                    {
+                        var candUser = receiverCand.User;
+                        if (solution.HasAssignment(candUser.UserId, assignment.ShiftId, assignment.Date))
+                        {
+                            continue;
+                        }
+
+                        if (!IsUserAvailableForShift(candUser, assignment.Date, assignment.ShiftLabel, solution))
+                        {
+                            continue;
+                        }
+
+                        if (!OvertimeBalanceGuard.WouldPreserveManagerMix(
+                                solution, _constraints, assignment.ShiftId, assignment.Date, donor.UserId, candUser.UserId))
+                        {
+                            continue;
+                        }
+
+                        solution.UnlockSkeletonAssignment(donor.UserId, assignment.ShiftId, assignment.Date);
+                        solution.RemoveAssignment(donor.UserId, assignment.ShiftId, assignment.Date, force: true);
+                        solution.AddAssignment(
+                            candUser.UserId,
+                            assignment.ShiftId,
+                            assignment.Date,
+                            assignment.ShiftLabel,
+                            assignment.IsOnCall);
+                        return;
+                    }
+                }
+
+                return;
             }
             else
             {
@@ -4958,40 +5299,40 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 {
                     return;
                 }
-            }
 
-            var donorAssignments = solution.GetUserAllAssignments(donor.UserId)
-                .Where(a => !a.IsOnCall && !IsProtectedAssignment(solution, a))
-                .Where(a => a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening)
-                .OrderBy(a => a.ShiftLabel == ShiftLabel.Morning ? 0 : 1)
-                .ThenByDescending(a => GetShiftEffectiveHours(a))
-                .ToList();
-            foreach (var assignment in donorAssignments)
-            {
-                if (solution.HasAssignment(receiver.UserId, assignment.ShiftId, assignment.Date))
+                var donorAssignments = solution.GetUserAllAssignments(donor.UserId)
+                    .Where(a => !a.IsOnCall && !IsProtectedAssignment(solution, a))
+                    .Where(a => a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening)
+                    .OrderBy(a => a.ShiftLabel == ShiftLabel.Morning ? 0 : 1)
+                    .ThenByDescending(a => GetShiftEffectiveHours(a))
+                    .ToList();
+                foreach (var assignment in donorAssignments)
                 {
-                    continue;
-                }
+                    if (solution.HasAssignment(receiver.UserId, assignment.ShiftId, assignment.Date))
+                    {
+                        continue;
+                    }
 
-                if (!IsUserAvailableForShift(receiver, assignment.Date, assignment.ShiftLabel, solution))
-                {
-                    continue;
-                }
+                    if (!IsUserAvailableForShift(receiver, assignment.Date, assignment.ShiftLabel, solution))
+                    {
+                        continue;
+                    }
 
-                if (!OvertimeBalanceGuard.WouldPreserveManagerMix(
-                        solution, _constraints, assignment.ShiftId, assignment.Date, donor.UserId, receiver.UserId))
-                {
-                    continue;
-                }
+                    if (!OvertimeBalanceGuard.WouldPreserveManagerMix(
+                            solution, _constraints, assignment.ShiftId, assignment.Date, donor.UserId, receiver.UserId))
+                    {
+                        continue;
+                    }
 
-                solution.RemoveAssignment(donor.UserId, assignment.ShiftId, assignment.Date);
-                solution.AddAssignment(
-                    receiver.UserId,
-                    assignment.ShiftId,
-                    assignment.Date,
-                    assignment.ShiftLabel,
-                    assignment.IsOnCall);
-                return;
+                    solution.RemoveAssignment(donor.UserId, assignment.ShiftId, assignment.Date);
+                    solution.AddAssignment(
+                        receiver.UserId,
+                        assignment.ShiftId,
+                        assignment.Date,
+                        assignment.ShiftLabel,
+                        assignment.IsOnCall);
+                    return;
+                }
             }
         }
 

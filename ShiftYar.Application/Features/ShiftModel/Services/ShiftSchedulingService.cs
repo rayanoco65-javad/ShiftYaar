@@ -1007,6 +1007,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
                         ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
                     }
+                    OvertimeBalanceGuard.Enforce(candidateSolution, constraints);
                     DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
                     ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
                     AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);

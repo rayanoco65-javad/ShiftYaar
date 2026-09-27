@@ -50,7 +50,32 @@ public static class SkeletonAssignmentGuard
         var lockedTotal = managerAssignees.Count(x => solution.IsLockedSkeleton(x.Assignment.UserId, x.Assignment.ShiftId, x.Assignment.Date));
 
         // اول فقط تا سقف minLevel1 از مسئولین سطح ۱ قفل می‌شوند
-        foreach (var m in managerAssignees.Where(x => ShiftManagerRules.IsLevel1(x.User) && !solution.IsLockedSkeleton(x.Assignment.UserId, x.Assignment.ShiftId, x.Assignment.Date)))
+        var l1Candidates = managerAssignees
+            .Where(x => ShiftManagerRules.IsLevel1(x.User) && !solution.IsLockedSkeleton(x.Assignment.UserId, x.Assignment.ShiftId, x.Assignment.Date))
+            .OrderByDescending(x => ApprovedRequestGuard.IsApprovedRequiredSlot(x.User!, x.Assignment.Date, x.Assignment.ShiftLabel, x.Assignment.ShiftId))
+            .ThenBy(x =>
+            {
+                if (constraints.EnableOvertimeDistributionBySeniority && constraints.OvertimePreferenceType == 1)
+                {
+                    var worked = OvertimeBalanceGuard.CalculateHours(solution, x.User!, constraints);
+                    var req = (double)(x.User!.ProductivityRequiredHours ?? 0);
+                    if (req > 0 && worked >= req)
+                    {
+                        return 10;
+                    }
+                }
+                return 0;
+            })
+            .ThenBy(x =>
+            {
+                if (constraints.EnableOvertimeDistributionBySeniority && constraints.OvertimePreferenceType == 1)
+                {
+                    return x.User!.ExperienceYears;
+                }
+                return 0;
+            });
+
+        foreach (var m in l1Candidates)
         {
             if (lockedL1 < minLevel1 && lockedTotal < requiredTotal)
             {
@@ -61,9 +86,33 @@ public static class SkeletonAssignmentGuard
         }
 
         // سپس بقیه مسئول‌ها تا سقف requiredTotal قفل می‌شوند (ترجیحاً سطح ۲ تا سطح ۱ برای شیفت‌های نیازمند آزاد بماند)
-        foreach (var m in managerAssignees
-                     .Where(x => !solution.IsLockedSkeleton(x.Assignment.UserId, x.Assignment.ShiftId, x.Assignment.Date))
-                     .OrderBy(x => ShiftManagerRules.IsLevel1(x.User) ? 1 : 0))
+        var remainingCandidates = managerAssignees
+            .Where(x => !solution.IsLockedSkeleton(x.Assignment.UserId, x.Assignment.ShiftId, x.Assignment.Date))
+            .OrderByDescending(x => ApprovedRequestGuard.IsApprovedRequiredSlot(x.User!, x.Assignment.Date, x.Assignment.ShiftLabel, x.Assignment.ShiftId))
+            .ThenBy(x => ShiftManagerRules.IsLevel1(x.User) ? 1 : 0)
+            .ThenBy(x =>
+            {
+                if (constraints.EnableOvertimeDistributionBySeniority && constraints.OvertimePreferenceType == 1)
+                {
+                    var worked = OvertimeBalanceGuard.CalculateHours(solution, x.User!, constraints);
+                    var req = (double)(x.User!.ProductivityRequiredHours ?? 0);
+                    if (req > 0 && worked >= req)
+                    {
+                        return 10;
+                    }
+                }
+                return 0;
+            })
+            .ThenBy(x =>
+            {
+                if (constraints.EnableOvertimeDistributionBySeniority && constraints.OvertimePreferenceType == 1)
+                {
+                    return x.User!.ExperienceYears;
+                }
+                return 0;
+            });
+
+        foreach (var m in remainingCandidates)
         {
             if (lockedTotal < requiredTotal)
             {

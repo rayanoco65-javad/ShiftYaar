@@ -62,7 +62,7 @@ public static class ShiftCoverageGuard
             .Select(i => constraints.StartDate.Date.AddDays(i))
             .ToList();
 
-        foreach (var label in new[] { ShiftLabel.Night, ShiftLabel.Morning, ShiftLabel.Evening })
+        foreach (var label in new[] { ShiftLabel.Night, ShiftLabel.Evening, ShiftLabel.Morning })
         {
             foreach (var date in dates)
             {
@@ -1205,6 +1205,30 @@ public static class ShiftCoverageGuard
                     score -= 8_000;
                 }
             }
+            else if (constraints.ShiftRequirements.Any(ShiftManagerRules.RequiresAnyManager))
+            {
+                if (ShiftManagerRules.IsLevel1(user))
+                {
+                    score += 15_000;
+                }
+                else if (ShiftManagerRules.IsManager(user))
+                {
+                    score += 8_000;
+                }
+            }
+        }
+        else if (constraints.ShiftRequirements.Any(ShiftManagerRules.RequiresAnyManager))
+        {
+            // شیفت جاری (مثلاً صبح) نیازمند مسئول نیست ولی دپارتمان شیفت‌های نیازمند مسئول (عصر/شب) دارد
+            // مسئولین نباید روی این شیفت هدر روند تا برای عصر/شب آزاد بمانند
+            if (ShiftManagerRules.IsLevel1(user))
+            {
+                score += 15_000;
+            }
+            else if (ShiftManagerRules.IsManager(user))
+            {
+                score += 8_000;
+            }
         }
 
         // کسری سهمیه شب اولویت مطلق برای شب
@@ -1276,16 +1300,23 @@ public static class ShiftCoverageGuard
                 }
                 else
                 {
-                    var seniorityFactor = 1.0;
-                    if (constraints.EnableOvertimeDistributionBySeniority && constraints.OvertimePreferenceType != 2)
+                    if (constraints.EnableOvertimeDistributionBySeniority && constraints.OvertimePreferenceType == 1 && ot >= 0)
                     {
-                        var weight = ShiftSeniorityDistributionGuard.ResolveOvertimeWeight(
-                            user.ExperienceYears,
-                            constraints.OvertimePreferenceType,
-                            constraints.OvertimeSeniorityDistributionSlope);
-                        seniorityFactor = Math.Max(0.2, weight);
+                        score += 25_000 + (int)(ot * 100) + user.ExperienceYears * 2000;
                     }
-                    score += (int)((ot * 30) / seniorityFactor);
+                    else
+                    {
+                        var seniorityFactor = 1.0;
+                        if (constraints.EnableOvertimeDistributionBySeniority && constraints.OvertimePreferenceType != 2)
+                        {
+                            var weight = ShiftSeniorityDistributionGuard.ResolveOvertimeWeight(
+                                user.ExperienceYears,
+                                constraints.OvertimePreferenceType,
+                                constraints.OvertimeSeniorityDistributionSlope);
+                            seniorityFactor = Math.Max(0.2, weight);
+                        }
+                        score += (int)((ot * 30) / seniorityFactor);
+                    }
                 }
             }
 
