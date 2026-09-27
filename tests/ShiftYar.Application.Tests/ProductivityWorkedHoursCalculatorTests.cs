@@ -46,7 +46,7 @@ public class ProductivityWorkedHoursCalculatorTests
     }
 
     [Fact]
-    public void CalculateEffectiveWorkedHours_AddsHandoverBetweenShifts()
+    public void CalculateEffectiveWorkedHours_DefaultHandoverIsZero()
     {
         var hours = ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
             new[]
@@ -56,6 +56,22 @@ public class ProductivityWorkedHoursCalculatorTests
             },
             ShiftInfo,
             _ => false);
+
+        Assert.Equal(16, hours, precision: 2);
+    }
+
+    [Fact]
+    public void CalculateEffectiveWorkedHours_AddsHandoverBetweenShifts_WhenExplicitlyConfigured()
+    {
+        var hours = ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(
+            new[]
+            {
+                new SaShiftAssignment { UserId = 1, ShiftId = 1, Date = new DateTime(2026, 1, 5), ShiftLabel = ShiftLabel.Morning },
+                new SaShiftAssignment { UserId = 1, ShiftId = 1, Date = new DateTime(2026, 1, 7), ShiftLabel = ShiftLabel.Morning }
+            },
+            ShiftInfo,
+            _ => false,
+            handoverHours: 1.0);
 
         Assert.Equal(17, hours, precision: 2);
     }

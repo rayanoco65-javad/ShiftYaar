@@ -10,7 +10,7 @@ namespace ShiftYar.Application.Common.Utilities;
 public static class ProductivityWorkedHoursCalculator
 {
     public const double DefaultNightHolidayMultiplier = 1.5;
-    public const double DefaultHandoverHours = 1.0;
+    public const double DefaultHandoverHours = 0.0;
     public const double DefaultMaxConsecutiveWorkHours = 12.0;
     public const double DefaultMaxMonthlyOvertimeHours = 80.0;
 
@@ -163,7 +163,7 @@ public static class ProductivityWorkedHoursCalculator
         for (var i = 1; i < segments.Count; i++)
         {
             var gap = (segments[i].Start - mergedEnd).TotalHours;
-            if (gap <= handoverHours)
+            if (gap <= Math.Max(0.05, handoverHours))
             {
                 mergedEnd = mergedEnd > segments[i].End ? mergedEnd : segments[i].End;
             }

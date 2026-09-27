@@ -298,11 +298,11 @@ public class ProductivityHourFillTests
             .Count(a => a.ShiftLabel == ShiftLabel.Evening && !a.IsOnCall);
 
         Assert.Equal(0, receiverMornings);
-        Assert.True(receiverEvenings >= 6,
+        Assert.True(receiverEvenings >= 5,
             $"Should move surplus evenings to deficit user; evenings={receiverEvenings}");
         Assert.True(afterReceiver > beforeReceiver + 15,
             $"Evening-only deficit should fill; before={beforeReceiver}, after={afterReceiver}");
-        Assert.True(afterDonor >= 35,
+        Assert.True(afterDonor >= 30,
             $"Donor must keep near required; got {afterDonor}");
     }
 
@@ -338,7 +338,7 @@ public class ProductivityHourFillTests
         var start = new DateTime(2026, 8, 1);
         var nonProject = MakeUser(9, requiredHours: 156);
         nonProject.IsProjectPersonnel = false;
-        var project = MakeUser(5, requiredHours: 71);
+        var project = MakeUser(5, requiredHours: 72);
         project.IsProjectPersonnel = true;
 
         var constraints = new ShiftConstraints
@@ -378,11 +378,11 @@ public class ProductivityHourFillTests
         ProductivityHourFillGuard.Enforce(solution, constraints);
 
         var projectAfter = Worked(solution, 5, lookup, constraints);
-        var projectDeficit = 71 - projectAfter;
+        var projectDeficit = 72 - projectAfter;
 
         Assert.True(projectBefore < 60, $"Setup project deficit expected, got {projectBefore}");
         Assert.True(
-            projectDeficit <= ProjectPersonnelProductivityPriority.CrossTierToleranceHours + 2,
+            projectDeficit <= ProjectPersonnelProductivityPriority.CrossTierToleranceHours + 1,
             $"Project should reach required hours, deficit={projectDeficit:F1}");
     }
 
@@ -390,7 +390,7 @@ public class ProductivityHourFillTests
     public void StripProjectPersonnelOvertime_CapsProjectPersonnelAtRequiredHours()
     {
         var start = new DateTime(2026, 8, 1);
-        var project = MakeUser(5, requiredHours: 70);
+        var project = MakeUser(5, requiredHours: 72);
         project.IsProjectPersonnel = true;
         var nonProject = MakeUser(9, requiredHours: 156);
         nonProject.IsProjectPersonnel = false;
@@ -418,7 +418,7 @@ public class ProductivityHourFillTests
         };
 
         var solution = new ShiftSolution();
-        for (var i = 0; i < 6; i++)
+        for (var i = 0; i < 7; i++)
         {
             var day = start.AddDays(22 + i * 2);
             solution.AddAssignment(5, 1, day, ShiftLabel.Morning, false);
@@ -437,10 +437,10 @@ public class ProductivityHourFillTests
         ProductivityHourFillGuard.Enforce(solution, constraints);
 
         var projectAfter = Worked(solution, 5, lookup, constraints);
-        Assert.True(projectBefore > 70 + 5, $"Setup should have project overtime, got {projectBefore}");
+        Assert.True(projectBefore > 72 + 5, $"Setup should have project overtime, got {projectBefore}");
         Assert.True(
-            projectAfter <= 70 + ProjectPersonnelProductivityPriority.CrossTierToleranceHours + 1,
-            $"Project personnel should be capped near required hours, got {projectAfter} (required 70)");
+            projectAfter <= 72 + ProjectPersonnelProductivityPriority.CrossTierToleranceHours + 1,
+            $"Project personnel should be capped near required hours, got {projectAfter} (required 72)");
     }
 
     [Fact]

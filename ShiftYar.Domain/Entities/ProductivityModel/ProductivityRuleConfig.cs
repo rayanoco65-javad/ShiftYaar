@@ -75,7 +75,7 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
         public decimal NightHolidayMultiplier { get; init; } = 1.5m;
         public decimal MaxMonthlyOvertimeHours { get; init; } = 80m;
         public decimal MaxConsecutiveWorkHours { get; init; } = 12m;
-        public decimal HandoverHoursBetweenShifts { get; init; } = 1m;
+        public decimal HandoverHoursBetweenShifts { get; init; } = 0m;
 
         public IReadOnlyCollection<SeniorityReductionBand> SeniorityReductionBands { get; init; } = DefaultSeniorityBands;
         public IReadOnlyCollection<HardshipReductionBand> HardshipReductionBands { get; init; } = DefaultHardshipBands;
