@@ -222,7 +222,11 @@ public static class ShiftEligibilityResolver
             var allowed = WeeklyAlternatingShiftService.GetAllowedDayShiftForDate(date, refStart, user.FirstWeekShiftLabel.Value);
             if (label != allowed)
             {
-                return false;
+                var allowedIsUnavailable = user.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == allowed);
+                if (!allowedIsUnavailable)
+                {
+                    return false;
+                }
             }
         }
 
@@ -275,7 +279,11 @@ public static class ShiftEligibilityResolver
             var allowed = WeeklyAlternatingShiftService.GetAllowedDayShiftForDate(date.Value, refStart, user.FirstWeekShiftLabel.Value);
             if (newLabel != allowed)
             {
-                return false;
+                var allowedIsUnavailable = user.UnavailableShiftSlots.Any(s => s.Date.Date == date.Value.Date && s.ShiftLabel == allowed);
+                if (!allowedIsUnavailable)
+                {
+                    return false;
+                }
             }
         }
 

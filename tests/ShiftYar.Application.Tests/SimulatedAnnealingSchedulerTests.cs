@@ -1231,7 +1231,7 @@ public class SimulatedAnnealingSchedulerTests
                     IsActive = true,
                     ShiftType = ShiftTypes.RotatingShift,
                     IncludedInProductivityPlan = true,
-                    ProductivityRequiredHours = 62, // 7 shifts * 8h + 6*1h handover = 62h
+                    ProductivityRequiredHours = 56, // 7 shifts * 8h = 56h
                     OvertimeConsent = false,
                     MaxMonthlyOvertimeHours = 80,
                     AllowedShiftLabels = new List<ShiftLabel> { ShiftLabel.Morning, ShiftLabel.Evening }
@@ -1244,7 +1244,7 @@ public class SimulatedAnnealingSchedulerTests
                     IsActive = true,
                     ShiftType = ShiftTypes.RotatingShift,
                     IncludedInProductivityPlan = true,
-                    ProductivityRequiredHours = 62,
+                    ProductivityRequiredHours = 56,
                     OvertimeConsent = true,
                     MaxMonthlyOvertimeHours = 80,
                     AllowedShiftLabels = new List<ShiftLabel> { ShiftLabel.Morning, ShiftLabel.Evening }
@@ -1261,13 +1261,13 @@ public class SimulatedAnnealingSchedulerTests
         };
 
         var solution = new ShiftSolution();
-        // User 1 has 8 shifts on even days (0, 2, 4, 6, 8, 10, 12, 14) -> 71h (9h overtime, OvertimeConsent = false)
+        // User 1 has 8 shifts on even days (0, 2, 4, 6, 8, 10, 12, 14) -> 64h (8h overtime, OvertimeConsent = false)
         for (var i = 0; i < 8; i++)
         {
             solution.AddAssignment(1, 1, start.AddDays(i * 2), ShiftLabel.Morning, isOnCall: false);
         }
 
-        // User 2 has 6 shifts on odd days (1, 3, 5, 7, 9, 11) -> 53h (9h deficit, OvertimeConsent = true)
+        // User 2 has 6 shifts on odd days (1, 3, 5, 7, 9, 11) -> 48h (8h deficit, OvertimeConsent = true)
         for (var i = 0; i < 6; i++)
         {
             solution.AddAssignment(2, 2, start.AddDays(i * 2 + 1), ShiftLabel.Evening, isOnCall: false);
@@ -1278,9 +1278,9 @@ public class SimulatedAnnealingSchedulerTests
         var u1Hours = OvertimeBalanceGuard.CalculateHours(solution, constraints.UserConstraints[0], constraints);
         var u2Hours = OvertimeBalanceGuard.CalculateHours(solution, constraints.UserConstraints[1], constraints);
 
-        // User 1 must be brought down to exactly required hours (62h)
-        Assert.Equal(62.0, u1Hours);
-        // User 2 received the transferred shift and reached required hours (62h)
-        Assert.Equal(62.0, u2Hours);
+        // User 1 must be brought down to exactly required hours (56h)
+        Assert.Equal(56.0, u1Hours);
+        // User 2 received the transferred shift and reached required hours (56h)
+        Assert.Equal(56.0, u2Hours);
     }
 }

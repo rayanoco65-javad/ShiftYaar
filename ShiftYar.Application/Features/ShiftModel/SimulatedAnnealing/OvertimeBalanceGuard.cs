@@ -33,6 +33,9 @@ public static class OvertimeBalanceGuard
 
         var lookup = ProductivityWorkedHoursCalculator.BuildShiftInfoLookup(constraints.ShiftRequirements);
 
+        // ۰) فاز اولویت مطلق: جبران کسری کار کلیه پرسنل دارای کسری موظفی از مازاد دیگران (Deficit Elimination)
+        EnforceDeficitFill(solution, constraints, users, lookup);
+
         // ۱) فاز اول: تصفیه اضافه کاری پرسنل بدون رضایت اضافه‌کار (OvertimeConsent == false)
         EnforceNonConsentingRelief(solution, constraints, users, lookup);
 
@@ -41,6 +44,396 @@ public static class OvertimeBalanceGuard
 
         // ۳) فاز سوم: یکنواخت‌سازی و برابرسازی اضافه کاری میان پرسنل هم‌سابقه (Peer Overtime Equalization)
         EnforcePeerOvertimeEqualization(solution, constraints, users, lookup);
+
+        // ۴) پاس پایانی: تضمین عدم وجود کسری کار پس از بازتوزیع اضافه‌کار
+        EnforceDeficitFill(solution, constraints, users, lookup);
+    }
+
+    /// <summary>
+    /// جبران کسری کار پرسنل دارای کسری موظفی از شیفت‌های مازاد پرسنل دارای اضافه کار.
+    /// اولویت برنامه در اختصاص اضافه کار باید به کاربرانی باشد که کسر کار دارند.
+    /// </summary>
+    private static void EnforceDeficitFill(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        List<UserConstraint> users,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup)
+    {
+        for (var pass = 0; pass < 32; pass++)
+        {
+            var progressed = false;
+
+            var deficitUsers = users
+                .Select(u => new
+                {
+                    User = u,
+                    Worked = CalculateHours(solution, u, lookup, constraints),
+                    Required = (double)u.ProductivityRequiredHours!.Value
+                })
+                .Where(x => x.Worked < x.Required - 0.25)
+                .OrderByDescending(x => x.Required - x.Worked)
+                .ToList();
+
+            if (deficitUsers.Count == 0)
+            {
+                break;
+            }
+
+            foreach (var defInfo in deficitUsers)
+            {
+                var receiver = defInfo.User;
+                var receiverWorked = defInfo.Worked;
+                var receiverReq = defInfo.Required;
+
+                var donors = users
+                    .Where(u => u.UserId != receiver.UserId && u.SpecialtyId == receiver.SpecialtyId)
+                    .Select(u => new
+                    {
+                        User = u,
+                        Worked = CalculateHours(solution, u, lookup, constraints),
+                        Required = (double)u.ProductivityRequiredHours!.Value
+                    })
+                    .Where(x => x.Worked > x.Required + 2.0)
+                    .OrderByDescending(x => x.Worked - x.Required)
+                    .ToList();
+
+                if (donors.Count == 0)
+                {
+                    continue;
+                }
+
+                LogAction?.Invoke($"Deficit user: {receiver.UserName} (Id={receiver.UserId}, Worked={receiverWorked:F1}, Req={receiverReq:F1}). Surplus donors count: {donors.Count}");
+
+                // مسیر ۱: انتقال مستقیم شیفت‌های روزانه
+                foreach (var donorInfo in donors)
+                {
+                    var donor = donorInfo.User;
+                    var donorAssignments = solution.GetUserAllAssignments(donor.UserId)
+                        .Where(a => !a.IsOnCall && !IsProtected(constraints, donor, a))
+                        .Where(a => a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening)
+                        .OrderBy(a => a.Date)
+                        .ToList();
+
+                    foreach (var asg in donorAssignments)
+                    {
+                        if (!CanTakeShift(solution, constraints, lookup, receiver, asg))
+                        {
+                            continue;
+                        }
+
+                        if (!WouldPreserveManagerMix(solution, constraints, asg.ShiftId, asg.Date, donor.UserId, receiver.UserId))
+                        {
+                            continue;
+                        }
+
+                        solution.UnlockSkeletonAssignment(donor.UserId, asg.ShiftId, asg.Date);
+                        solution.RemoveAssignment(donor.UserId, asg.ShiftId, asg.Date, force: true);
+                        solution.AddAssignment(receiver.UserId, asg.ShiftId, asg.Date, asg.ShiftLabel, isOnCall: false);
+
+                        LogAction?.Invoke($"Route 1 success: Transferred {asg.ShiftLabel} on {asg.Date:yyyy-MM-dd} from {donor.UserName} to {receiver.UserName}");
+                        progressed = true;
+                        break;
+                    }
+
+                    if (progressed) break;
+                }
+
+                if (progressed) break;
+
+                // مسیر ۲: اگر انتقال مستقیم ممکن نبود و کاربر شیفت شب دارد، جابه‌جایی شب با اهداکنندگان مازاد جهت آزادسازی روز
+                if (receiver.HasExactNightQuota || receiver.ExactNightShiftCount.HasValue)
+                {
+                    var nightShiftReq = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftLabel == ShiftLabel.Night);
+                    if (nightShiftReq != null)
+                    {
+                        var receiverNights = solution.GetUserAllAssignments(receiver.UserId)
+                            .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall)
+                            .OrderBy(a => a.Date)
+                            .ToList();
+
+                        LogAction?.Invoke($"Route 2 check for {receiver.UserName}: {receiverNights.Count} nights found.");
+
+                        foreach (var rNight in receiverNights.Where(n => !IsProtected(constraints, receiver, n)))
+                        {
+                            var freedDate = rNight.Date.Date;
+                            var receiverAsgsWithoutRNight = solution.GetUserAllAssignments(receiver.UserId)
+                                .Where(a => a.Date.Date != freedDate)
+                                .ToList();
+
+                            var dayCandidatesOnFreedDate = solution.Assignments.Values
+                                .Where(a => a.Date.Date == freedDate && !a.IsOnCall && (a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening))
+                                .Where(a => a.UserId != receiver.UserId)
+                                .Select(a => new
+                                {
+                                    Assignment = a,
+                                    Donor = users.FirstOrDefault(u => u.UserId == a.UserId),
+                                    Surplus = users.Where(u => u.UserId == a.UserId)
+                                        .Select(u => CalculateHours(solution, u, lookup, constraints) - (double)u.ProductivityRequiredHours!.Value)
+                                        .FirstOrDefault()
+                                })
+                                .Where(x => x.Donor != null && x.Surplus > 2.0 && !IsProtected(constraints, x.Donor, x.Assignment))
+                                .OrderByDescending(x =>
+                                {
+                                    var dAsgs = solution.GetUserAllAssignments(x.Donor!.UserId)
+                                        .Where(a => !(a.ShiftId == x.Assignment.ShiftId && a.Date.Date == freedDate))
+                                        .ToList();
+                                    var canTakeNight = !x.Donor.UnavailableDates.Any(d => d.Date == freedDate)
+                                        && !x.Donor.UnavailableShiftSlots.Any(s => s.Date.Date == freedDate && s.ShiftLabel == ShiftLabel.Night)
+                                        && ShiftEligibilityResolver.MayTakeLabelOnDate(x.Donor, ShiftLabel.Night, freedDate)
+                                        && !AdjacentShiftRestRules.WouldConflict(dAsgs, freedDate, ShiftLabel.Night, constraints)
+                                        && !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(dAsgs, x.Donor, freedDate, constraints.HardRules.EnforceMaxConsecutiveShifts)
+                                        && WouldPreserveManagerMix(solution, constraints, nightShiftReq.ShiftId, freedDate, receiver.UserId, x.Donor.UserId);
+                                    return canTakeNight ? 1 : 0;
+                                })
+                                .ThenByDescending(x => x.Surplus)
+                                .ToList();
+
+                            LogAction?.Invoke($"  freedDate={freedDate:yyyy-MM-dd} (Day {freedDate.Day}): {dayCandidatesOnFreedDate.Count} day donors available.");
+
+                            foreach (var dayCand in dayCandidatesOnFreedDate)
+                            {
+                                var dayShiftAsg = dayCand.Assignment;
+                                var dayDonor = dayCand.Donor!;
+
+                                if (receiver.UnavailableShiftSlots.Any(s => s.Date.Date == freedDate && s.ShiftLabel == dayShiftAsg.ShiftLabel))
+                                    continue;
+
+                                if (!ShiftEligibilityResolver.MayTakeLabelOnDate(receiver, dayShiftAsg.ShiftLabel, freedDate))
+                                    continue;
+
+                                if (AdjacentShiftRestRules.WouldConflict(receiverAsgsWithoutRNight, freedDate, dayShiftAsg.ShiftLabel, constraints))
+                                    continue;
+
+                                if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(receiverAsgsWithoutRNight, receiver, freedDate, constraints.HardRules.EnforceMaxConsecutiveShifts))
+                                    continue;
+
+                                if (!WouldPreserveManagerMix(solution, constraints, dayShiftAsg.ShiftId, freedDate, dayDonor.UserId, receiver.UserId))
+                                    continue;
+
+                                var receiverAsgsWithNewDay = receiverAsgsWithoutRNight
+                                    .Append(new SaShiftAssignment { UserId = receiver.UserId, ShiftId = dayShiftAsg.ShiftId, Date = freedDate, ShiftLabel = dayShiftAsg.ShiftLabel, IsOnCall = false })
+                                    .ToList();
+
+                                var candidateTargetDates = constraints.ShiftRequirements
+                                    .Where(s => s.ShiftLabel == ShiftLabel.Night)
+                                    .SelectMany(_ => constraints.UserConstraints.SelectMany(u => solution.GetUserAllAssignments(u.UserId)))
+                                    .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall && a.Date.Date != freedDate)
+                                    .Select(a => a.Date.Date)
+                                    .Distinct()
+                                    .Where(d => !receiver.UnavailableDates.Any(x => x.Date == d)
+                                             && !receiver.UnavailableShiftSlots.Any(s => s.Date.Date == d && s.ShiftLabel == ShiftLabel.Night)
+                                             && !AdjacentShiftRestRules.WouldConflict(receiverAsgsWithNewDay, d, ShiftLabel.Night, constraints)
+                                             && !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(receiverAsgsWithNewDay, receiver, d, constraints.HardRules.EnforceMaxConsecutiveShifts))
+                                    .OrderByDescending(d => d)
+                                    .ToList();
+
+                                LogAction?.Invoke($"    DayDonor={dayDonor.UserName}, shift={dayShiftAsg.ShiftLabel}: {candidateTargetDates.Count} target dates: [{string.Join(",", candidateTargetDates.Select(d=>d.Day))}]");
+
+                                var dayDonorAsgsWithoutDayShift = solution.GetUserAllAssignments(dayDonor.UserId)
+                                    .Where(a => !(a.ShiftId == dayShiftAsg.ShiftId && a.Date.Date == freedDate))
+                                    .ToList();
+                                var unavailDate = dayDonor.UnavailableDates.Any(x => x.Date == freedDate);
+                                var unavailSlot = dayDonor.UnavailableShiftSlots.Any(s => s.Date.Date == freedDate && s.ShiftLabel == ShiftLabel.Night);
+                                var eligibility = ShiftEligibilityResolver.MayTakeLabelOnDate(dayDonor, ShiftLabel.Night, freedDate);
+                                var adjacent = AdjacentShiftRestRules.WouldConflict(dayDonorAsgsWithoutDayShift, freedDate, ShiftLabel.Night, constraints);
+                                var maxConsec = MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(dayDonorAsgsWithoutDayShift, dayDonor, freedDate, constraints.HardRules.EnforceMaxConsecutiveShifts);
+                                var mgrMix = WouldPreserveManagerMix(solution, constraints, nightShiftReq.ShiftId, freedDate, receiver.UserId, dayDonor.UserId);
+
+                                var dayDonorCanTakeFreedNight = !unavailDate && !unavailSlot && eligibility && !adjacent && !maxConsec && mgrMix;
+
+                                LogAction?.Invoke($"      DayDonor {dayDonor.UserName} canTakeNight={dayDonorCanTakeFreedNight} (unavailDate={unavailDate}, unavailSlot={unavailSlot}, elig={eligibility}, adj={adjacent}, maxConsec={maxConsec}, mgrMix={mgrMix})");
+
+                                // مسیر ۲-الف: dayDonor خود شیفت شب تاریخ freedDate را می‌گیرد، و یک اهداکننده در targetDate شب را واگذار می‌کند
+                                if (dayDonorCanTakeFreedNight)
+                                {
+                                    foreach (var targetDate in candidateTargetDates)
+                                    {
+                                        var allNightAssignees = solution.GetShiftAssignments(nightShiftReq.ShiftId, targetDate)
+                                            .Where(a => !a.IsOnCall && a.UserId != receiver.UserId)
+                                            .Select(a => constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId))
+                                            .Where(u => u != null)
+                                            .ToList();
+
+                                        foreach (var u in allNightAssignees)
+                                        {
+                                            if (u!.UserId != dayDonor.UserId)
+                                            {
+                                                var uSurplus = CalculateHours(solution, u, lookup, constraints) - (double)u.ProductivityRequiredHours!.Value;
+                                                if (uSurplus < 2.0) continue;
+                                            }
+
+                                            if (!WouldPreserveManagerMix(solution, constraints, nightShiftReq.ShiftId, targetDate, u.UserId, receiver.UserId))
+                                                continue;
+
+                                            var uNights = solution.GetUserAllAssignments(u.UserId).Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+                                            DateTime? balanceDate = null;
+                                            SaShiftAssignment? uBalanceDayAsg = null;
+
+                                            // اگر اهداکننده شب سهمیه دقیق دارد و با واگذاری این شب زیر سهمیه می‌رود، با شیفت شب دیگری از dayDonor تعادل برقرار شود
+                                            if (u.ExactNightShiftCount.HasValue && uNights <= u.ExactNightShiftCount.Value && u.UserId != dayDonor.UserId)
+                                            {
+                                                var dayDonorOtherNights = solution.GetUserAllAssignments(dayDonor.UserId)
+                                                    .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall && a.Date.Date != freedDate && a.Date.Date != targetDate)
+                                                    .ToList();
+
+                                                foreach (var dNight in dayDonorOtherNights)
+                                                {
+                                                    var bDate = dNight.Date.Date;
+                                                    if (u.UnavailableDates.Any(x => x.Date == bDate) || u.UnavailableShiftSlots.Any(s => s.Date.Date == bDate && s.ShiftLabel == ShiftLabel.Night))
+                                                        continue;
+
+                                                    var uAsgsWithoutTarget = solution.GetUserAllAssignments(u.UserId)
+                                                        .Where(a => a.Date.Date != targetDate && a.Date.Date != bDate)
+                                                        .ToList();
+
+                                                    if (AdjacentShiftRestRules.WouldConflict(uAsgsWithoutTarget, bDate, ShiftLabel.Night, constraints))
+                                                        continue;
+
+                                                    if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(uAsgsWithoutTarget, u, bDate, constraints.HardRules.EnforceMaxConsecutiveShifts))
+                                                        continue;
+
+                                                    if (!WouldPreserveManagerMix(solution, constraints, nightShiftReq.ShiftId, bDate, dayDonor.UserId, u.UserId))
+                                                        continue;
+
+                                                    var dayDonorAsgsWithFreedNight = dayDonorAsgsWithoutDayShift
+                                                        .Append(new SaShiftAssignment { UserId = dayDonor.UserId, ShiftId = nightShiftReq.ShiftId, Date = freedDate, ShiftLabel = ShiftLabel.Night, IsOnCall = false })
+                                                        .Where(a => a.Date.Date != bDate)
+                                                        .ToList();
+
+                                                    var uDayAsgOnBDate = solution.GetUserAssignments(u.UserId, bDate).FirstOrDefault(a => !a.IsOnCall);
+                                                    if (uDayAsgOnBDate != null)
+                                                    {
+                                                        if (dayDonor.UnavailableDates.Any(x => x.Date == bDate) || dayDonor.UnavailableShiftSlots.Any(s => s.Date.Date == bDate && s.ShiftLabel == uDayAsgOnBDate.ShiftLabel))
+                                                            continue;
+                                                        if (!ShiftEligibilityResolver.MayTakeLabelOnDate(dayDonor, uDayAsgOnBDate.ShiftLabel, bDate))
+                                                            continue;
+                                                        if (AdjacentShiftRestRules.WouldConflict(dayDonorAsgsWithFreedNight, bDate, uDayAsgOnBDate.ShiftLabel, constraints))
+                                                            continue;
+                                                        if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(dayDonorAsgsWithFreedNight, dayDonor, bDate, constraints.HardRules.EnforceMaxConsecutiveShifts))
+                                                            continue;
+                                                        if (!WouldPreserveManagerMix(solution, constraints, uDayAsgOnBDate.ShiftId, bDate, u.UserId, dayDonor.UserId))
+                                                            continue;
+                                                    }
+
+                                                    balanceDate = bDate;
+                                                    uBalanceDayAsg = uDayAsgOnBDate;
+                                                    break;
+                                                }
+
+                                                if (balanceDate == null)
+                                                    continue;
+                                            }
+
+                                            solution.UnlockSkeletonAssignment(receiver.UserId, nightShiftReq.ShiftId, freedDate);
+                                            solution.RemoveAssignment(receiver.UserId, nightShiftReq.ShiftId, freedDate, force: true);
+
+                                            solution.UnlockSkeletonAssignment(dayDonor.UserId, dayShiftAsg.ShiftId, freedDate);
+                                            solution.RemoveAssignment(dayDonor.UserId, dayShiftAsg.ShiftId, freedDate, force: true);
+                                            solution.AddAssignment(dayDonor.UserId, nightShiftReq.ShiftId, freedDate, ShiftLabel.Night, isOnCall: false);
+
+                                            solution.UnlockSkeletonAssignment(u.UserId, nightShiftReq.ShiftId, targetDate);
+                                            solution.RemoveAssignment(u.UserId, nightShiftReq.ShiftId, targetDate, force: true);
+
+                                            solution.AddAssignment(receiver.UserId, nightShiftReq.ShiftId, targetDate, ShiftLabel.Night, isOnCall: false);
+                                            solution.AddAssignment(receiver.UserId, dayShiftAsg.ShiftId, freedDate, dayShiftAsg.ShiftLabel, isOnCall: false);
+
+                                            if (balanceDate.HasValue)
+                                            {
+                                                var bDate = balanceDate.Value;
+                                                if (uBalanceDayAsg != null)
+                                                {
+                                                    solution.UnlockSkeletonAssignment(u.UserId, uBalanceDayAsg.ShiftId, bDate);
+                                                    solution.RemoveAssignment(u.UserId, uBalanceDayAsg.ShiftId, bDate, force: true);
+                                                    solution.AddAssignment(dayDonor.UserId, uBalanceDayAsg.ShiftId, bDate, uBalanceDayAsg.ShiftLabel, isOnCall: false);
+                                                }
+
+                                                solution.UnlockSkeletonAssignment(dayDonor.UserId, nightShiftReq.ShiftId, bDate);
+                                                solution.RemoveAssignment(dayDonor.UserId, nightShiftReq.ShiftId, bDate, force: true);
+                                                solution.AddAssignment(u.UserId, nightShiftReq.ShiftId, bDate, ShiftLabel.Night, isOnCall: false);
+                                            }
+
+                                            LogAction?.Invoke($"Route 2A success: Gave {receiver.UserName} {dayDonor.UserName}'s {dayShiftAsg.ShiftLabel} on Day {freedDate.Day}, moved {dayDonor.UserName} to Night on Day {freedDate.Day}, gave {receiver.UserName} {u.UserName}'s Night on Day {targetDate.Day}" + (balanceDate.HasValue ? $", and balanced night between {u.UserName} and {dayDonor.UserName} on Day {balanceDate.Value.Day}" : ""));
+                                            progressed = true;
+                                            break;
+                                        }
+
+                                        if (progressed) break;
+                                    }
+                                }
+
+                                if (progressed) break;
+
+                                // مسیر ۲-ب: اهداکننده شب در targetDate شیفت شب freedDate را می‌گیرد
+                                foreach (var targetDate in candidateTargetDates)
+                                {
+                                    var allNightAssignees = solution.GetShiftAssignments(nightShiftReq.ShiftId, targetDate)
+                                        .Where(a => !a.IsOnCall && a.UserId != receiver.UserId)
+                                        .Select(a => constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId))
+                                        .Where(u => u != null)
+                                        .ToList();
+
+                                    var candidateNightDonors = new List<UserConstraint>();
+                                    foreach (var u in allNightAssignees)
+                                    {
+                                        var reasons = new List<string>();
+                                        if (solution.HasAssignment(u!.UserId, nightShiftReq.ShiftId, freedDate)) reasons.Add("AlreadyHasFreedNight");
+                                        if (u.UnavailableDates.Any(x => x.Date == freedDate)) reasons.Add("UnavailDateFreed");
+                                        if (u.UnavailableShiftSlots.Any(s => s.Date.Date == freedDate && s.ShiftLabel == ShiftLabel.Night)) reasons.Add("UnavailSlotFreed");
+                                        var donorAsgsWithoutTarget = solution.GetUserAllAssignments(u!.UserId)
+                                            .Where(a => a.Date.Date != targetDate && !(u.UserId == dayDonor.UserId && a.ShiftId == dayShiftAsg.ShiftId && a.Date.Date == freedDate))
+                                            .ToList();
+                                        if (AdjacentShiftRestRules.WouldConflict(donorAsgsWithoutTarget, freedDate, ShiftLabel.Night, constraints)) reasons.Add("AdjacentConflictFreed");
+                                        if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(donorAsgsWithoutTarget, u, freedDate, constraints.HardRules.EnforceMaxConsecutiveShifts)) reasons.Add("MaxConsecutiveWorkdays");
+                                        if (!WouldPreserveManagerMix(solution, constraints, nightShiftReq.ShiftId, targetDate, u.UserId, receiver.UserId)) reasons.Add("BreakMgrMixTarget");
+                                        if (!WouldPreserveManagerMix(solution, constraints, nightShiftReq.ShiftId, freedDate, receiver.UserId, u.UserId)) reasons.Add("BreakMgrMixFreed");
+
+                                        if (reasons.Count == 0)
+                                        {
+                                            candidateNightDonors.Add(u);
+                                        }
+                                        else
+                                        {
+                                            LogAction?.Invoke($"        Assignee {u.UserName} rejected for TargetDate {targetDate.Day}->FreedDate {freedDate.Day}: [{string.Join(", ", reasons)}]");
+                                        }
+                                    }
+
+                                    var nightDonor = candidateNightDonors.FirstOrDefault();
+                                    if (nightDonor != null)
+                                    {
+                                        solution.UnlockSkeletonAssignment(receiver.UserId, nightShiftReq.ShiftId, freedDate);
+                                        solution.RemoveAssignment(receiver.UserId, nightShiftReq.ShiftId, freedDate, force: true);
+
+                                        solution.UnlockSkeletonAssignment(nightDonor.UserId, nightShiftReq.ShiftId, targetDate);
+                                        solution.RemoveAssignment(nightDonor.UserId, nightShiftReq.ShiftId, targetDate, force: true);
+
+                                        solution.AddAssignment(nightDonor.UserId, nightShiftReq.ShiftId, freedDate, ShiftLabel.Night, isOnCall: false);
+                                        solution.AddAssignment(receiver.UserId, nightShiftReq.ShiftId, targetDate, ShiftLabel.Night, isOnCall: false);
+
+                                        solution.UnlockSkeletonAssignment(dayDonor.UserId, dayShiftAsg.ShiftId, freedDate);
+                                        solution.RemoveAssignment(dayDonor.UserId, dayShiftAsg.ShiftId, freedDate, force: true);
+                                        solution.AddAssignment(receiver.UserId, dayShiftAsg.ShiftId, freedDate, dayShiftAsg.ShiftLabel, isOnCall: false);
+                                        LogAction?.Invoke($"Route 2B success: Swapped night {freedDate.Day}<->{targetDate.Day} with {nightDonor.UserName} and gave {dayDonor.UserName}'s {dayShiftAsg.ShiftLabel} on Day {freedDate.Day} to {receiver.UserName}");
+                                        progressed = true;
+                                        break;
+                                    }
+                                }
+
+                                if (progressed) break;
+                            }
+
+                            if (progressed) break;
+                        }
+                    }
+                }
+
+                if (progressed) break;
+            }
+
+            if (!progressed)
+            {
+                break;
+            }
+        }
     }
 
     /// <summary>
@@ -279,6 +672,12 @@ public static class OvertimeBalanceGuard
 
                         // جلوگیری از معکوس شدن جایگاه دهنده و گیرنده یا نوسان پینگ‌پونگی
                         if (newDonorDelta < newReceiverDelta - 0.5)
+                        {
+                            continue;
+                        }
+
+                        // اهداکننده نباید به کسر کار بیفتد
+                        if (donorInfo.Worked - shiftEffectiveHours < donorInfo.Required - 0.25)
                         {
                             continue;
                         }
@@ -595,6 +994,12 @@ public static class OvertimeBalanceGuard
 
                             // گیرنده پس از دریافت شیفت نباید از دهنده بیشتر شود (مهار قطعی پینگ‌پنگ)
                             if (newReceiverOt > newDonorOt + 0.5)
+                            {
+                                continue;
+                            }
+
+                            // اهداکننده نباید به کسر کار بیفتد
+                            if (newDonorOt < -0.25)
                             {
                                 continue;
                             }

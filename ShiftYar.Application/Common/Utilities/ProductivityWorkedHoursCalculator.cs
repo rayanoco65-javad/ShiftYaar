@@ -9,10 +9,10 @@ namespace ShiftYar.Application.Common.Utilities;
 /// </summary>
 public static class ProductivityWorkedHoursCalculator
 {
-    public const double DefaultNightHolidayMultiplier = 1.5;
-    public const double DefaultHandoverHours = 0.0;
-    public const double DefaultMaxConsecutiveWorkHours = 12.0;
-    public const double DefaultMaxMonthlyOvertimeHours = 80.0;
+    public const double DefaultNightHolidayMultiplier = 1.5;  //ضریب شب و تعطیل
+    public const double DefaultHandoverHours = 0.0;  //مقدار پیش‌فرض ساعت تحویل کار
+    public const double DefaultMaxConsecutiveWorkHours = 12.0;  //حداکثر ساعات کار متوالی
+    public const double DefaultMaxMonthlyOvertimeHours = 80.0;  //حداکثر اضافه کار ماهانه
 
     public sealed record ShiftWorkInfo(
         int ShiftId,

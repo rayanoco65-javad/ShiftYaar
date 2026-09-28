@@ -3158,4 +3158,223 @@ public class DiagnoseDept2NightQuotasTests
         }
         System.IO.File.WriteAllLines(@"C:\Users\Paria\.gemini\antigravity-ide\brain\01fa0c14-6b84-4a65-a8de-0b575391d003\scratch\u20_diagnosis.txt", outputLines);
     }
+
+    [Fact]
+    public void Test_TrackDeficitUsers_Mehr1405()
+    {
+        var path = @"C:\Users\Paria\.gemini\antigravity-ide\brain\ed37ed7b-afd1-467e-bdb4-ec225833f7bf\scratch\dept2_1405_07_constraints.json";
+        var json = System.IO.File.ReadAllText(path);
+        var constraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(json)!;
+
+        constraints.EnableOvertimeDistributionBySeniority = true;
+        constraints.OvertimePreferenceType = 1; // OvertimeAvoiding
+        constraints.SoftWeights.OvertimeDistributionWeight = 2.0;
+        constraints.OvertimeSeniorityDistributionSlope = 0.5;
+
+        var lookup = ProductivityWorkedHoursCalculator.BuildShiftInfoLookup(constraints.ShiftRequirements);
+
+        void PrintUserHours(string stage, ShiftSolution sol)
+        {
+            _output.WriteLine($"\n--- {stage} ---");
+            foreach (var u in constraints.UserConstraints.OrderBy(u => u.UserId))
+            {
+                var h = OvertimeBalanceGuard.CalculateHours(sol, u, lookup, constraints);
+                var req = (double)u.ProductivityRequiredHours!.Value;
+                var ot = h - req;
+                var asgs = sol.GetUserAllAssignments(u.UserId).Where(a => !a.IsOnCall).ToList();
+                if (ot < -0.1 || u.UserId == 14 || u.UserId == 18 || u.UserId == 13 || u.UserId == 20)
+                {
+                    _output.WriteLine($"  U{u.UserId,2} ({u.UserName,-20}): Req={req,5:F1}, Worked={h,5:F1}, OT={ot,5:F1} (M:{asgs.Count(a=>a.ShiftLabel==ShiftLabel.Morning)}, E:{asgs.Count(a=>a.ShiftLabel==ShiftLabel.Evening)}, N:{asgs.Count(a=>a.ShiftLabel==ShiftLabel.Night)})");
+                }
+            }
+            var u18Nights = sol.GetUserAllAssignments(18).Where(a => a.ShiftLabel == ShiftLabel.Night).OrderBy(a => a.Date).Select(a => $"{a.Date:yyyy-MM-dd}(Day {(a.Date - constraints.StartDate.Date).Days + 1})");
+            _output.WriteLine($"  -> U18 Nights: [{string.Join(", ", u18Nights)}]");
+        }
+
+        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            MaxIterations = 4000,
+            MaxIterationsWithoutImprovement = 600
+        });
+
+        var initSol = scheduler.GenerateInitialSolution();
+        PrintUserHours("1. Initial Solution", initSol);
+
+        var saSol = scheduler.Optimize();
+        PrintUserHours("2. After SA Optimize", saSol);
+
+        ExactNightQuotaGuard.ForceSatisfyAllDeficits(saSol, constraints);
+        ExactNightQuotaGuard.GlobalRebalanceNightQuotas(saSol, constraints);
+        PrintUserHours("3. After Night Quotas", saSol);
+
+        _output.WriteLine("\n=== ASSIGNMENTS ON DAYS 28, 29, 30 ===");
+        for (var day = 28; day <= 30; day++)
+        {
+            var d = constraints.StartDate.Date.AddDays(day - 1);
+            _output.WriteLine($"Day {day} ({d:yyyy-MM-dd}):");
+            foreach (var a in saSol.Assignments.Values.Where(x => x.Date.Date == d).OrderBy(x => x.ShiftLabel).ThenBy(x => x.UserId))
+            {
+                var u = constraints.UserConstraints.First(uc => uc.UserId == a.UserId);
+                _output.WriteLine($"  {a.ShiftLabel,-8}: U{u.UserId,2} ({u.UserName})");
+            }
+        }
+
+        ShiftCoverageGuard.StripExcessCoverage(saSol, constraints);
+        ShiftCoverageGuard.FillRemainingAfterForceApply(saSol, constraints);
+        ShiftCoverageGuard.StripExcessCoverage(saSol, constraints);
+        PrintUserHours("4. After Coverage Strip/Fill 1", saSol);
+
+        ProductivityHourFillGuard.EnforceFinalBalance(saSol, constraints);
+        PrintUserHours("5. After ProductivityHourFillGuard.EnforceFinalBalance", saSol);
+
+        OvertimeBalanceGuard.Enforce(saSol, constraints);
+        PrintUserHours("6. After OvertimeBalanceGuard.Enforce", saSol);
+
+        ShiftCoverageGuard.StripExcessCoverage(saSol, constraints);
+        ShiftCoverageGuard.FillRemainingAfterForceApply(saSol, constraints);
+        ShiftCoverageGuard.StripExcessCoverage(saSol, constraints);
+        PrintUserHours("7. After Coverage Strip/Fill 2", saSol);
+
+        ProductivityHourFillGuard.EnforceFinalBalance(saSol, constraints);
+        PrintUserHours("8. After ProductivityHourFillGuard.EnforceFinalBalance 2", saSol);
+
+
+        var u14 = constraints.UserConstraints.First(u => u.UserId == 14);
+        var u14Hours = OvertimeBalanceGuard.CalculateHours(saSol, u14, lookup, constraints);
+        _output.WriteLine($"\n--- DETAILED CHECK FOR U14 (Hours={u14Hours}, Req={u14.ProductivityRequiredHours}) ---");
+        for (var day = 1; day <= 30; day++)
+        {
+            var d = constraints.StartDate.Date.AddDays(day - 1);
+            var isUnavailDate = u14.UnavailableDates.Any(x => x.Date == d);
+            var existing = saSol.GetUserAssignments(14, d).ToList();
+            if (existing.Count > 0)
+            {
+                _output.WriteLine($"Day {day,2} ({d:yyyy-MM-dd}): Assigned {string.Join(",", existing.Select(a=>a.ShiftLabel))}");
+            }
+            else if (isUnavailDate)
+            {
+                _output.WriteLine($"Day {day,2} ({d:yyyy-MM-dd}): Unavailable Date");
+            }
+            else
+            {
+                // Free!
+                var unavailSlots = u14.UnavailableShiftSlots.Where(s => s.Date.Date == d).Select(s => s.ShiftLabel).ToList();
+                _output.WriteLine($"Day {day,2} ({d:yyyy-MM-dd}): FREE! UnavailSlots=[{string.Join(",", unavailSlots)}]");
+                foreach (var shift in constraints.ShiftRequirements.OrderBy(s => s.ShiftLabel))
+                {
+                    if (unavailSlots.Contains(shift.ShiftLabel)) continue;
+                    var asg = new SaShiftAssignment { UserId = 14, ShiftId = shift.ShiftId, Date = d, ShiftLabel = shift.ShiftLabel, IsOnCall = false };
+                    
+                    var reasons = new List<string>();
+                    if (u14.UnavailableDates.Any(x => x.Date == d)) reasons.Add("UnavailDate");
+                    if (u14.UnavailableShiftSlots.Any(s => s.Date.Date == d && s.ShiftLabel == shift.ShiftLabel)) reasons.Add("UnavailSlot");
+                    var existingLabels = saSol.GetUserAssignments(14, d).Select(a => a.ShiftLabel).ToList();
+                    var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay) : 2;
+                    if (!ShiftEligibilityResolver.IsAssignmentAllowed(u14, existingLabels, shift.ShiftLabel, maxPerDay, constraints.HardRules.ForbidDuplicateDailyAssignments, d)) reasons.Add("DailyAssignmentAllowed");
+                    if (AdjacentShiftRestRules.WouldConflict(saSol.GetUserAllAssignments(14), d, shift.ShiftLabel, constraints)) reasons.Add("AdjacentConflict");
+                    if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(saSol, constraints, u14, d)) reasons.Add("MaxConsecutiveWorkdays");
+                    var maxAllowed = DayShiftQuotaEligibility.GetMaxAllowedTotal(u14, shift.ShiftLabel);
+                    var currentCount = saSol.GetUserAllAssignments(14).Count(a => a.ShiftLabel == shift.ShiftLabel && !a.IsOnCall);
+                    if (currentCount >= maxAllowed) reasons.Add($"DayShiftQuota(cur={currentCount},max={maxAllowed})");
+                    var projected = saSol.GetUserAllAssignments(14).ToList();
+                    projected.Add(asg);
+                    var worked = ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(projected, lookup, constraints.IsHoliday, uid => uid == 14 && u14.IncludedInProductivityPlan);
+                    if (ProjectPersonnelProductivityPriority.WouldExceedSchedulingCap(u14, worked)) reasons.Add($"ExceedSchedulingCap(w={worked},cap={ProjectPersonnelProductivityPriority.GetMaxAllowedSchedulingHours(u14)})");
+                    
+                    var assignees = saSol.GetShiftAssignments(shift.ShiftId, d).Where(a => !a.IsOnCall).Select(a => $"{constraints.UserConstraints.First(u=>u.UserId==a.UserId).UserName}(Id={a.UserId},Worked={OvertimeBalanceGuard.CalculateHours(saSol, constraints.UserConstraints.First(u=>u.UserId==a.UserId), lookup, constraints):F1})").ToList();
+                    _output.WriteLine($"    -> Could take {shift.ShiftLabel}? FailReasons=[{string.Join(", ", reasons)}]. Current assignees: [{string.Join("; ", assignees)}]");
+                }
+            }
+        }
+
+        // Check why U18 has deficit
+        var u18 = constraints.UserConstraints.First(u => u.UserId == 18);
+        var u18Hours = OvertimeBalanceGuard.CalculateHours(saSol, u18, lookup, constraints);
+        _output.WriteLine($"\n--- DETAILED CHECK FOR U18 (Hours={u18Hours}, Req={u18.ProductivityRequiredHours}) ---");
+        for (var day = 1; day <= 30; day++)
+        {
+            var d = constraints.StartDate.Date.AddDays(day - 1);
+            var isUnavailDate = u18.UnavailableDates.Any(x => x.Date == d);
+            var existing = saSol.GetUserAssignments(18, d).ToList();
+            if (existing.Count > 0)
+            {
+                _output.WriteLine($"Day {day,2} ({d:yyyy-MM-dd}): Assigned {string.Join(",", existing.Select(a=>a.ShiftLabel))}");
+            }
+            else if (isUnavailDate)
+            {
+                _output.WriteLine($"Day {day,2} ({d:yyyy-MM-dd}): Unavailable Date");
+            }
+            else
+            {
+                var unavailSlots = u18.UnavailableShiftSlots.Where(s => s.Date.Date == d).Select(s => s.ShiftLabel).ToList();
+                _output.WriteLine($"Day {day,2} ({d:yyyy-MM-dd}): FREE! UnavailSlots=[{string.Join(",", unavailSlots)}]");
+                foreach (var shift in constraints.ShiftRequirements.OrderBy(s => s.ShiftLabel))
+                {
+                    if (unavailSlots.Contains(shift.ShiftLabel)) continue;
+                    var asg = new SaShiftAssignment { UserId = 18, ShiftId = shift.ShiftId, Date = d, ShiftLabel = shift.ShiftLabel, IsOnCall = false };
+                    
+                    var reasons = new List<string>();
+                    if (u18.UnavailableDates.Any(x => x.Date == d)) reasons.Add("UnavailDate");
+                    if (u18.UnavailableShiftSlots.Any(s => s.Date.Date == d && s.ShiftLabel == shift.ShiftLabel)) reasons.Add("UnavailSlot");
+                    var existingLabels = saSol.GetUserAssignments(18, d).Select(a => a.ShiftLabel).ToList();
+                    var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay) : 2;
+                    if (!ShiftEligibilityResolver.IsAssignmentAllowed(u18, existingLabels, shift.ShiftLabel, maxPerDay, constraints.HardRules.ForbidDuplicateDailyAssignments, d)) reasons.Add("DailyAssignmentAllowed");
+                    if (AdjacentShiftRestRules.WouldConflict(saSol.GetUserAllAssignments(18), d, shift.ShiftLabel, constraints)) reasons.Add("AdjacentConflict");
+                    if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(saSol, constraints, u18, d)) reasons.Add("MaxConsecutiveWorkdays");
+                    var maxAllowed = DayShiftQuotaEligibility.GetMaxAllowedTotal(u18, shift.ShiftLabel);
+                    var currentCount = saSol.GetUserAllAssignments(18).Count(a => a.ShiftLabel == shift.ShiftLabel && !a.IsOnCall);
+                    if (currentCount >= maxAllowed) reasons.Add($"DayShiftQuota(cur={currentCount},max={maxAllowed})");
+                    var projected = saSol.GetUserAllAssignments(18).ToList();
+                    projected.Add(asg);
+                    var worked = ProductivityWorkedHoursCalculator.CalculateEffectiveWorkedHours(projected, lookup, constraints.IsHoliday, uid => uid == 18 && u18.IncludedInProductivityPlan);
+                    if (ProjectPersonnelProductivityPriority.WouldExceedSchedulingCap(u18, worked)) reasons.Add($"ExceedSchedulingCap(w={worked},cap={ProjectPersonnelProductivityPriority.GetMaxAllowedSchedulingHours(u18)})");
+                    
+                    var assignees = saSol.GetShiftAssignments(shift.ShiftId, d).Where(a => !a.IsOnCall).Select(a => $"{constraints.UserConstraints.First(u=>u.UserId==a.UserId).UserName}(Id={a.UserId},Worked={OvertimeBalanceGuard.CalculateHours(saSol, constraints.UserConstraints.First(u=>u.UserId==a.UserId), lookup, constraints):F1})").ToList();
+                    _output.WriteLine($"    -> Could take {shift.ShiftLabel}? FailReasons=[{string.Join(", ", reasons)}]. Current assignees: [{string.Join("; ", assignees)}]");
+                }
+            }
+        }
+
+        // --- EXECUTE AUTOMATIC OVERTIME AND DEFICIT ENFORCEMENT ---
+        _output.WriteLine($"\n=== EXECUTING OvertimeBalanceGuard.Enforce ===");
+        OvertimeBalanceGuard.LogAction = s => _output.WriteLine(s);
+        OvertimeBalanceGuard.Enforce(saSol, constraints);
+
+
+        // Print final hours
+        _output.WriteLine("\n=== HOURS AFTER SIMULATED REPAIRS ===");
+        foreach (var u in constraints.UserConstraints.OrderBy(u => u.UserId))
+        {
+            var h = OvertimeBalanceGuard.CalculateHours(saSol, u, lookup, constraints);
+            var req = (double)u.ProductivityRequiredHours!.Value;
+            var ot = h - req;
+            var asgs = saSol.GetUserAllAssignments(u.UserId).Where(a => !a.IsOnCall).ToList();
+            if (ot < -0.1 || u.UserId == 14 || u.UserId == 18 || u.UserId == 13 || u.UserId == 20)
+            {
+                _output.WriteLine($"  U{u.UserId,2} ({u.UserName,-20}): Req={req,5:F1}, Worked={h,5:F1}, OT={ot,5:F1} (M:{asgs.Count(a=>a.ShiftLabel==ShiftLabel.Morning)}, E:{asgs.Count(a=>a.ShiftLabel==ShiftLabel.Evening)}, N:{asgs.Count(a=>a.ShiftLabel==ShiftLabel.Night)})");
+            }
+        }
+
+        // Validate all rules on saSol!
+        var violations = new List<string>();
+        violations.AddRange(DailyDuplicateAssignmentGuard.GetViolations(saSol, constraints));
+        violations.AddRange(AdjacentShiftRestGuard.GetViolations(saSol, constraints));
+        violations.AddRange(MaxConsecutiveWorkdayRules.GetViolations(saSol, constraints));
+        violations.AddRange(ShiftCoverageGuard.GetUnderCapacityViolations(saSol, constraints));
+        if (!scheduler.AreExactNightQuotasSatisfied(saSol, out var unmetNights))
+        {
+            violations.Add($"Unmet night quotas: {string.Join("; ", unmetNights)}");
+        }
+        
+        _output.WriteLine($"\nViolations count: {violations.Count}");
+        foreach (var v in violations)
+        {
+            _output.WriteLine($"  VIOLATION: {v}");
+        }
+        var finalU14Hours = OvertimeBalanceGuard.CalculateHours(saSol, u14, lookup, constraints);
+        var finalU18Hours = OvertimeBalanceGuard.CalculateHours(saSol, u18, lookup, constraints);
+        Assert.True(finalU14Hours >= (double)u14.ProductivityRequiredHours!.Value - 0.25, $"U14 has deficit: Worked={finalU14Hours}, Req={u14.ProductivityRequiredHours}");
+        Assert.True(finalU18Hours >= (double)u18.ProductivityRequiredHours!.Value - 0.25, $"U18 has deficit: Worked={finalU18Hours}, Req={u18.ProductivityRequiredHours}");
+        Assert.Empty(violations);
+    }
 }

@@ -65,17 +65,17 @@ namespace ShiftYar.Domain.Entities.ProductivityModel
         public int MaxMonthlyWorkingDays { get; init; } = 24;
         /// <summary>فعال بودن سقف‌گذاری ساعت پایه بر مبنای ماه استاندارد (پیش‌فرض: false تا روزهای کاری تقویمی دقیقاً محاسبه شوند)</summary>
         public bool CapBaseHoursToStandardMonth { get; init; } = false;
-        public decimal SpecialSectionHardshipReduction { get; init; } = 2.0m;
-        public decimal GeneralSectionHardshipReduction { get; init; } = 0.0m;
-        public decimal RotatingShiftReductionPerWeek { get; init; } = 1.0m;
-        public decimal ThreeShiftRotatingReductionHours { get; init; } = 1.0m;
-        public decimal TwoShiftRotatingReductionHours { get; init; } = 1.0m;
-        public decimal FixedNightReductionHours { get; init; } = 1.0m;
-        public decimal FixedDayReductionHours { get; init; } = 0.0m;
-        public decimal NightHolidayMultiplier { get; init; } = 1.5m;
-        public decimal MaxMonthlyOvertimeHours { get; init; } = 80m;
-        public decimal MaxConsecutiveWorkHours { get; init; } = 12m;
-        public decimal HandoverHoursBetweenShifts { get; init; } = 0m;
+        public decimal SpecialSectionHardshipReduction { get; init; } = 2.0m; //سقف کسر ساعت برای بخش‌های ویژه
+        public decimal GeneralSectionHardshipReduction { get; init; } = 0.0m;  //سقف کسر ساعت برای بخش‌های عمومی
+        public decimal RotatingShiftReductionPerWeek { get; init; } = 1.0m;   //کاهش ساعت برای شیفت‌های چرخشی
+        public decimal ThreeShiftRotatingReductionHours { get; init; } = 1.0m;  //کاهش ساعت برای شیفت‌های چرخشی سه شیفت
+        public decimal TwoShiftRotatingReductionHours { get; init; } = 1.0m;  //کاهش ساعت برای شیفت‌های چرخشی دو شیفت
+        public decimal FixedNightReductionHours { get; init; } = 1.0m;  //کاهش ساعت برای شیفت‌های ثابت شب
+        public decimal FixedDayReductionHours { get; init; } = 0.0m;  //کاهش ساعت برای شیفت‌های ثابت روز
+        public decimal NightHolidayMultiplier { get; init; } = 1.5m;    //ضریب شب و تعطیل
+        public decimal MaxMonthlyOvertimeHours { get; init; } = 80m;    //حداکثر اضافه کار ماهانه
+        public decimal MaxConsecutiveWorkHours { get; init; } = 12m;  //حداکثر ساعات کار متوالی
+        public decimal HandoverHoursBetweenShifts { get; init; } = 0m;  //ساعت تحویل کار بین شیفت‌ها
 
         public IReadOnlyCollection<SeniorityReductionBand> SeniorityReductionBands { get; init; } = DefaultSeniorityBands;
         public IReadOnlyCollection<HardshipReductionBand> HardshipReductionBands { get; init; } = DefaultHardshipBands;

@@ -233,7 +233,7 @@ public static class ExactNightQuotaGuard
         var minGap = ResolveNightSpacingGap(constraints, user);
         var openCapacityDates = AllCandidateDates(constraints, holidayOnly: false)
             .Where(d => HasSpecialtyCapacity(solution, constraints, nightShift, d, user.SpecialtyId))
-            .OrderBy(d => existingDates.Any() ? existingDates.Min(e => Math.Abs((e - d).Days)) : 0)
+            .OrderByDescending(d => existingDates.Any() ? existingDates.Min(e => Math.Abs((e - d).Days)) : 0)
             .ToList();
 
         var candidates = openCapacityDates
@@ -251,7 +251,7 @@ public static class ExactNightQuotaGuard
             candidates = candidates
                 .OrderBy(d => solution.GetShiftAssignments(nightShift.ShiftId, d)
                     .Count(a => !a.IsOnCall && ShiftManagerRules.IsLevel1(constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId))))
-                .ThenBy(d => existingDates.Any() ? existingDates.Min(e => Math.Abs((e - d).Days)) : 0)
+                .ThenByDescending(d => existingDates.Any() ? existingDates.Min(e => Math.Abs((e - d).Days)) : 0)
                 .ToList();
         }
         else if (ShiftManagerRules.IsManager(user))
@@ -263,7 +263,7 @@ public static class ExactNightQuotaGuard
                     var mgrCount = assignees.Count(a => ShiftManagerRules.IsManager(constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)));
                     return mgrCount == 1 ? 0 : mgrCount == 0 ? 1 : 2;
                 })
-                .ThenBy(d => existingDates.Any() ? existingDates.Min(e => Math.Abs((e - d).Days)) : 0)
+                .ThenByDescending(d => existingDates.Any() ? existingDates.Min(e => Math.Abs((e - d).Days)) : 0)
                 .ToList();
         }
         else
@@ -275,7 +275,7 @@ public static class ExactNightQuotaGuard
                     var mgrCount = assignees.Count(a => ShiftManagerRules.IsManager(constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)));
                     return mgrCount >= 2 ? 0 : 1;
                 })
-                .ThenBy(d => existingDates.Any() ? existingDates.Min(e => Math.Abs((e - d).Days)) : 0)
+                .ThenByDescending(d => existingDates.Any() ? existingDates.Min(e => Math.Abs((e - d).Days)) : 0)
                 .ToList();
         }
 
