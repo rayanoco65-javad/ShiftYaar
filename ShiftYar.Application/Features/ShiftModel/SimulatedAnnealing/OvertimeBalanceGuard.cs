@@ -24,7 +24,11 @@ public static class OvertimeBalanceGuard
             .Where(u => u.IncludedInProductivityPlan && u.ProductivityRequiredHours.HasValue && u.ProductivityRequiredHours > 0)
             .ToList();
 
-        LogAction?.Invoke($"OvertimeBalanceGuard.Enforce called with {users.Count} eligible users.");
+        try
+        {
+            LogAction?.Invoke($"OvertimeBalanceGuard.Enforce called with {users.Count} eligible users.");
+        }
+        catch { }
 
         if (users.Count < 2)
         {
@@ -1147,11 +1151,13 @@ public static class OvertimeBalanceGuard
         var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
             ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
             : 2;
+        var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == date.Date);
+        var effectiveMax = Math.Max(maxPerDay, approvedCount);
 
         if (!DailyAssignmentRules.CanAddShift(
                 existing,
                 label,
-                maxPerDay,
+                effectiveMax,
                 constraints.HardRules.ForbidDuplicateDailyAssignments))
         {
             return false;

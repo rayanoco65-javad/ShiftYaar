@@ -284,12 +284,14 @@ public static class ManagerMixFeasibilityChecker
         var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
             ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
             : 2;
+        var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == date.Date);
+        var effectiveMax = Math.Max(maxPerDay, approvedCount);
         return user.RequiredShiftSlots.Any(s =>
             s.Date.Date == date.Date &&
             s.ShiftLabel != installLabel &&
             !DailyAssignmentRules.IsValidDaySet(
                 new[] { s.ShiftLabel, installLabel },
-                maxPerDay,
+                effectiveMax,
                 constraints.HardRules.ForbidDuplicateDailyAssignments));
     }
 
@@ -313,11 +315,13 @@ public static class ManagerMixFeasibilityChecker
         var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
             ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
             : 2;
+        var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == date.Date);
+        var effectiveMax = Math.Max(maxPerDay, approvedCount);
         var sameDay = solution.GetUserAssignments(user.UserId, date)
             .Where(a => ApprovedRequestGuard.IsApprovedRequiredSlot(user, a.Date, a.ShiftLabel, a.ShiftId))
             .Select(a => a.ShiftLabel);
         if (!ShiftEligibilityResolver.IsAssignmentAllowed(
-                user, sameDay, shiftReq.ShiftLabel, maxPerDay,
+                user, sameDay, shiftReq.ShiftLabel, effectiveMax,
                 constraints.HardRules.ForbidDuplicateDailyAssignments,
                 date))
         {

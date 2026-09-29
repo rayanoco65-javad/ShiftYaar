@@ -304,11 +304,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
                         ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
                         : 2;
+                    var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == presenceDate.Date);
+                    var effectiveMax = Math.Max(maxPerDay, approvedCount);
 
                     var candidates = constraints.ShiftRequirements
                         .Where(s => IsOffConflictFree(user, presenceDate, s.ShiftLabel))
                         .Where(s => Common.Utilities.ShiftEligibilityResolver.IsAssignmentAllowed(
-                            user, existingLabels, s.ShiftLabel, maxPerDay,
+                            user, existingLabels, s.ShiftLabel, effectiveMax,
                             constraints.HardRules.ForbidDuplicateDailyAssignments,
                             presenceDate))
                         .OrderByDescending(s => onCallOnly != null && s.ShiftId == onCallOnly.ShiftId ? 1_000_000 : 0)
@@ -582,6 +584,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
                 ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
                 : 2;
+            var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == date.Date);
+            var effectiveMax = Math.Max(maxPerDay, approvedCount);
 
             foreach (var assignment in solution.GetUserAssignments(user.UserId, date).ToList())
             {
@@ -590,7 +594,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     continue;
                 }
 
-                var conflicts = maxPerDay <= 1
+                var conflicts = effectiveMax <= 1
                     || (label == ShiftLabel.Night && assignment.ShiftLabel == ShiftLabel.Evening)
                     || (label == ShiftLabel.Evening && assignment.ShiftLabel == ShiftLabel.Night);
 
@@ -769,11 +773,14 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
                     ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
                     : 2;
+                var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == date.Date);
+                var effectiveMax = Math.Max(maxPerDay, approvedCount);
+
                 var existing = solution.GetUserAssignments(user.UserId, date)
                     .Where(a => a.ShiftLabel != shiftLabel)
                     .Select(a => a.ShiftLabel);
                 if (!Common.Utilities.ShiftEligibilityResolver.IsAssignmentAllowed(
-                        user, existing, shiftLabel, maxPerDay, constraints.HardRules.ForbidDuplicateDailyAssignments,
+                        user, existing, shiftLabel, effectiveMax, constraints.HardRules.ForbidDuplicateDailyAssignments,
                         date))
                 {
                     return false;

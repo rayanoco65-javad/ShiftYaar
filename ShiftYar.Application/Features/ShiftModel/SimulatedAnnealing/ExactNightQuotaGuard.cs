@@ -3067,7 +3067,7 @@ public static class ExactNightQuotaGuard
             .Where(a => !(ignoreUserNightOnDate && a.ShiftLabel == ShiftLabel.Night))
             .Where(a => !(a.Date.Date == date.Date && a.ShiftLabel == ShiftLabel.Evening && !IsProtected(constraints, user.UserId, a)))
             .Select(a => a.ShiftLabel);
-        if (!DailyAssignmentRules.CanAddShift(existingLabels, ShiftLabel.Night, GetMaxShiftsPerDay(constraints)))
+        if (!DailyAssignmentRules.CanAddShift(existingLabels, ShiftLabel.Night, GetMaxShiftsPerDay(constraints, user, date)))
         {
             return false;
         }
@@ -3199,10 +3199,18 @@ public static class ExactNightQuotaGuard
         return current < Math.Max(day.RequiredTotalCount, 1);
     }
 
-    private static int GetMaxShiftsPerDay(ShiftConstraints constraints) =>
-        constraints.HardRules.EnforceMaxShiftsPerDay
+    private static int GetMaxShiftsPerDay(ShiftConstraints constraints, UserConstraint user = null, DateTime? date = null)
+    {
+        var baseMax = constraints.HardRules.EnforceMaxShiftsPerDay
             ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
             : 2;
+        if (user != null && date.HasValue)
+        {
+            var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == date.Value.Date);
+            return Math.Max(baseMax, approvedCount);
+        }
+        return baseMax;
+    }
 
     private static int GetSpecialty(ShiftConstraints constraints, int userId) =>
         constraints.UserConstraints.FirstOrDefault(u => u.UserId == userId)?.SpecialtyId ?? 0;

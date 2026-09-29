@@ -1001,7 +1001,9 @@ public static class ShiftCoverageGuard
                 var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
                     ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
                     : 2;
-                if (!DailyAssignmentRules.CanAddShift(existing, shiftReq.ShiftLabel, maxPerDay, constraints.HardRules.ForbidDuplicateDailyAssignments))
+                var approvedCount = u.RequiredShiftSlots.Count(s => s.Date.Date == date.Date);
+                var effectiveMax = Math.Max(maxPerDay, approvedCount);
+                if (!DailyAssignmentRules.CanAddShift(existing, shiftReq.ShiftLabel, effectiveMax, constraints.HardRules.ForbidDuplicateDailyAssignments))
                     return false;
                 return true;
             })
@@ -1370,13 +1372,17 @@ public static class ShiftCoverageGuard
         // بررسی مجوز نوع شیفت با آگاهی از تاریخ:
         // کاربر فقط در صورتی می‌تواند این نوع شیفت را بگیرد که یا مجوز کلی داشته باشد
         // یا درخواست تأییدشده دقیقاً برای همین تاریخ و نوع شیفت داشته باشد.
+        var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
+            ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
+            : 2;
+        var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == date.Date);
+        var effectiveMax = Math.Max(maxPerDay, approvedCount);
+
         if (!ShiftEligibilityResolver.IsAssignmentAllowed(
                 user,
                 solution.GetUserAssignments(user.UserId, date).Select(a => a.ShiftLabel),
                 label,
-                constraints.HardRules.EnforceMaxShiftsPerDay
-                    ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
-                    : 2,
+                effectiveMax,
                 constraints.HardRules.ForbidDuplicateDailyAssignments,
                 date))
         {
@@ -1385,13 +1391,10 @@ public static class ShiftCoverageGuard
 
         // عمداً سقف هفته اینجا اعمال نمی‌شود — پوشش ظرفیت اجباری است؛ سقف روزهای کاری متوالی اعمال می‌شود.
         var existing = solution.GetUserAssignments(user.UserId, date).Select(a => a.ShiftLabel);
-        var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
-            ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
-            : 2;
         if (!DailyAssignmentRules.CanAddShift(
                 existing,
                 label,
-                maxPerDay,
+                effectiveMax,
                 constraints.HardRules.ForbidDuplicateDailyAssignments))
         {
             return false;

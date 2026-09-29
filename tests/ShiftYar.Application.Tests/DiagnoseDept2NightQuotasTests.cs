@@ -3337,8 +3337,15 @@ public class DiagnoseDept2NightQuotasTests
 
         // --- EXECUTE AUTOMATIC OVERTIME AND DEFICIT ENFORCEMENT ---
         _output.WriteLine($"\n=== EXECUTING OvertimeBalanceGuard.Enforce ===");
-        OvertimeBalanceGuard.LogAction = s => _output.WriteLine(s);
-        OvertimeBalanceGuard.Enforce(saSol, constraints);
+        try
+        {
+            OvertimeBalanceGuard.LogAction = s => _output.WriteLine(s);
+            OvertimeBalanceGuard.Enforce(saSol, constraints);
+        }
+        finally
+        {
+            OvertimeBalanceGuard.LogAction = null;
+        }
 
 
         // Print final hours

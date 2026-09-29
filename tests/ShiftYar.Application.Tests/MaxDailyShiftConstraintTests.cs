@@ -4,6 +4,7 @@ using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using Xunit;
 using static ShiftYar.Domain.Enums.ShiftModel.ShiftEnums;
 using static ShiftYar.Domain.Enums.UserModel.UserEnums;
@@ -240,5 +241,314 @@ public class MaxDailyShiftConstraintTests
 
         Assert.True(grouped.ContainsKey("1405/06/01"));
         Assert.Equal(2, grouped["1405/06/01"]);
+    }
+
+    [Fact]
+    public void DailyDuplicateAssignmentGuard_WhenMaxShiftsPerDayIsOne_AndUserHasTwoApprovedRequests_DoesNotReportViolation()
+    {
+        var date = new DateTime(2026, 8, 23);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = date,
+            EndDate = date.AddDays(1),
+            HardRules = new HardRuleSet
+            {
+                EnforceMaxShiftsPerDay = true,
+                ForbidDuplicateDailyAssignments = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 },
+            UserConstraints = new List<UserConstraint>
+            {
+                new()
+                {
+                    UserId = 1,
+                    UserName = "کاربر تستی",
+                    IsActive = true,
+                    AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.MorningEveningSameDay,
+                    RequiredShiftSlots = new List<ShiftSlotConstraint>
+                    {
+                        new() { Date = date, ShiftLabel = ShiftLabel.Morning, ShiftId = 101 },
+                        new() { Date = date, ShiftLabel = ShiftLabel.Evening, ShiftId = 102 }
+                    }
+                }
+            }
+        };
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(1, 101, date, ShiftLabel.Morning);
+        solution.AddAssignment(1, 102, date, ShiftLabel.Evening);
+
+        var violations = DailyDuplicateAssignmentGuard.GetViolations(solution, constraints);
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void DailyDuplicateAssignmentGuard_StripDuplicates_WhenMaxShiftsPerDayIsOne_AndUserHasTwoApprovedRequests_PreservesBothShifts()
+    {
+        var date = new DateTime(2026, 8, 23);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = date,
+            EndDate = date.AddDays(1),
+            HardRules = new HardRuleSet
+            {
+                EnforceMaxShiftsPerDay = true,
+                ForbidDuplicateDailyAssignments = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 },
+            UserConstraints = new List<UserConstraint>
+            {
+                new()
+                {
+                    UserId = 1,
+                    UserName = "کاربر تستی",
+                    IsActive = true,
+                    AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.MorningEveningSameDay,
+                    RequiredShiftSlots = new List<ShiftSlotConstraint>
+                    {
+                        new() { Date = date, ShiftLabel = ShiftLabel.Morning, ShiftId = 101 },
+                        new() { Date = date, ShiftLabel = ShiftLabel.Evening, ShiftId = 102 }
+                    }
+                }
+            }
+        };
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(1, 101, date, ShiftLabel.Morning);
+        solution.AddAssignment(1, 102, date, ShiftLabel.Evening);
+
+        DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
+
+        var assignments = solution.GetUserAssignments(1, date);
+        Assert.Equal(2, assignments.Count);
+        Assert.Contains(assignments, a => a.ShiftLabel == ShiftLabel.Morning);
+        Assert.Contains(assignments, a => a.ShiftLabel == ShiftLabel.Evening);
+    }
+
+    [Fact]
+    public void ShiftEligibilityGuard_WhenMaxShiftsPerDayIsOne_AndUserHasTwoApprovedRequests_ReportsNoViolation()
+    {
+        var date = new DateTime(2026, 8, 23);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = date,
+            EndDate = date.AddDays(1),
+            HardRules = new HardRuleSet
+            {
+                EnforceMaxShiftsPerDay = true,
+                ForbidDuplicateDailyAssignments = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 },
+            UserConstraints = new List<UserConstraint>
+            {
+                new()
+                {
+                    UserId = 1,
+                    UserName = "کاربر تستی",
+                    IsActive = true,
+                    AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.MorningEveningSameDay,
+                    RequiredShiftSlots = new List<ShiftSlotConstraint>
+                    {
+                        new() { Date = date, ShiftLabel = ShiftLabel.Morning, ShiftId = 101 },
+                        new() { Date = date, ShiftLabel = ShiftLabel.Evening, ShiftId = 102 }
+                    }
+                }
+            }
+        };
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(1, 101, date, ShiftLabel.Morning);
+        solution.AddAssignment(1, 102, date, ShiftLabel.Evening);
+
+        var violations = ShiftEligibilityGuard.GetViolations(solution, constraints);
+        Assert.DoesNotContain(violations, v => v.Contains("سقف شیفت روزانه"));
+    }
+
+    [Fact]
+    public void ApprovedRequestGuard_ForceApply_WhenMaxShiftsPerDayIsOne_AndUserHasTwoApprovedRequests_AssignsBothWithoutError()
+    {
+        var date = new DateTime(2026, 8, 23);
+        var shiftMorning = new ShiftRequirement
+        {
+            ShiftId = 101,
+            ShiftLabel = ShiftLabel.Morning,
+            SpecialtyRequirements = new List<SpecialtyRequirement>
+            {
+                new() { SpecialtyId = 1, RequiredTotalCount = 1 }
+            }
+        };
+        var shiftEvening = new ShiftRequirement
+        {
+            ShiftId = 102,
+            ShiftLabel = ShiftLabel.Evening,
+            SpecialtyRequirements = new List<SpecialtyRequirement>
+            {
+                new() { SpecialtyId = 1, RequiredTotalCount = 1 }
+            }
+        };
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = date,
+            EndDate = date.AddDays(1),
+            HardRules = new HardRuleSet
+            {
+                EnforceMaxShiftsPerDay = true,
+                ForbidDuplicateDailyAssignments = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 },
+            ShiftRequirements = new List<ShiftRequirement> { shiftMorning, shiftEvening },
+            UserConstraints = new List<UserConstraint>
+            {
+                new()
+                {
+                    UserId = 1,
+                    UserName = "کاربر تستی",
+                    IsActive = true,
+                    SpecialtyId = 1,
+                    AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.MorningEveningSameDay,
+                    RequiredShiftSlots = new List<ShiftSlotConstraint>
+                    {
+                        new() { Date = date, ShiftLabel = ShiftLabel.Morning, ShiftId = 101 },
+                        new() { Date = date, ShiftLabel = ShiftLabel.Evening, ShiftId = 102 }
+                    }
+                }
+            }
+        };
+
+        var solution = new ShiftSolution();
+        ApprovedRequestGuard.ForceApply(solution, constraints);
+
+        var assignments = solution.GetUserAssignments(1, date);
+        Assert.Equal(2, assignments.Count);
+        Assert.Contains(assignments, a => a.ShiftLabel == ShiftLabel.Morning);
+        Assert.Contains(assignments, a => a.ShiftLabel == ShiftLabel.Evening);
+
+        var unmet = ApprovedRequestGuard.GetUnmetViolations(solution, constraints);
+        Assert.Empty(unmet);
+    }
+
+    [Fact]
+    public void ShiftSchedulingService_EnsureHardDailyRulesOrThrow_WhenMaxShiftsPerDayIsOne_AndUserHasTwoApprovedRequests_DoesNotThrow()
+    {
+        var date = new DateTime(2026, 8, 23);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = date,
+            EndDate = date.AddDays(1),
+            HardRules = new HardRuleSet
+            {
+                EnforceMaxShiftsPerDay = true,
+                ForbidDuplicateDailyAssignments = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 },
+            UserConstraints = new List<UserConstraint>
+            {
+                new()
+                {
+                    UserId = 1,
+                    UserName = "کاربر تستی",
+                    IsActive = true,
+                    AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.MorningEveningSameDay,
+                    RequiredShiftSlots = new List<ShiftSlotConstraint>
+                    {
+                        new() { Date = date, ShiftLabel = ShiftLabel.Morning, ShiftId = 101 },
+                        new() { Date = date, ShiftLabel = ShiftLabel.Evening, ShiftId = 102 }
+                    }
+                }
+            }
+        };
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(1, 101, date, ShiftLabel.Morning);
+        solution.AddAssignment(1, 102, date, ShiftLabel.Evening);
+
+        var method = typeof(ShiftYar.Application.Features.ShiftModel.Services.ShiftSchedulingService)
+            .GetMethod("EnsureHardDailyRulesOrThrow", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        // نباید استثنا پرتاب کند
+        var ex = Record.Exception(() => method.Invoke(null, new object[] { solution, constraints }));
+        Assert.Null(ex);
+    }
+
+    [Fact]
+    public void ShiftSchedulingService_EnsureHardDailyRulesOrThrow_WhenMaxShiftsPerDayIsOne_AndUserHasNoApprovedRequests_ThrowsException()
+    {
+        var date = new DateTime(2026, 8, 23);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = date,
+            EndDate = date.AddDays(1),
+            HardRules = new HardRuleSet
+            {
+                EnforceMaxShiftsPerDay = true,
+                ForbidDuplicateDailyAssignments = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 },
+            UserConstraints = new List<UserConstraint>
+            {
+                new()
+                {
+                    UserId = 1,
+                    UserName = "کاربر تستی",
+                    IsActive = true,
+                    AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.MorningEveningSameDay,
+                    RequiredShiftSlots = new List<ShiftSlotConstraint>() // بدون درخواست تایید شده
+                }
+            }
+        };
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(1, 101, date, ShiftLabel.Morning);
+        solution.AddAssignment(1, 102, date, ShiftLabel.Evening);
+
+        var method = typeof(ShiftYar.Application.Features.ShiftModel.Services.ShiftSchedulingService)
+            .GetMethod("EnsureHardDailyRulesOrThrow", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var ex = Assert.Throws<TargetInvocationException>(() => method.Invoke(null, new object[] { solution, constraints }));
+        Assert.IsType<InvalidOperationException>(ex.InnerException);
+        Assert.Contains("سقف شیفت روزانه", ex.InnerException.Message);
+    }
+
+    [Fact]
+    public void DailyDuplicateAssignmentGuard_WhenUserHasTwoApprovedRequests_RejectsThirdRoutineShift()
+    {
+        var date = new DateTime(2026, 8, 23);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = date,
+            EndDate = date.AddDays(1),
+            HardRules = new HardRuleSet
+            {
+                EnforceMaxShiftsPerDay = true,
+                ForbidDuplicateDailyAssignments = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 },
+            UserConstraints = new List<UserConstraint>
+            {
+                new()
+                {
+                    UserId = 1,
+                    UserName = "کاربر تستی",
+                    IsActive = true,
+                    AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.Night | UserShiftPermission.MorningEveningSameDay,
+                    RequiredShiftSlots = new List<ShiftSlotConstraint>
+                    {
+                        new() { Date = date, ShiftLabel = ShiftLabel.Morning, ShiftId = 101 },
+                        new() { Date = date, ShiftLabel = ShiftLabel.Evening, ShiftId = 102 }
+                    }
+                }
+            }
+        };
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(1, 101, date, ShiftLabel.Morning);
+        solution.AddAssignment(1, 102, date, ShiftLabel.Evening);
+        solution.AddAssignment(1, 103, date, ShiftLabel.Night); // شیفت سوم غیرتأییدشده
+
+        var violations = DailyDuplicateAssignmentGuard.GetViolations(solution, constraints);
+        Assert.NotEmpty(violations);
     }
 }

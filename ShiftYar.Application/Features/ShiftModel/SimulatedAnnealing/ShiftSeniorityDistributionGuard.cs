@@ -584,12 +584,14 @@ public static class ShiftSeniorityDistributionGuard
         var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
             ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
             : 2;
+        var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == assignment.Date.Date);
+        var effectiveMax = Math.Max(maxPerDay, approvedCount);
         var existingLabels = solution.GetUserAssignments(user.UserId, assignment.Date)
             .Select(a => a.ShiftLabel);
         if (!DailyAssignmentRules.CanAddShift(
                 existingLabels,
                 assignment.ShiftLabel,
-                maxPerDay,
+                effectiveMax,
                 constraints.HardRules.ForbidDuplicateDailyAssignments))
         {
             return false;

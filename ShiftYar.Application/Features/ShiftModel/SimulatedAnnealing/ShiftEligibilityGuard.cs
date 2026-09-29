@@ -39,12 +39,14 @@ public static class ShiftEligibilityGuard
             var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
                 ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
                 : 2;
+            var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == assignment.Date.Date);
+            var effectiveMax = Math.Max(maxPerDay, approvedCount);
             var dayAssignments = solution.GetUserAssignments(user.UserId, assignment.Date).ToList();
-            if (MaxShiftsPerDayRules.WouldExceedDailyLimit(dayAssignments.Count - 1, maxPerDay, constraints.HardRules.EnforceMaxShiftsPerDay)
-                && dayAssignments.Count > maxPerDay)
+            if (MaxShiftsPerDayRules.WouldExceedDailyLimit(dayAssignments.Count - 1, effectiveMax, constraints.HardRules.EnforceMaxShiftsPerDay)
+                && dayAssignments.Count > effectiveMax)
             {
                 violations.Add(
-                    $"سقف شیفت روزانه: کاربر {user.UserId} ({user.UserName}) در {assignment.Date:yyyy-MM-dd} بیش از {maxPerDay} شیفت دارد. {MaxShiftsPerDayRules.SecondShiftBlockedMessage}");
+                    $"سقف شیفت روزانه: کاربر {user.UserId} ({user.UserName}) در {assignment.Date:yyyy-MM-dd} بیش از {effectiveMax} شیفت دارد. {MaxShiftsPerDayRules.SecondShiftBlockedMessage}");
                 continue;
             }
 
@@ -90,6 +92,8 @@ public static class ShiftEligibilityGuard
         var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
             ? System.Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
             : 2;
+        var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == assignment.Date.Date);
+        var effectiveMax = Math.Max(maxPerDay, approvedCount);
         var existing = solution.GetUserAssignments(assignment.UserId, assignment.Date)
             .Where(a => a.ShiftId != assignment.ShiftId || a.ShiftLabel != assignment.ShiftLabel)
             .Select(a => a.ShiftLabel)
@@ -99,7 +103,7 @@ public static class ShiftEligibilityGuard
             user,
             existing,
             assignment.ShiftLabel,
-            maxPerDay,
+            effectiveMax,
             constraints.HardRules.ForbidDuplicateDailyAssignments,
             assignment.Date,
             constraints.StartDate);

@@ -1710,16 +1710,24 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         a.UserId,
                         PersianDate = DateConverter.ConvertToPersianDate(a.Date)
                     })
-                    .Where(g => g.Count() > maxPerDay)
+                    .Where(g =>
+                    {
+                        var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == g.Key.UserId);
+                        var approvedCount = user?.RequiredShiftSlots.Count(s => DateConverter.ConvertToPersianDate(s.Date) == g.Key.PersianDate) ?? 0;
+                        var effectiveMax = Math.Max(maxPerDay, approvedCount);
+                        return g.Count() > effectiveMax;
+                    })
                     .ToList();
 
                 foreach (var group in groupedByPersianDate)
                 {
                     var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == group.Key.UserId);
+                    var approvedCount = user?.RequiredShiftSlots.Count(s => DateConverter.ConvertToPersianDate(s.Date) == group.Key.PersianDate) ?? 0;
+                    var effectiveMax = Math.Max(maxPerDay, approvedCount);
                     var userName = user?.UserName ?? $"کاربر {group.Key.UserId}";
                     var shifts = string.Join(" + ", group.Select(a => a.ShiftLabel));
                     persianDailyViolations.Add(
-                        $"نقض محدودیت قطعی سقف شیفت روزانه: کاربر {group.Key.UserId} ({userName}) در تاریخ شمسی {group.Key.PersianDate} دارای {group.Count()} شیفت ({shifts}) است در حالی که حداکثر شیفت مجاز {maxPerDay} می‌باشد.");
+                        $"نقض محدودیت قطعی سقف شیفت روزانه: کاربر {group.Key.UserId} ({userName}) در تاریخ شمسی {group.Key.PersianDate} دارای {group.Count()} شیفت ({shifts}) است در حالی که حداکثر شیفت مجاز {effectiveMax} می‌باشد.");
                 }
             }
 

@@ -267,8 +267,13 @@ public static class ShiftEligibilityResolver
 
         if (hasApprovedSlotForLabel)
         {
+            var approvedCount = date.HasValue
+                ? user.RequiredShiftSlots.Count(s => s.Date.Date == date.Value.Date)
+                : Math.Max(1, user.RequiredShiftSlots.Count(s => s.ShiftLabel == newLabel));
+            var effectiveMax = Math.Max(maxShiftsPerDay, Math.Max(approvedCount, 2));
+
             return DailyAssignmentRules.CanAddShift(
-                existingOnDay, newLabel, maxShiftsPerDay, forbidDuplicateLabels);
+                existingOnDay, newLabel, effectiveMax, forbidDuplicateLabels);
         }
 
         // بررسی قانون تناوب هفتگی شیفت‌های روزانه (صبح و عصر)

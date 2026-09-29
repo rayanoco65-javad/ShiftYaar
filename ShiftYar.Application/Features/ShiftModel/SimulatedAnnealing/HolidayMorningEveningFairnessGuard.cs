@@ -330,10 +330,12 @@ public static class HolidayMorningEveningFairnessGuard
         var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
             ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
             : 2;
+        var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == date.Date);
+        var effectiveMax = Math.Max(maxPerDay, approvedCount);
         if (!DailyAssignmentRules.CanAddShift(
                 existing,
                 label,
-                maxPerDay,
+                effectiveMax,
                 constraints.HardRules.ForbidDuplicateDailyAssignments))
         {
             return false;

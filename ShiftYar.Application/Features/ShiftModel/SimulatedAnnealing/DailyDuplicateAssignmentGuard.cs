@@ -27,15 +27,18 @@ public static class DailyDuplicateAssignmentGuard
 
         foreach (var group in groups)
         {
+            var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == group.Key.UserId);
+            var approvedCount = user?.RequiredShiftSlots.Count(s => s.Date.Date == group.Key.Date) ?? 0;
+            var effectiveMax = Math.Max(maxPerDay, approvedCount);
+
             var items = group.ToList();
             var labels = items.Select(a => a.ShiftLabel).ToList();
-            if (DailyAssignmentRules.IsValidDaySet(labels, maxPerDay, forbidDup))
+            if (DailyAssignmentRules.IsValidDaySet(labels, effectiveMax, forbidDup))
             {
                 continue;
             }
 
-            var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == group.Key.UserId);
-            var keepers = SelectKeepers(solution, items, user, maxPerDay, forbidDup);
+            var keepers = SelectKeepers(solution, items, user, effectiveMax, forbidDup);
 
             foreach (var extra in items.Where(a => !keepers.Contains(a)))
             {
@@ -62,8 +65,12 @@ public static class DailyDuplicateAssignmentGuard
             .Where(g =>
             {
                 var labels = g.Select(a => a.ShiftLabel).ToList();
+                var user = constraints?.UserConstraints.FirstOrDefault(u => u.UserId == g.Key.UserId);
+                var approvedCount = user?.RequiredShiftSlots.Count(s => s.Date.Date == g.Key.Date) ?? 0;
+                var effectiveMax = Math.Max(maxPerDay, approvedCount);
+
                 // ترکیب‌های غیرمجاز پزشکی یا نقض سقف روزانه
-                return !DailyAssignmentRules.IsValidDaySet(labels, maxShiftsPerDay: maxPerDay, forbidDup);
+                return !DailyAssignmentRules.IsValidDaySet(labels, maxShiftsPerDay: effectiveMax, forbidDup);
             })
             .Select(g =>
             {
