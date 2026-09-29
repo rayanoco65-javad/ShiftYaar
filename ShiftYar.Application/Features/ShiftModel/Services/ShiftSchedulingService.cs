@@ -985,6 +985,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
                     for (var pass = 0; pass < 3; pass++)
                     {
+                        CoupledShiftRuleGuard.Enforce(candidateSolution, constraints);
                         DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
                         ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
                         AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
@@ -996,6 +997,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         if (DailyDuplicateAssignmentGuard.GetViolations(candidateSolution, constraints).Count == 0
                             && ShiftEligibilityGuard.GetViolations(candidateSolution, constraints).Count == 0
                             && AdjacentShiftRestGuard.GetViolations(candidateSolution, constraints).Count == 0
+                            && CoupledShiftRuleGuard.GetViolations(candidateSolution, constraints).Count == 0
                             && MaxConsecutiveWorkdayRules.GetViolations(candidateSolution, constraints).Count == 0
                             && ShiftCoverageGuard.GetUnderCapacityViolations(candidateSolution, constraints).Count == 0)
                         {
@@ -1008,6 +1010,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
                     }
                     OvertimeBalanceGuard.Enforce(candidateSolution, constraints);
+                    CoupledShiftRuleGuard.Enforce(candidateSolution, constraints);
                     DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
                     ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
                     AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
@@ -1699,6 +1702,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             var daily = DailyDuplicateAssignmentGuard.GetViolations(solution, constraints);
             var adjacency = AdjacentShiftRestGuard.GetViolations(solution, constraints);
             var eligibility = ShiftEligibilityGuard.GetViolations(solution, constraints);
+            var coupled = CoupledShiftRuleGuard.GetViolations(solution, constraints);
 
             var persianDailyViolations = new List<string>();
             if (constraints.HardRules.EnforceMaxShiftsPerDay)
@@ -1715,6 +1719,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == g.Key.UserId);
                         var approvedCount = user?.RequiredShiftSlots.Count(s => DateConverter.ConvertToPersianDate(s.Date) == g.Key.PersianDate) ?? 0;
                         var effectiveMax = Math.Max(maxPerDay, approvedCount);
+                        if (user != null && user.HasCoupledShiftRules && effectiveMax < 2)
+                        {
+                            effectiveMax = 2;
+                        }
                         return g.Count() > effectiveMax;
                     })
                     .ToList();
@@ -1724,6 +1732,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == group.Key.UserId);
                     var approvedCount = user?.RequiredShiftSlots.Count(s => DateConverter.ConvertToPersianDate(s.Date) == group.Key.PersianDate) ?? 0;
                     var effectiveMax = Math.Max(maxPerDay, approvedCount);
+                    if (user != null && user.HasCoupledShiftRules && effectiveMax < 2)
+                    {
+                        effectiveMax = 2;
+                    }
                     var userName = user?.UserName ?? $"کاربر {group.Key.UserId}";
                     var shifts = string.Join(" + ", group.Select(a => a.ShiftLabel));
                     persianDailyViolations.Add(
@@ -1731,7 +1743,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 }
             }
 
-            var allViolations = daily.Concat(adjacency).Concat(eligibility).Concat(persianDailyViolations).Distinct().ToList();
+            var allViolations = daily.Concat(adjacency).Concat(eligibility).Concat(coupled).Concat(persianDailyViolations).Distinct().ToList();
             if (allViolations.Count == 0)
             {
                 return;
@@ -2294,7 +2306,13 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         MorningNightShiftCount = comboShiftQuota?.MorningNightShiftCount,
                         MorningNightFallbackParticipation = comboShiftQuota?.MorningNightFallbackParticipation,
                         MorningNightHolidayCount = comboShiftQuota?.MorningNightHolidayCount,
-                        MorningNightHolidayFallback = comboShiftQuota?.MorningNightHolidayFallback
+                        MorningNightHolidayFallback = comboShiftQuota?.MorningNightHolidayFallback,
+                        MorningRequiresEvening = user.MorningRequiresEvening ?? false,
+                        MorningRequiresNight = user.MorningRequiresNight ?? false,
+                        EveningRequiresMorning = user.EveningRequiresMorning ?? false,
+                        NightRequiresMorning = user.NightRequiresMorning ?? false,
+                        AllowEveningAfterNightShift = user.AllowEveningAfterNightShift,
+                        AllowNightShiftAfterNightShift = user.AllowNightShiftAfterNightShift
                     };
 
                     if (userConstraint.MorningEveningShiftCount.HasValue &&
@@ -2339,27 +2357,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                             userConstraint.ExactNightShiftCount.Value);
                     }
 
-                    userConstraint.AllowedShiftPermissions = ShiftEligibilityResolver
-                        .ResolvePermissions(
-                            user.AllowedShiftPermissions,
-                            userConstraint.ShiftType,
-                            userConstraint.ShiftSubType,
-                            userConstraint.TwoShiftRotationPattern);
-                    userConstraint.AllowedShiftLabels = ShiftEligibilityResolver
-                        .GetStandaloneLabels(userConstraint.AllowedShiftPermissions)
-                        .ToList();
+                    ShiftEligibilityResolver.ApplyPermissionsToUserConstraint(
+                        userConstraint, user.AllowedShiftPermissions);
 
                     userConstraint.MaxConsecutiveShifts = 2;
                     userConstraint.MinRestDaysBetweenShifts = 1; // پیش‌فرض
                     userConstraint.MaxShiftsPerWeek = 5; // پیش‌فرض
-                    // با خاموش بودن شب‌متوالی: فقط شب پشت‌سرهم ممنوع است (Abs فاصله > ۱ ⇒ الگوی N / استراحت / N مجاز)
-                    userConstraint.MinDaysBetweenNightShifts = 1;
-                    if (constraints.HardRules.AllowNightShiftAfterNightShift)
-                    {
-                        // با فعال بودن شب متوالی، فاصلهٔ اجباری بین شب‌ها برداشته می‌شود
-                        // (سقف طول زنجیره با MaxConsecutiveNightShifts کنترل می‌شود)
-                        userConstraint.MinDaysBetweenNightShifts = 0;
-                    }
+                    // با فعال بودن شب متوالی (برای کاربر یا دپارتمان)، فاصلهٔ اجباری بین شب‌ها برداشته می‌شود
+                    var effectiveAllowNightShift = userConstraint.ResolveAllowNightShiftAfterNightShift(constraints.HardRules.AllowNightShiftAfterNightShift);
+                    userConstraint.MinDaysBetweenNightShifts = effectiveAllowNightShift ? 0 : 1;
                     var isFixedNightUser = userConstraint.ShiftSubType == ShiftSubTypes.FixedNight
                         || (userConstraint.ShiftType == ShiftTypes.FixedShift &&
                             userConstraint.AllowedShiftLabels.Count == 1 &&
@@ -3455,6 +3461,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
             for (var pass = 0; pass < 3; pass++)
             {
+                CoupledShiftRuleGuard.Enforce(solution, constraints);
                 DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
                 ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
                 AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
@@ -3466,6 +3473,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 if (DailyDuplicateAssignmentGuard.GetViolations(solution, constraints).Count == 0
                     && ShiftEligibilityGuard.GetViolations(solution, constraints).Count == 0
                     && AdjacentShiftRestGuard.GetViolations(solution, constraints).Count == 0
+                    && CoupledShiftRuleGuard.GetViolations(solution, constraints).Count == 0
                     && MaxConsecutiveWorkdayRules.GetViolations(solution, constraints).Count == 0
                     && ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints).Count == 0)
                 {
@@ -3477,6 +3485,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
                 ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
             }
+            CoupledShiftRuleGuard.Enforce(solution, constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
             ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
@@ -3597,6 +3606,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     MaxConsecutiveWorkdayGuard.Enforce(candidateSolution, constraints);
                     for (var pass = 0; pass < 3; pass++)
                     {
+                        CoupledShiftRuleGuard.Enforce(candidateSolution, constraints);
                         DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
                         ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
                         AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
@@ -3608,6 +3618,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         if (DailyDuplicateAssignmentGuard.GetViolations(candidateSolution, constraints).Count == 0
                             && ShiftEligibilityGuard.GetViolations(candidateSolution, constraints).Count == 0
                             && AdjacentShiftRestGuard.GetViolations(candidateSolution, constraints).Count == 0
+                            && CoupledShiftRuleGuard.GetViolations(candidateSolution, constraints).Count == 0
                             && MaxConsecutiveWorkdayRules.GetViolations(candidateSolution, constraints).Count == 0
                             && ShiftCoverageGuard.GetUnderCapacityViolations(candidateSolution, constraints).Count == 0)
                         {
@@ -3619,6 +3630,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
                         ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
                     }
+                    CoupledShiftRuleGuard.Enforce(candidateSolution, constraints);
                     DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
                     ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
                     AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);

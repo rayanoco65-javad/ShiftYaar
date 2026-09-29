@@ -11,3 +11,5 @@
 2025-05-01 00:12:54 - 20250501_001242_EditPermissionModel2
 2025-05-01 00:35:11 - 20250501_003454_EditPermissionModel3
 2026-09-24 20:45:00 - 20260924204500_AddHardshipScoreAndClinicalManagementRolesToUser
+2026-09-29 22:48:31 - 20260929191831_AddCoupledShiftRulesToUser
+2026-09-29 23:19:05 - 20260929194905_AddPostNightShiftRulesToUser

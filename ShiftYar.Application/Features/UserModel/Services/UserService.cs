@@ -149,6 +149,12 @@ namespace ShiftYar.Application.Features.UserModel.Services
                     return ApiResponse<UserDtoAdd>.Fail(permissionsError);
                 }
 
+                var coupledRulesError = ValidateCoupledShiftRules(dto);
+                if (coupledRulesError != null)
+                {
+                    return ApiResponse<UserDtoAdd>.Fail(coupledRulesError);
+                }
+
                 NormalizeShiftManagerFields(dto);
 
                 var user = _mapper.Map<User>(dto);
@@ -267,6 +273,12 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 if (permissionsError != null)
                 {
                     return ApiResponse<UserDtoAdd>.Fail(permissionsError);
+                }
+
+                var coupledRulesError = ValidateCoupledShiftRules(dto);
+                if (coupledRulesError != null)
+                {
+                    return ApiResponse<UserDtoAdd>.Fail(coupledRulesError);
                 }
 
                 NormalizeShiftManagerFields(dto);
@@ -488,6 +500,19 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 out var canBe);
             dto.ShiftManagerLevel = level;
             dto.CanBeShiftManager = canBe;
+        }
+
+        private static string? ValidateCoupledShiftRules(UserDtoAdd dto)
+        {
+            var hasEveningRule = (dto.MorningRequiresEvening == true) || (dto.EveningRequiresMorning == true);
+            var hasNightRule = (dto.MorningRequiresNight == true) || (dto.NightRequiresMorning == true);
+
+            if (hasEveningRule && hasNightRule)
+            {
+                return "امکان فعال‌سازی هم‌زمان قوانین شیفت مقید عصر و شب برای یک کاربر وجود ندارد.";
+            }
+
+            return null;
         }
     }
 }

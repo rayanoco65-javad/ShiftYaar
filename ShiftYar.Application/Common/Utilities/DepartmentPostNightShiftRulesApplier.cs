@@ -24,7 +24,8 @@ public static class DepartmentPostNightShiftRulesApplier
                 Math.Max(1, settings.MaxConsecutiveNightShifts.Value);
         }
 
-        if (constraints.HardRules.AllowNightShiftAfterNightShift)
+        var anyUserAllowsNight = constraints.UserConstraints.Any(u => u.ResolveAllowNightShiftAfterNightShift(constraints.HardRules.AllowNightShiftAfterNightShift));
+        if (constraints.HardRules.AllowNightShiftAfterNightShift || anyUserAllowsNight)
         {
             constraints.GlobalConstraints.AllowConsecutiveNightShifts = true;
 
@@ -32,18 +33,20 @@ public static class DepartmentPostNightShiftRulesApplier
             {
                 constraints.GlobalConstraints.MaxConsecutiveNightShifts = 2;
             }
-
-            // فاصلهٔ اجباری بین شب‌های کاربران باید با این فلگ هم‌خوان باشد
-            foreach (var user in constraints.UserConstraints)
-            {
-                user.MinDaysBetweenNightShifts = 0;
-            }
         }
         else
         {
             constraints.GlobalConstraints.AllowConsecutiveNightShifts = false;
-            // فقط شب متوالی ممنوع؛ یک روز استراحت بین دو شب کافی است
-            foreach (var user in constraints.UserConstraints)
+        }
+
+        foreach (var user in constraints.UserConstraints)
+        {
+            var effectiveAllowNight = user.ResolveAllowNightShiftAfterNightShift(constraints.HardRules.AllowNightShiftAfterNightShift);
+            if (effectiveAllowNight)
+            {
+                user.MinDaysBetweenNightShifts = 0;
+            }
+            else
             {
                 if (user.MinDaysBetweenNightShifts == 0 || user.MinDaysBetweenNightShifts > 1)
                 {

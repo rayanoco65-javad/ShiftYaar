@@ -128,11 +128,12 @@ public static class AdjacentShiftRestRules
 
     public static bool HasForbiddenAdjacentPair(
         IEnumerable<SaShiftAssignment> assignments,
-        HardRuleSet rules) =>
+        HardRuleSet rules,
+        UserConstraint? user = null) =>
         HasForbiddenAdjacentPair(
             assignments,
-            rules.AllowEveningAfterNightShift,
-            rules.AllowNightShiftAfterNightShift);
+            user != null ? user.ResolveAllowEveningAfterNightShift(rules.AllowEveningAfterNightShift) : rules.AllowEveningAfterNightShift,
+            user != null ? user.ResolveAllowNightShiftAfterNightShift(rules.AllowNightShiftAfterNightShift) : rules.AllowNightShiftAfterNightShift);
 
     /// <summary>
     /// اگر انتساب جدید (date, label) به لیست فعلی اضافه شود، توالی ممنوع ایجاد می‌شود؟
@@ -184,14 +185,32 @@ public static class AdjacentShiftRestRules
         ShiftLabel label,
         ShiftConstraints constraints,
         int? ignoreShiftId = null,
-        bool ignoreSettingsControlledAfterNight = false) =>
-        WouldConflict(
+        bool ignoreSettingsControlledAfterNight = false,
+        int? userId = null)
+    {
+        var targetUserId = userId ?? existingAssignments.FirstOrDefault()?.UserId;
+        var userConstraint = targetUserId.HasValue && constraints != null
+            ? constraints.UserConstraints.FirstOrDefault(u => u.UserId == targetUserId.Value)
+            : null;
+
+        var allowEvening = ignoreSettingsControlledAfterNight ||
+            (userConstraint != null
+                ? userConstraint.ResolveAllowEveningAfterNightShift(constraints.HardRules.AllowEveningAfterNightShift)
+                : constraints.HardRules.AllowEveningAfterNightShift);
+
+        var allowNight = ignoreSettingsControlledAfterNight ||
+            (userConstraint != null
+                ? userConstraint.ResolveAllowNightShiftAfterNightShift(constraints.HardRules.AllowNightShiftAfterNightShift)
+                : constraints.HardRules.AllowNightShiftAfterNightShift);
+
+        return WouldConflict(
             existingAssignments,
             date,
             label,
             ignoreShiftId,
-            ignoreSettingsControlledAfterNight || constraints.HardRules.AllowEveningAfterNightShift,
-            ignoreSettingsControlledAfterNight || constraints.HardRules.AllowNightShiftAfterNightShift);
+            allowEvening,
+            allowNight);
+    }
 
     public static List<(SaShiftAssignment Earlier, SaShiftAssignment Later)> FindForbiddenPairs(
         IEnumerable<SaShiftAssignment> assignments,
@@ -217,11 +236,12 @@ public static class AdjacentShiftRestRules
 
     public static List<(SaShiftAssignment Earlier, SaShiftAssignment Later)> FindForbiddenPairs(
         IEnumerable<SaShiftAssignment> assignments,
-        HardRuleSet rules) =>
+        HardRuleSet rules,
+        UserConstraint? user = null) =>
         FindForbiddenPairs(
             assignments,
-            rules.AllowEveningAfterNightShift,
-            rules.AllowNightShiftAfterNightShift);
+            user != null ? user.ResolveAllowEveningAfterNightShift(rules.AllowEveningAfterNightShift) : rules.AllowEveningAfterNightShift,
+            user != null ? user.ResolveAllowNightShiftAfterNightShift(rules.AllowNightShiftAfterNightShift) : rules.AllowNightShiftAfterNightShift);
 
     private static List<SaShiftAssignment> OrderAssignments(IEnumerable<SaShiftAssignment> assignments)
     {

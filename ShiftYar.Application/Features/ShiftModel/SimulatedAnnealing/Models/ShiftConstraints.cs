@@ -136,6 +136,57 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         /// <summary>شیفت انتخابی هفته اول ماه: صبح (Morning) یا عصر (Evening)</summary>
         public ShiftLabel? FirstWeekShiftLabel { get; set; }
 
+        /// <summary>اگر کاربر در هر روز شیفت صبح گرفت، شیفت عصر همان روز را هم بگیرد.</summary>
+        public bool MorningRequiresEvening { get; set; }
+        /// <summary>اگر کاربر در هر روز شیفت صبح گرفت، شیفت شب همان روز را هم بگیرد.</summary>
+        public bool MorningRequiresNight { get; set; }
+        /// <summary>اگر کاربر در هر روز شیفت عصر گرفت، شیفت صبح همان روز را هم بگیرد.</summary>
+        public bool EveningRequiresMorning { get; set; }
+        /// <summary>اگر کاربر در هر روز شیفت شب گرفت، شیفت صبح همان روز را هم بگیرد.</summary>
+        public bool NightRequiresMorning { get; set; }
+
+        public bool HasCoupledShiftRules =>
+            MorningRequiresEvening || MorningRequiresNight || EveningRequiresMorning || NightRequiresMorning;
+
+        /// <summary>عصر بعد از شب مجاز است (true = مجاز، false = ممنوع، null = تبعیت از دپارتمان).</summary>
+        public bool? AllowEveningAfterNightShift { get; set; }
+
+        /// <summary>شب بعد از شب مجاز است (true = مجاز، false = ممنوع، null = تبعیت از دپارتمان).</summary>
+        public bool? AllowNightShiftAfterNightShift { get; set; }
+
+        /// <summary>
+        /// تعیین مجاز بودن شیفت عصر بعد از شب با اولویت تنظیمات کاربر بر دپارتمان.
+        /// </summary>
+        public bool ResolveAllowEveningAfterNightShift(bool departmentDefault) =>
+            AllowEveningAfterNightShift ?? departmentDefault;
+
+        /// <summary>
+        /// تعیین مجاز بودن شیفت شب بعد از شب با اولویت تنظیمات کاربر بر دپارتمان.
+        /// </summary>
+        public bool ResolveAllowNightShiftAfterNightShift(bool departmentDefault) =>
+            AllowNightShiftAfterNightShift ?? departmentDefault;
+
+        /// <summary>
+        /// اگر این شیفت داده شود، آیا شیفت مقید دیگری در همان روز الزامی می‌شود؟
+        /// </summary>
+        public ShiftLabel? GetRequiredCoupledShift(ShiftLabel label)
+        {
+            if (label == ShiftLabel.Morning)
+            {
+                if (MorningRequiresEvening) return ShiftLabel.Evening;
+                if (MorningRequiresNight) return ShiftLabel.Night;
+            }
+            else if (label == ShiftLabel.Evening)
+            {
+                if (EveningRequiresMorning) return ShiftLabel.Morning;
+            }
+            else if (label == ShiftLabel.Night)
+            {
+                if (NightRequiresMorning) return ShiftLabel.Morning;
+            }
+            return null;
+        }
+
         public bool CanBeShiftManager { get; set; }
         /// <summary>null = مسئول نیست؛ 1 = سطح ۱؛ 2 = سطح ۲</summary>
         public byte? ShiftManagerLevel { get; set; }
@@ -334,10 +385,15 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public bool AllowNightShiftAfterNightShift { get; set; } = false;
 
         /// <summary>آیا شیفت مشخص در روز بعد از شب ممنوع است؟</summary>
-        public bool IsForbiddenOnDayAfterNight(ShiftLabel label) =>
-            label == ShiftLabel.Morning ||
-            (label == ShiftLabel.Evening && !AllowEveningAfterNightShift) ||
-            (label == ShiftLabel.Night && !AllowNightShiftAfterNightShift);
+        public bool IsForbiddenOnDayAfterNight(ShiftLabel label, UserConstraint? user = null)
+        {
+            var allowEvening = user != null ? user.ResolveAllowEveningAfterNightShift(AllowEveningAfterNightShift) : AllowEveningAfterNightShift;
+            var allowNight = user != null ? user.ResolveAllowNightShiftAfterNightShift(AllowNightShiftAfterNightShift) : AllowNightShiftAfterNightShift;
+
+            return label == ShiftLabel.Morning ||
+                (label == ShiftLabel.Evening && !allowEvening) ||
+                (label == ShiftLabel.Night && !allowNight);
+        }
 
         public static HardRuleSet CreateDefault()
         {

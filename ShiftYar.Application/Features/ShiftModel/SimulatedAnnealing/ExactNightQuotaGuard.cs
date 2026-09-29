@@ -1389,8 +1389,8 @@ public static class ExactNightQuotaGuard
             .Where(s => s.ShiftLabel == ShiftLabel.Night)
             .Select(s => s.Date.Date));
 
-        var allowNightAfterNight = constraints.HardRules.AllowNightShiftAfterNightShift;
-        var allowEveningAfterNight = constraints.HardRules.AllowEveningAfterNightShift;
+        var allowNightAfterNight = user.ResolveAllowNightShiftAfterNightShift(constraints.HardRules.AllowNightShiftAfterNightShift);
+        var allowEveningAfterNight = user.ResolveAllowEveningAfterNightShift(constraints.HardRules.AllowEveningAfterNightShift);
 
         var feasible = new List<DateTime>();
         for (int i = 0; i < allDates.Count; i++)
@@ -2550,7 +2550,7 @@ public static class ExactNightQuotaGuard
                 continue;
             }
 
-            if (constraints.HardRules.IsForbiddenOnDayAfterNight(assignment.ShiftLabel))
+            if (constraints.HardRules.IsForbiddenOnDayAfterNight(assignment.ShiftLabel, user))
             {
                 solution.UnlockSkeletonAssignment(assignment.UserId, assignment.ShiftId, assignment.Date);
                 solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date, force: true);
@@ -2601,7 +2601,7 @@ public static class ExactNightQuotaGuard
         RemoveForbiddenOnDayAfterNight(solution, constraints, user, next);
 
         // روز قبل از شب (اگر عصر بعد از شب غیرمجاز است)
-        if (!constraints.HardRules.AllowEveningAfterNightShift)
+        if (!user.ResolveAllowEveningAfterNightShift(constraints.HardRules.AllowEveningAfterNightShift))
         {
             RemoveClearableAssignments(solution, constraints, user, prev, ShiftLabel.Evening);
         }
@@ -2683,7 +2683,7 @@ public static class ExactNightQuotaGuard
                     return false;
                 }
 
-                if (a.Date.Date == prev && a.ShiftLabel == ShiftLabel.Evening && !constraints.HardRules.AllowEveningAfterNightShift && !IsProtected(constraints, user.UserId, a))
+                if (a.Date.Date == prev && a.ShiftLabel == ShiftLabel.Evening && !user.ResolveAllowEveningAfterNightShift(constraints.HardRules.AllowEveningAfterNightShift) && !IsProtected(constraints, user.UserId, a))
                 {
                     return false;
                 }
@@ -3204,10 +3204,17 @@ public static class ExactNightQuotaGuard
         var baseMax = constraints.HardRules.EnforceMaxShiftsPerDay
             ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
             : 2;
-        if (user != null && date.HasValue)
+        if (user != null)
         {
-            var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == date.Value.Date);
-            return Math.Max(baseMax, approvedCount);
+            if (user.HasCoupledShiftRules && baseMax < 2)
+            {
+                baseMax = 2;
+            }
+            if (date.HasValue)
+            {
+                var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == date.Value.Date);
+                return Math.Max(baseMax, approvedCount);
+            }
         }
         return baseMax;
     }
@@ -3222,7 +3229,7 @@ public static class ExactNightQuotaGuard
     /// </summary>
     private static int ResolveNightSpacingGap(ShiftConstraints constraints, UserConstraint user)
     {
-        if (constraints.HardRules.AllowNightShiftAfterNightShift)
+        if (user.ResolveAllowNightShiftAfterNightShift(constraints.HardRules.AllowNightShiftAfterNightShift))
         {
             return 0;
         }

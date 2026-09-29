@@ -403,13 +403,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         continue;
                     }
 
-                    if (constraints.HardRules.IsForbiddenOnDayAfterNight(assignment.ShiftLabel))
+                    if (constraints.HardRules.IsForbiddenOnDayAfterNight(assignment.ShiftLabel, user))
                     {
                         solution.RemoveAssignment(assignment.UserId, assignment.ShiftId, assignment.Date, force: true);
                     }
                 }
 
-                if (!constraints.HardRules.AllowNightShiftAfterNightShift)
+                if (!user.ResolveAllowNightShiftAfterNightShift(constraints.HardRules.AllowNightShiftAfterNightShift))
                 {
                     foreach (var assignment in GetUserNightAssignments(solution, user.UserId)
                                  .Where(a => a.Date.Date == date.Date.AddDays(-1))

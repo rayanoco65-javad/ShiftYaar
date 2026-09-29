@@ -363,16 +363,19 @@ public static class ManagerMixFeasibilityChecker
         DateTime date,
         ShiftLabel label)
     {
+        var effectiveAllowNight = user.ResolveAllowNightShiftAfterNightShift(constraints.HardRules.AllowNightShiftAfterNightShift);
+        var effectiveAllowEvening = user.ResolveAllowEveningAfterNightShift(constraints.HardRules.AllowEveningAfterNightShift);
+
         if (label == ShiftLabel.Night)
         {
-            if (!constraints.HardRules.AllowNightShiftAfterNightShift)
+            if (!effectiveAllowNight)
             {
                 ClearLabelOnDate(solution, constraints, user, date.AddDays(-1), ShiftLabel.Night);
             }
 
             foreach (var assignment in solution.GetUserAssignments(user.UserId, date.AddDays(1)).ToList())
             {
-                if (constraints.HardRules.IsForbiddenOnDayAfterNight(assignment.ShiftLabel))
+                if (constraints.HardRules.IsForbiddenOnDayAfterNight(assignment.ShiftLabel, user))
                 {
                     TryForceRemove(solution, constraints, user, assignment);
                 }
@@ -385,7 +388,7 @@ public static class ManagerMixFeasibilityChecker
                 TryForceRemove(solution, constraints, user, assignment);
             }
         }
-        else if (label == ShiftLabel.Evening && !constraints.HardRules.AllowEveningAfterNightShift)
+        else if (label == ShiftLabel.Evening && !effectiveAllowEvening)
         {
             ClearLabelOnDate(solution, constraints, user, date.AddDays(-1), ShiftLabel.Night);
         }

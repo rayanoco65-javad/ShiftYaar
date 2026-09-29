@@ -21,7 +21,8 @@ public static class AdjacentShiftRestGuard
             {
                 var pairs = AdjacentShiftRestRules.FindForbiddenPairs(
                     solution.GetUserAllAssignments(user.UserId),
-                    constraints.HardRules);
+                    constraints.HardRules,
+                    user);
                 if (pairs.Count == 0)
                 {
                     break;
@@ -68,6 +69,9 @@ public static class AdjacentShiftRestGuard
         var violations = new List<string>();
         foreach (var user in constraints.UserConstraints)
         {
+            var effectiveAllowEvening = user.ResolveAllowEveningAfterNightShift(constraints.HardRules.AllowEveningAfterNightShift);
+            var effectiveAllowNight = user.ResolveAllowNightShiftAfterNightShift(constraints.HardRules.AllowNightShiftAfterNightShift);
+
             foreach (var (earlier, later) in FindReportableForbiddenPairs(
                          user,
                          solution.GetUserAllAssignments(user.UserId),
@@ -81,13 +85,13 @@ public static class AdjacentShiftRestGuard
                         : earlier.ShiftLabel == ShiftLabel.Night &&
                           later.ShiftLabel == ShiftLabel.Evening &&
                           later.Date.Date == earlier.Date.Date.AddDays(1) &&
-                          !constraints.HardRules.AllowEveningAfterNightShift
-                            ? "شیفت عصر روز بعد از شب مجاز نیست (تنظیمات دپارتمان)"
+                          !effectiveAllowEvening
+                            ? "شیفت عصر روز بعد از شب مجاز نیست (تنظیمات کاربر/دپارتمان)"
                         : earlier.ShiftLabel == ShiftLabel.Night &&
                           later.ShiftLabel == ShiftLabel.Night &&
                           later.Date.Date == earlier.Date.Date.AddDays(1) &&
-                          !constraints.HardRules.AllowNightShiftAfterNightShift
-                            ? "شیفت شب روز بعد از شب مجاز نیست (تنظیمات دپارتمان)"
+                          !effectiveAllowNight
+                            ? "شیفت شب روز بعد از شب مجاز نیست (تنظیمات کاربر/دپارتمان)"
                             : "حداقل یک نوبت فاصله لازم است";
                 violations.Add(
                     $"توالی ممنوع شیفت: کاربر {user.UserId} ({user.UserName}) " +
@@ -114,7 +118,7 @@ public static class AdjacentShiftRestGuard
         IEnumerable<SaShiftAssignment> assignments,
         HardRuleSet rules)
     {
-        return AdjacentShiftRestRules.FindForbiddenPairs(assignments, rules)
+        return AdjacentShiftRestRules.FindForbiddenPairs(assignments, rules, user)
             .Where(p => !IsWaivedByApprovedLaterSlot(user, p.Earlier, p.Later))
             .ToList();
     }

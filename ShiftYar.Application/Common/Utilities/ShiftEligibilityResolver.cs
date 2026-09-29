@@ -140,6 +140,17 @@ public static class ShiftEligibilityResolver
             user.ShiftType,
             user.ShiftSubType,
             user.TwoShiftRotationPattern);
+
+        if (user.MorningRequiresEvening || user.EveningRequiresMorning)
+        {
+            user.AllowedShiftPermissions |= UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.MorningEveningSameDay;
+        }
+
+        if (user.MorningRequiresNight || user.NightRequiresMorning)
+        {
+            user.AllowedShiftPermissions |= UserShiftPermission.Morning | UserShiftPermission.Night | UserShiftPermission.MorningNightSameDay;
+        }
+
         user.AllowedShiftLabels = GetStandaloneLabels(user.AllowedShiftPermissions).ToList();
     }
 
@@ -290,6 +301,11 @@ public static class ShiftEligibilityResolver
                     return false;
                 }
             }
+        }
+
+        if (user.HasCoupledShiftRules && maxShiftsPerDay < 2)
+        {
+            maxShiftsPerDay = 2;
         }
 
         if (!UsesPermissionModel(user))

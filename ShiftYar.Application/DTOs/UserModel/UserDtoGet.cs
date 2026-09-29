@@ -64,6 +64,24 @@ namespace ShiftYar.Application.DTOs.UserModel
         /// <summary>مجوزهای صریح نوع شیفت (flags). null = مشتق از ShiftType.</summary>
         public UserShiftPermission? AllowedShiftPermissions { get; set; }
 
+        /// <summary>اگر کاربر در هر روز شیفت صبح گرفت، شیفت عصر همان روز را هم بگیرد.</summary>
+        public bool? MorningRequiresEvening { get; set; }
+
+        /// <summary>اگر کاربر در هر روز شیفت صبح گرفت، شیفت شب همان روز را هم بگیرد.</summary>
+        public bool? MorningRequiresNight { get; set; }
+
+        /// <summary>اگر کاربر در هر روز شیفت عصر گرفت، شیفت صبح همان روز را هم بگیرد.</summary>
+        public bool? EveningRequiresMorning { get; set; }
+
+        /// <summary>اگر کاربر در هر روز شیفت شب گرفت، شیفت صبح همان روز را هم بگیرد.</summary>
+        public bool? NightRequiresMorning { get; set; }
+
+        /// <summary>عصر بعد از شب مجاز است (true = مجاز، false = ممنوع، null = تبعیت از دپارتمان).</summary>
+        public bool? AllowEveningAfterNightShift { get; set; }
+
+        /// <summary>شب بعد از شب مجاز است (true = مجاز، false = ممنوع، null = تبعیت از دپارتمان).</summary>
+        public bool? AllowNightShiftAfterNightShift { get; set; }
+
         public List<UserPhoneNumberDtoGet>? OtherPhoneNumbers { get; set; }
         public List<UserRoleDtoGet>? UserRoles { get; set; }
     }

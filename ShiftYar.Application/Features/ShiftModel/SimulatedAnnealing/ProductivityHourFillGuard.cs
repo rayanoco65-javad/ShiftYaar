@@ -1368,6 +1368,11 @@ public static class ProductivityHourFillGuard
             return true;
         }
 
+        if (ShiftCoverageGuard.IsCoupledShiftOnDate(solution, user, assignment.Date, assignment.ShiftLabel))
+        {
+            return true;
+        }
+
         var isSkeleton = solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
             || assignment.IsSkeleton;
         if (!isSkeleton)

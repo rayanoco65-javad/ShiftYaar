@@ -309,8 +309,14 @@ public static class ExactDayShiftQuotaGuard
         var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
             ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
             : 2;
+        var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == date.Date);
+        var effectiveMax = Math.Max(maxPerDay, approvedCount);
+        if (user.HasCoupledShiftRules && effectiveMax < 2)
+        {
+            effectiveMax = 2;
+        }
         if (!DailyAssignmentRules.CanAddShift(
-                existing, label, maxPerDay, constraints.HardRules.ForbidDuplicateDailyAssignments))
+                existing, label, effectiveMax, constraints.HardRules.ForbidDuplicateDailyAssignments))
         {
             return false;
         }
@@ -329,7 +335,28 @@ public static class ExactDayShiftQuotaGuard
         solution.IsLockedSkeleton(assignment.UserId, assignment.ShiftId, assignment.Date)
         || assignment.IsSkeleton
         || ApprovedRequestGuard.IsApprovedRequiredSlot(
-            user, assignment.Date, assignment.ShiftLabel, assignment.ShiftId);
+            user, assignment.Date, assignment.ShiftLabel, assignment.ShiftId)
+        || IsCoupledAssignment(solution, user, assignment);
+
+    private static bool IsCoupledAssignment(ShiftSolution solution, UserConstraint user, SaShiftAssignment assignment)
+    {
+        if (!user.HasCoupledShiftRules) return false;
+        var labels = solution.GetUserAssignments(user.UserId, assignment.Date).Select(a => a.ShiftLabel).ToList();
+        if (assignment.ShiftLabel == ShiftLabel.Morning)
+        {
+            if ((user.MorningRequiresEvening || user.EveningRequiresMorning) && labels.Contains(ShiftLabel.Evening)) return true;
+            if ((user.MorningRequiresNight || user.NightRequiresMorning) && labels.Contains(ShiftLabel.Night)) return true;
+        }
+        else if (assignment.ShiftLabel == ShiftLabel.Evening)
+        {
+            if ((user.MorningRequiresEvening || user.EveningRequiresMorning) && labels.Contains(ShiftLabel.Morning)) return true;
+        }
+        else if (assignment.ShiftLabel == ShiftLabel.Night)
+        {
+            if ((user.MorningRequiresNight || user.NightRequiresMorning) && labels.Contains(ShiftLabel.Morning)) return true;
+        }
+        return false;
+    }
 
     private static bool HasAnyQuota(UserConstraint user, ShiftLabel label) =>
         label == ShiftLabel.Morning

@@ -671,6 +671,11 @@ public static class ShiftCoverageGuard
             return true;
         }
 
+        if (IsCoupledShiftOnDate(solution, user, assignment.Date, assignment.ShiftLabel))
+        {
+            return true;
+        }
+
         if (assignment.ShiftLabel == ShiftLabel.Night)
         {
             if (user.ExactNightShiftCount.HasValue)
@@ -712,6 +717,26 @@ public static class ShiftCoverageGuard
             }
         }
 
+        return false;
+    }
+
+    public static bool IsCoupledShiftOnDate(ShiftSolution solution, UserConstraint user, DateTime date, ShiftLabel label)
+    {
+        if (!user.HasCoupledShiftRules) return false;
+        var dayLabels = solution.GetUserAssignments(user.UserId, date).Select(x => x.ShiftLabel).ToList();
+        if (label == ShiftLabel.Morning)
+        {
+            if ((user.MorningRequiresEvening || user.EveningRequiresMorning) && dayLabels.Contains(ShiftLabel.Evening)) return true;
+            if ((user.MorningRequiresNight || user.NightRequiresMorning) && dayLabels.Contains(ShiftLabel.Night)) return true;
+        }
+        else if (label == ShiftLabel.Evening)
+        {
+            if ((user.MorningRequiresEvening || user.EveningRequiresMorning) && dayLabels.Contains(ShiftLabel.Morning)) return true;
+        }
+        else if (label == ShiftLabel.Night)
+        {
+            if ((user.MorningRequiresNight || user.NightRequiresMorning) && dayLabels.Contains(ShiftLabel.Morning)) return true;
+        }
         return false;
     }
 
@@ -1377,6 +1402,10 @@ public static class ShiftCoverageGuard
             : 2;
         var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == date.Date);
         var effectiveMax = Math.Max(maxPerDay, approvedCount);
+        if (user.HasCoupledShiftRules && effectiveMax < 2)
+        {
+            effectiveMax = 2;
+        }
 
         if (!ShiftEligibilityResolver.IsAssignmentAllowed(
                 user,

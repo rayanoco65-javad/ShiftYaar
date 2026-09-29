@@ -30,6 +30,10 @@ public static class DailyDuplicateAssignmentGuard
             var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == group.Key.UserId);
             var approvedCount = user?.RequiredShiftSlots.Count(s => s.Date.Date == group.Key.Date) ?? 0;
             var effectiveMax = Math.Max(maxPerDay, approvedCount);
+            if (user != null && user.HasCoupledShiftRules && effectiveMax < 2)
+            {
+                effectiveMax = 2;
+            }
 
             var items = group.ToList();
             var labels = items.Select(a => a.ShiftLabel).ToList();
@@ -68,6 +72,10 @@ public static class DailyDuplicateAssignmentGuard
                 var user = constraints?.UserConstraints.FirstOrDefault(u => u.UserId == g.Key.UserId);
                 var approvedCount = user?.RequiredShiftSlots.Count(s => s.Date.Date == g.Key.Date) ?? 0;
                 var effectiveMax = Math.Max(maxPerDay, approvedCount);
+                if (user != null && user.HasCoupledShiftRules && effectiveMax < 2)
+                {
+                    effectiveMax = 2;
+                }
 
                 // ترکیب‌های غیرمجاز پزشکی یا نقض سقف روزانه
                 return !DailyAssignmentRules.IsValidDaySet(labels, maxShiftsPerDay: effectiveMax, forbidDup);
@@ -140,6 +148,28 @@ public static class DailyDuplicateAssignmentGuard
                 s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel))
         {
             return true;
+        }
+
+        if (user.HasCoupledShiftRules)
+        {
+            var dayLabels = solution.GetUserAssignments(user.UserId, assignment.Date).Select(a => a.ShiftLabel).ToList();
+            if (assignment.ShiftLabel == ShiftLabel.Morning)
+            {
+                if ((user.MorningRequiresEvening || user.EveningRequiresMorning) && dayLabels.Contains(ShiftLabel.Evening))
+                    return true;
+                if ((user.MorningRequiresNight || user.NightRequiresMorning) && dayLabels.Contains(ShiftLabel.Night))
+                    return true;
+            }
+            else if (assignment.ShiftLabel == ShiftLabel.Evening)
+            {
+                if ((user.MorningRequiresEvening || user.EveningRequiresMorning) && dayLabels.Contains(ShiftLabel.Morning))
+                    return true;
+            }
+            else if (assignment.ShiftLabel == ShiftLabel.Night)
+            {
+                if ((user.MorningRequiresNight || user.NightRequiresMorning) && dayLabels.Contains(ShiftLabel.Morning))
+                    return true;
+            }
         }
 
         return !assignment.IsOnCall &&

@@ -1620,6 +1620,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         {
             solution.Violations.Clear();
             ApprovedRequestGuard.ForceApply(solution, _constraints);
+            CoupledShiftRuleGuard.Enforce(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             ShiftEligibilityGuard.StripIneligibleAssignments(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
@@ -1635,6 +1636,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             HolidayMorningEveningFairnessGuard.Enforce(solution, _constraints);
             MorningEveningBalanceGuard.Enforce(solution, _constraints);
             ShiftCoverageGuard.Enforce(solution, _constraints);
+            CoupledShiftRuleGuard.Enforce(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
 
             // یک پاس نهایی برای نزدیک کردن ساعات مؤثر به موظفی پس از گاردهای پوشش/تعطیل
@@ -1648,6 +1650,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
             ExactDayShiftQuotaGuard.EnforceAll(solution, _constraints);
+            CoupledShiftRuleGuard.Enforce(solution, _constraints);
             DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
             ShiftCoverageGuard.EnforceCapacityCeiling(solution, _constraints);
@@ -1671,6 +1674,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ExactComboShiftQuotaGuard.Enforce(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
             ApprovedRequestGuard.ForceApply(solution, _constraints);
+            CoupledShiftRuleGuard.Enforce(solution, _constraints);
             ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             ShiftCoverageGuard.Enforce(solution, _constraints);
             ExactNightQuotaGuard.Enforce(solution, _constraints);
@@ -1732,6 +1736,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
             for (var pass = 0; pass < 3; pass++)
             {
+                CoupledShiftRuleGuard.Enforce(solution, _constraints);
                 DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
                 ShiftEligibilityGuard.StripIneligibleAssignments(solution, _constraints);
                 AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
@@ -1743,6 +1748,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 if (DailyDuplicateAssignmentGuard.GetViolations(solution, _constraints).Count == 0
                     && ShiftEligibilityGuard.GetViolations(solution, _constraints).Count == 0
                     && AdjacentShiftRestGuard.GetViolations(solution, _constraints).Count == 0
+                    && CoupledShiftRuleGuard.GetViolations(solution, _constraints).Count == 0
                     && MaxConsecutiveWorkdayRules.GetViolations(solution, _constraints).Count == 0
                     && ShiftCoverageGuard.GetUnderCapacityViolations(solution, _constraints).Count == 0)
                 {
@@ -1768,6 +1774,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             solution.Violations.AddRange(ShiftEligibilityGuard.GetViolations(solution, _constraints));
             solution.Violations.AddRange(AdjacentShiftRestGuard.GetViolations(solution, _constraints));
             solution.Violations.AddRange(DailyDuplicateAssignmentGuard.GetViolations(solution, _constraints));
+            solution.Violations.AddRange(CoupledShiftRuleGuard.GetViolations(solution, _constraints));
             solution.Violations.AddRange(GetExactNightQuotaViolations(solution));
             solution.Violations.AddRange(GetExactDayShiftQuotaViolations(solution));
             solution.Violations.AddRange(ExactDayShiftQuotaGuard.GetFallbackPoolWarnings(solution, _constraints));
@@ -1841,19 +1848,22 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         }
                     }
 
-                    if (!_constraints.HardRules.AllowEveningAfterNightShift)
+                    var effectiveAllowEvening = user.ResolveAllowEveningAfterNightShift(_constraints.HardRules.AllowEveningAfterNightShift);
+                    var effectiveAllowNight = user.ResolveAllowNightShiftAfterNightShift(_constraints.HardRules.AllowNightShiftAfterNightShift);
+
+                    if (!effectiveAllowEvening)
                     {
                         msg += " (تنظیم «اجازه عصر روز بعد از شب» غیرفعال است.)";
                     }
 
-                    if (!_constraints.HardRules.AllowNightShiftAfterNightShift)
+                    if (!effectiveAllowNight)
                     {
                         msg += " (تنظیم «اجازه شب روز بعد از شب» غیرفعال است.)";
                     }
 
                     if (_constraints.HardRules.EnforceMaxShiftsPerDay
                         && _constraints.GlobalConstraints.MaxShiftsPerDay <= 1
-                        && _constraints.HardRules.AllowEveningAfterNightShift)
+                        && effectiveAllowEvening)
                     {
                         msg += " (حداکثر ۱ شیفت در روز فعال است؛ شیفت صبح/عصر همان روز ممکن است مانع شب شود.)";
                     }
@@ -3783,9 +3793,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ShiftLabel label,
             bool relaxSoftRest = false)
         {
+            var effectiveAllowNight = user.ResolveAllowNightShiftAfterNightShift(_constraints.HardRules.AllowNightShiftAfterNightShift);
+            var effectiveAllowEvening = user.ResolveAllowEveningAfterNightShift(_constraints.HardRules.AllowEveningAfterNightShift);
+
             if (label == ShiftLabel.Night)
             {
-                if (!_constraints.HardRules.AllowNightShiftAfterNightShift && !relaxSoftRest)
+                if (!effectiveAllowNight && !relaxSoftRest)
                 {
                     if (!TryClearUserAssignmentsOnDate(solution, user, date.Date.AddDays(-1), ShiftLabel.Night, allowRelocation: true))
                     {
@@ -3795,7 +3808,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
                 foreach (var assignment in solution.GetUserAssignments(user.UserId, date.Date.AddDays(1)).ToList())
                 {
-                    if (!_constraints.HardRules.IsForbiddenOnDayAfterNight(assignment.ShiftLabel))
+                    if (!_constraints.HardRules.IsForbiddenOnDayAfterNight(assignment.ShiftLabel, user))
                     {
                         continue;
                     }
@@ -3816,7 +3829,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     }
                 }
             }
-            else if (label == ShiftLabel.Evening && !_constraints.HardRules.AllowEveningAfterNightShift)
+            else if (label == ShiftLabel.Evening && !effectiveAllowEvening)
             {
                 if (!TryClearUserAssignmentsOnDate(solution, user, date.Date.AddDays(-1), ShiftLabel.Night, allowRelocation: true))
                 {
@@ -4046,6 +4059,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 : 2;
             var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == date.Date);
             var effectiveMax = Math.Max(maxPerDay, approvedCount);
+            if (user.HasCoupledShiftRules && effectiveMax < 2)
+            {
+                effectiveMax = 2;
+            }
             var forbidDup = _constraints.HardRules.ForbidDuplicateDailyAssignments;
 
             return user.RequiredShiftSlots.Any(s =>
@@ -4115,6 +4132,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 : 2;
             var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == date.Date);
             var effectiveMax = Math.Max(maxPerDay, approvedCount);
+            if (user.HasCoupledShiftRules && effectiveMax < 2)
+            {
+                effectiveMax = 2;
+            }
             var sameDayAssignments = solution.GetUserAssignments(user.UserId, date);
             var existingLabels = ignoreSameDayAssignments
                 ? Enumerable.Empty<ShiftLabel>()
@@ -4209,6 +4230,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var user = _constraints.UserConstraints.FirstOrDefault(u => u.UserId == userId);
             var approvedCount = user?.RequiredShiftSlots.Count(s => s.Date.Date == date.Date) ?? 0;
             var effectiveMax = Math.Max(maxPerDay, approvedCount);
+            if (user != null && user.HasCoupledShiftRules && effectiveMax < 2)
+            {
+                effectiveMax = 2;
+            }
             var forbidDup = _constraints.HardRules.ForbidDuplicateDailyAssignments;
             foreach (var assignment in solution.GetUserAssignments(userId, date).ToList())
             {
@@ -4288,6 +4313,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     : 2;
                 var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == date.Date);
                 var effectiveMax = Math.Max(maxPerDay, approvedCount);
+                if (user.HasCoupledShiftRules && effectiveMax < 2)
+                {
+                    effectiveMax = 2;
+                }
                 var existingLabels = solution.GetUserAssignments(user.UserId, date)
                     .Select(a => a.ShiftLabel);
                 if (!ShiftEligibilityResolver.IsAssignmentAllowed(
@@ -4444,6 +4473,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             if (user.RequiredShiftSlots.Any(s =>
                     s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel))
+            {
+                return true;
+            }
+
+            if (ShiftCoverageGuard.IsCoupledShiftOnDate(solution, user, assignment.Date, assignment.ShiftLabel))
             {
                 return true;
             }
@@ -4914,6 +4948,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 ? Math.Max(1, _constraints.GlobalConstraints.MaxShiftsPerDay)
                 : 2;
             var effectiveMax = Math.Max(maxPerDay, approvedCount);
+            if (user != null && user.HasCoupledShiftRules && effectiveMax < 2)
+            {
+                effectiveMax = 2;
+            }
             return !DailyAssignmentRules.CanAddShift(
                 existing,
                 newLabel,
