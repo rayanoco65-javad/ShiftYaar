@@ -1719,7 +1719,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == g.Key.UserId);
                         var approvedCount = user?.RequiredShiftSlots.Count(s => DateConverter.ConvertToPersianDate(s.Date) == g.Key.PersianDate) ?? 0;
                         var effectiveMax = Math.Max(maxPerDay, approvedCount);
-                        if (user != null && user.HasCoupledShiftRules && effectiveMax < 2)
+                        var labels = g.Select(a => a.ShiftLabel).Distinct().ToList();
+                        var firstDate = g.First().Date;
+                        if (user != null && user.CanBypassMaxShiftsPerDay(labels, firstDate) && effectiveMax < 2)
                         {
                             effectiveMax = 2;
                         }
@@ -1732,7 +1734,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == group.Key.UserId);
                     var approvedCount = user?.RequiredShiftSlots.Count(s => DateConverter.ConvertToPersianDate(s.Date) == group.Key.PersianDate) ?? 0;
                     var effectiveMax = Math.Max(maxPerDay, approvedCount);
-                    if (user != null && user.HasCoupledShiftRules && effectiveMax < 2)
+                    var labels = group.Select(a => a.ShiftLabel).Distinct().ToList();
+                    var firstDate = group.First().Date;
+                    if (user != null && user.CanBypassMaxShiftsPerDay(labels, firstDate) && effectiveMax < 2)
                     {
                         effectiveMax = 2;
                     }

@@ -187,6 +187,48 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
             return null;
         }
 
+        /// <summary>
+        /// بررسی می‌کند که آیا دو شیفت در یک روز، دقیقاً با قوانین مقید این کاربر مطابقت دارند یا خیر.
+        /// </summary>
+        public bool AllowsCoupledSameDayPair(ShiftLabel label1, ShiftLabel label2)
+        {
+            if (!HasCoupledShiftRules) return false;
+
+            var hasMorning = label1 == ShiftLabel.Morning || label2 == ShiftLabel.Morning;
+            var hasEvening = label1 == ShiftLabel.Evening || label2 == ShiftLabel.Evening;
+            var hasNight = label1 == ShiftLabel.Night || label2 == ShiftLabel.Night;
+
+            if (hasMorning && hasEvening)
+            {
+                return MorningRequiresEvening || EveningRequiresMorning;
+            }
+
+            if (hasMorning && hasNight)
+            {
+                return MorningRequiresNight || NightRequiresMorning;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// بررسی می‌کند که آیا این مجموعه شیفت‌ها در یک روز می‌توانند از سقف روزانه دپارتمان (مثلاً MaxShiftsPerDay = 1) عبور کنند یا خیر.
+        /// عبور فقط در دو حالت مجاز است:
+        /// ۱. کاربر برای همه این شیفت‌ها درخواست تأییدشده در این تاریخ دارد.
+        /// ۲. دقیقاً دو شیفت بوده و جفت آن‌ها منطبق بر قوانین مقید پرسنل است (صبح+عصر یا صبح+شب).
+        /// </summary>
+        public bool CanBypassMaxShiftsPerDay(IEnumerable<ShiftLabel> labels, DateTime date)
+        {
+            var list = labels.Distinct().ToList();
+            if (list.Count <= 1) return true;
+            if (list.Count > 2) return false;
+
+            var approvedCount = RequiredShiftSlots.Count(s => s.Date.Date == date.Date);
+            if (approvedCount >= list.Count) return true;
+
+            return AllowsCoupledSameDayPair(list[0], list[1]);
+        }
+
         public bool CanBeShiftManager { get; set; }
         /// <summary>null = مسئول نیست؛ 1 = سطح ۱؛ 2 = سطح ۲</summary>
         public byte? ShiftManagerLevel { get; set; }

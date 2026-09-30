@@ -451,7 +451,8 @@ public static class ManagerMixFeasibilityChecker
             }
 
             var trial = new[] { assignment.ShiftLabel, keepLabel };
-            if (!DailyAssignmentRules.IsValidDaySet(trial, maxPerDay, forbidDup))
+            var curMax = (user.CanBypassMaxShiftsPerDay(trial, date) && maxPerDay < 2) ? 2 : maxPerDay;
+            if (!DailyAssignmentRules.IsValidDaySet(trial, curMax, forbidDup))
             {
                 solution.RemoveAssignment(user.UserId, assignment.ShiftId, date, force: true);
             }

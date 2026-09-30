@@ -1402,14 +1402,16 @@ public static class ShiftCoverageGuard
             : 2;
         var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == date.Date);
         var effectiveMax = Math.Max(maxPerDay, approvedCount);
-        if (user.HasCoupledShiftRules && effectiveMax < 2)
+        var existing = solution.GetUserAssignments(user.UserId, date).Select(a => a.ShiftLabel).ToList();
+        var trialLabels = existing.Append(label).Distinct().ToList();
+        if (user.CanBypassMaxShiftsPerDay(trialLabels, date) && effectiveMax < 2)
         {
             effectiveMax = 2;
         }
 
         if (!ShiftEligibilityResolver.IsAssignmentAllowed(
                 user,
-                solution.GetUserAssignments(user.UserId, date).Select(a => a.ShiftLabel),
+                existing,
                 label,
                 effectiveMax,
                 constraints.HardRules.ForbidDuplicateDailyAssignments,
@@ -1419,7 +1421,6 @@ public static class ShiftCoverageGuard
         }
 
         // عمداً سقف هفته اینجا اعمال نمی‌شود — پوشش ظرفیت اجباری است؛ سقف روزهای کاری متوالی اعمال می‌شود.
-        var existing = solution.GetUserAssignments(user.UserId, date).Select(a => a.ShiftLabel);
         if (!DailyAssignmentRules.CanAddShift(
                 existing,
                 label,

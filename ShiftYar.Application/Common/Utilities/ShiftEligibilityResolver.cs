@@ -144,11 +144,13 @@ public static class ShiftEligibilityResolver
         if (user.MorningRequiresEvening || user.EveningRequiresMorning)
         {
             user.AllowedShiftPermissions |= UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.MorningEveningSameDay;
+            user.AllowedShiftPermissions &= ~UserShiftPermission.MorningNightSameDay;
         }
 
         if (user.MorningRequiresNight || user.NightRequiresMorning)
         {
             user.AllowedShiftPermissions |= UserShiftPermission.Morning | UserShiftPermission.Night | UserShiftPermission.MorningNightSameDay;
+            user.AllowedShiftPermissions &= ~UserShiftPermission.MorningEveningSameDay;
         }
 
         user.AllowedShiftLabels = GetStandaloneLabels(user.AllowedShiftPermissions).ToList();
@@ -303,7 +305,13 @@ public static class ShiftEligibilityResolver
             }
         }
 
-        if (user.HasCoupledShiftRules && maxShiftsPerDay < 2)
+        var existingList = existingOnDay.ToList();
+        var trialLabels = existingList.Append(newLabel).Distinct().ToList();
+        if (date.HasValue && user.CanBypassMaxShiftsPerDay(trialLabels, date.Value) && maxShiftsPerDay < 2)
+        {
+            maxShiftsPerDay = 2;
+        }
+        else if (!date.HasValue && trialLabels.Count == 2 && user.AllowsCoupledSameDayPair(trialLabels[0], trialLabels[1]) && maxShiftsPerDay < 2)
         {
             maxShiftsPerDay = 2;
         }

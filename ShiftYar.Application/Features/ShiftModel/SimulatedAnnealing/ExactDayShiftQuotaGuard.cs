@@ -305,13 +305,14 @@ public static class ExactDayShiftQuotaGuard
             return false;
         }
 
-        var existing = solution.GetUserAssignments(user.UserId, date).Select(a => a.ShiftLabel);
+        var existing = solution.GetUserAssignments(user.UserId, date).Select(a => a.ShiftLabel).ToList();
         var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
             ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
             : 2;
         var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == date.Date);
         var effectiveMax = Math.Max(maxPerDay, approvedCount);
-        if (user.HasCoupledShiftRules && effectiveMax < 2)
+        var trialLabels = existing.Append(label).Distinct().ToList();
+        if (user.CanBypassMaxShiftsPerDay(trialLabels, date) && effectiveMax < 2)
         {
             effectiveMax = 2;
         }

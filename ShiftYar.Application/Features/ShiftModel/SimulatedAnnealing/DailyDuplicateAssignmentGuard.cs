@@ -30,13 +30,14 @@ public static class DailyDuplicateAssignmentGuard
             var user = constraints.UserConstraints.FirstOrDefault(u => u.UserId == group.Key.UserId);
             var approvedCount = user?.RequiredShiftSlots.Count(s => s.Date.Date == group.Key.Date) ?? 0;
             var effectiveMax = Math.Max(maxPerDay, approvedCount);
-            if (user != null && user.HasCoupledShiftRules && effectiveMax < 2)
+
+            var items = group.ToList();
+            var labels = items.Select(a => a.ShiftLabel).Distinct().ToList();
+            if (user != null && user.CanBypassMaxShiftsPerDay(labels, group.Key.Date) && effectiveMax < 2)
             {
                 effectiveMax = 2;
             }
 
-            var items = group.ToList();
-            var labels = items.Select(a => a.ShiftLabel).ToList();
             if (DailyAssignmentRules.IsValidDaySet(labels, effectiveMax, forbidDup))
             {
                 continue;
@@ -68,11 +69,11 @@ public static class DailyDuplicateAssignmentGuard
             .GroupBy(a => new { a.UserId, Date = a.Date.Date })
             .Where(g =>
             {
-                var labels = g.Select(a => a.ShiftLabel).ToList();
+                var labels = g.Select(a => a.ShiftLabel).Distinct().ToList();
                 var user = constraints?.UserConstraints.FirstOrDefault(u => u.UserId == g.Key.UserId);
                 var approvedCount = user?.RequiredShiftSlots.Count(s => s.Date.Date == g.Key.Date) ?? 0;
                 var effectiveMax = Math.Max(maxPerDay, approvedCount);
-                if (user != null && user.HasCoupledShiftRules && effectiveMax < 2)
+                if (user != null && user.CanBypassMaxShiftsPerDay(labels, g.Key.Date) && effectiveMax < 2)
                 {
                     effectiveMax = 2;
                 }
@@ -124,7 +125,10 @@ public static class DailyDuplicateAssignmentGuard
                     a.ShiftLabel == (kept.ShiftLabel == ShiftLabel.Morning ? ShiftLabel.Evening : ShiftLabel.Morning));
                 if (other != null)
                 {
-                    keepers.Add(other);
+                    if (user == null || user.CanBypassMaxShiftsPerDay(new[] { kept.ShiftLabel, other.ShiftLabel }, kept.Date))
+                    {
+                        keepers.Add(other);
+                    }
                 }
             }
         }

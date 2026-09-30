@@ -319,4 +319,113 @@ public class CoupledShiftRuleTests
         Assert.Empty(DailyDuplicateAssignmentGuard.GetViolations(solution, constraints));
         Assert.Empty(CoupledShiftRuleGuard.GetViolations(solution, constraints));
     }
+
+    [Fact]
+    public void DailyDuplicateAssignmentGuard_WhenNightRequiresMorning_StripsUncoupledMorningEvening_WhenMaxShiftsPerDayIsOne()
+    {
+        var date = new DateTime(2026, 10, 11); // یکشنبه 19 مهر 1405
+        var constraints = new ShiftConstraints
+        {
+            StartDate = date,
+            EndDate = date.AddDays(1),
+            HardRules = new HardRuleSet
+            {
+                EnforceMaxShiftsPerDay = true,
+                ForbidDuplicateDailyAssignments = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 },
+            UserConstraints = new List<UserConstraint>
+            {
+                new()
+                {
+                    UserId = 1,
+                    UserName = "آفرین نورکرمی",
+                    IsActive = true,
+                    NightRequiresMorning = true,
+                    // حتی اگر کاربر از قبل مجوزها را داشته باشد، چون قانون مقید فقط شب-صبح است
+                    AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.Night | UserShiftPermission.MorningNightSameDay
+                }
+            }
+        };
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(1, 101, date, ShiftLabel.Morning);
+        solution.AddAssignment(1, 102, date, ShiftLabel.Evening);
+
+        // ترکیب صبح+عصر برای کاربری که فقط شب-صبح دارد در بخش با سقف ۱ شیفت، تخلف محسوب می‌شود
+        var violations = DailyDuplicateAssignmentGuard.GetViolations(solution, constraints);
+        Assert.NotEmpty(violations);
+
+        // پس از StripDuplicates، یکی از شیفت‌ها باید حذف شود و کاربر فقط ۱ شیفت داشته باشد
+        DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
+        var assignments = solution.GetUserAssignments(1, date);
+        Assert.Single(assignments);
+    }
+
+    [Fact]
+    public void ShiftEligibilityResolver_WhenNightRequiresMorning_RejectsAddingEveningToMorning_WhenMaxShiftsPerDayIsOne()
+    {
+        var date = new DateTime(2026, 10, 11);
+        var user = new UserConstraint
+        {
+            UserId = 1,
+            UserName = "آفرین نورکرمی",
+            IsActive = true,
+            NightRequiresMorning = true,
+            AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.Night | UserShiftPermission.MorningNightSameDay
+        };
+
+        // کاربر روی این تاریخ شیفت صبح دارد
+        var existing = new List<ShiftLabel> { ShiftLabel.Morning };
+
+        // افزودن عصر باید رد شود چون سقف دپارتمان ۱ است و کاربر فقط مجوز جفت شب+صبح دارد
+        var canAddEvening = ShiftEligibilityResolver.IsAssignmentAllowed(
+            user,
+            existing,
+            ShiftLabel.Evening,
+            maxShiftsPerDay: 1,
+            forbidDuplicateLabels: true,
+            date: date);
+
+        Assert.False(canAddEvening);
+
+        // اما افزودن شب باید مجاز باشد چون جفت شب+صبح مجاز است
+        var canAddNight = ShiftEligibilityResolver.IsAssignmentAllowed(
+            user,
+            existing,
+            ShiftLabel.Night,
+            maxShiftsPerDay: 1,
+            forbidDuplicateLabels: true,
+            date: date);
+
+        Assert.True(canAddNight);
+    }
+
+    [Fact]
+    public void ShiftEligibilityResolver_ApplyPermissionsToUserConstraint_ClearsOpposingSameDayCombination()
+    {
+        var nightUser = new UserConstraint
+        {
+            UserId = 1,
+            ShiftType = ShiftTypes.RotatingShift,
+            ShiftSubType = ShiftSubTypes.ThreeShifts,
+            NightRequiresMorning = true
+        };
+
+        ShiftEligibilityResolver.ApplyPermissionsToUserConstraint(nightUser, null);
+        Assert.True(nightUser.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningNightSameDay));
+        Assert.False(nightUser.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningEveningSameDay));
+
+        var eveningUser = new UserConstraint
+        {
+            UserId = 2,
+            ShiftType = ShiftTypes.RotatingShift,
+            ShiftSubType = ShiftSubTypes.ThreeShifts,
+            MorningRequiresEvening = true
+        };
+
+        ShiftEligibilityResolver.ApplyPermissionsToUserConstraint(eveningUser, null);
+        Assert.True(eveningUser.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningEveningSameDay));
+        Assert.False(eveningUser.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningNightSameDay));
+    }
 }

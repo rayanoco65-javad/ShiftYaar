@@ -41,11 +41,12 @@ public static class ShiftEligibilityGuard
                 : 2;
             var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == assignment.Date.Date);
             var effectiveMax = Math.Max(maxPerDay, approvedCount);
-            if (user.HasCoupledShiftRules && effectiveMax < 2)
+            var dayAssignments = solution.GetUserAssignments(user.UserId, assignment.Date).ToList();
+            var dayLabels = dayAssignments.Select(a => a.ShiftLabel).Distinct().ToList();
+            if (user != null && user.CanBypassMaxShiftsPerDay(dayLabels, assignment.Date) && effectiveMax < 2)
             {
                 effectiveMax = 2;
             }
-            var dayAssignments = solution.GetUserAssignments(user.UserId, assignment.Date).ToList();
             if (MaxShiftsPerDayRules.WouldExceedDailyLimit(dayAssignments.Count - 1, effectiveMax, constraints.HardRules.EnforceMaxShiftsPerDay)
                 && dayAssignments.Count > effectiveMax)
             {
@@ -98,14 +99,15 @@ public static class ShiftEligibilityGuard
             : 2;
         var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == assignment.Date.Date);
         var effectiveMax = Math.Max(maxPerDay, approvedCount);
-        if (user.HasCoupledShiftRules && effectiveMax < 2)
-        {
-            effectiveMax = 2;
-        }
         var existing = solution.GetUserAssignments(assignment.UserId, assignment.Date)
             .Where(a => a.ShiftId != assignment.ShiftId || a.ShiftLabel != assignment.ShiftLabel)
             .Select(a => a.ShiftLabel)
             .ToList();
+        var trialLabels = existing.Append(assignment.ShiftLabel).Distinct().ToList();
+        if (user != null && user.CanBypassMaxShiftsPerDay(trialLabels, assignment.Date) && effectiveMax < 2)
+        {
+            effectiveMax = 2;
+        }
 
         return ShiftEligibilityResolver.IsAssignmentAllowed(
             user,
