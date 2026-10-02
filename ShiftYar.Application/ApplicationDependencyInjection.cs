@@ -60,6 +60,7 @@ namespace ShiftYar.Application
             services.AddScoped<IUserMonthlyNightQuotaService, UserMonthlyNightQuotaService>();
             services.AddScoped<IUserMonthlyDayShiftQuotaService, UserMonthlyDayShiftQuotaService>();
             services.AddScoped<IUserMonthlyComboShiftQuotaService, UserMonthlyComboShiftQuotaService>();
+            services.AddScoped<IUserMonthlyRequiredHourService, UserMonthlyRequiredHourService>();
             services.AddScoped<IDepartmentService, DepartmentService>();
             services.AddScoped<IDepartmentNameService, DepartmentNameService>();
             services.AddScoped<IRoleService, RoleService>();

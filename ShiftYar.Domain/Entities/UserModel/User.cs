@@ -99,6 +99,9 @@ namespace ShiftYar.Domain.Entities.UserModel
         /// <summary>سهمیه ترکیبی صبح/عصر و صبح/شب برای پرسنل دو‌نوبته</summary>
         public ICollection<UserMonthlyComboShiftQuota>? MonthlyComboShiftQuotas { get; set; }
 
+        /// <summary>ساعات موظفی تأییدشده پرسنل به‌تفکیک ماه شمسی</summary>
+        public ICollection<UserMonthlyRequiredHour>? MonthlyRequiredHours { get; set; }
+
         [ForeignKey("Department")]
         public int? DepartmentId { get; set; } // Foreign key to Department table
         public Department? Department { get; set; } // Navigation property to Department table

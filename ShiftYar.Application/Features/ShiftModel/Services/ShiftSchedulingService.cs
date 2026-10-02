@@ -41,6 +41,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         private readonly IEfRepository<UserMonthlyNightQuota> _monthlyNightQuotaRepository;
         private readonly IEfRepository<UserMonthlyDayShiftQuota> _monthlyDayShiftQuotaRepository;
         private readonly IEfRepository<UserMonthlyComboShiftQuota> _monthlyComboShiftQuotaRepository;
+        private readonly IEfRepository<UserMonthlyRequiredHour>? _monthlyRequiredHourRepository;
         private readonly IEfRepository<Shift> _shiftRepository;
         private readonly IEfRepository<Department> _departmentRepository;
         private readonly IEfRepository<DepartmentSchedulingSettings> _deptSettingsRepository;
@@ -74,12 +75,14 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             IMapper mapper,
             ISchedulingJobStore schedulingJobStore,
             IHttpContextAccessor httpContextAccessor,
-            ILogger<ShiftSchedulingService> logger)
+            ILogger<ShiftSchedulingService> logger,
+            IEfRepository<UserMonthlyRequiredHour>? monthlyRequiredHourRepository = null)
         {
             _userRepository = userRepository;
             _monthlyNightQuotaRepository = monthlyNightQuotaRepository;
             _monthlyDayShiftQuotaRepository = monthlyDayShiftQuotaRepository;
             _monthlyComboShiftQuotaRepository = monthlyComboShiftQuotaRepository;
+            _monthlyRequiredHourRepository = monthlyRequiredHourRepository;
             _shiftRepository = shiftRepository;
             _departmentRepository = departmentRepository;
             _deptSettingsRepository = deptSettingsRepository;
@@ -108,6 +111,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             {
                 _logger.LogInformation("Starting shift scheduling optimization for department {DepartmentId} using algorithm {Algorithm}",
                     request.DepartmentId, request.Algorithm);
+
+                var scheduleGuardError = await GetMonthlyScheduleCreationBlockerAsync(
+                    request.DepartmentId,
+                    DateConverter.ConvertToGregorianDate(request.StartDate),
+                    DateConverter.ConvertToGregorianDate(request.EndDate));
+                if (scheduleGuardError != null)
+                {
+                    return ApiResponse<ShiftSchedulingResultDto>.Fail(scheduleGuardError);
+                }
 
                 // بارگذاری داده‌های مورد نیاز
                 var constraints = await LoadConstraintsAsync(request);
@@ -185,6 +197,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             {
                 _logger.LogInformation("Starting shift scheduling optimization for department {DepartmentId} using algorithm {Algorithm}",
                     request.DepartmentId, request.Algorithm);
+
+                var scheduleGuardError = await GetMonthlyScheduleCreationBlockerAsync(
+                    request.DepartmentId,
+                    request.StartDate,
+                    request.EndDate);
+                if (scheduleGuardError != null)
+                {
+                    return ApiResponse<ShiftSchedulingResultDto>.Fail(scheduleGuardError);
+                }
 
                 // بارگذاری داده‌های مورد نیاز
                 var constraints = await LoadConstraintsInternalAsync(request);
@@ -450,6 +471,32 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 if (daysDifference > 90) // 3 ماه
                 {
                     validationErrors.Add("Scheduling period cannot exceed 3 months");
+                }
+
+                // اعتبارسنجی تأیید ساعات موظفی ماهانه پرسنل فعال
+                if (_monthlyRequiredHourRepository != null && activeUsers.Count > 0)
+                {
+                    var pc = new PersianCalendar();
+                    var startYear = pc.GetYear(startDate);
+                    var startMonth = pc.GetMonth(startDate);
+
+                    var (confirmedRecords, _) = await _monthlyRequiredHourRepository.GetByFilterAsync(
+                        new Application.Common.Filters.SimpleFilter<UserMonthlyRequiredHour>(r =>
+                            r.DepartmentId == request.DepartmentId &&
+                            r.PersianYear == startYear &&
+                            r.PersianMonth == startMonth));
+
+                    var confirmedUserIds = confirmedRecords.Select(r => r.UserId).ToHashSet();
+                    var unconfirmedUsers = activeUsers
+                        .Where(u => u.Id.HasValue && !confirmedUserIds.Contains(u.Id.Value))
+                        .Select(u => u.FullName ?? $"کاربر {u.Id}")
+                        .ToList();
+
+                    if (unconfirmedUsers.Count > 0)
+                    {
+                        validationErrors.Add(
+                            $"ساعات موظفی {unconfirmedUsers.Count} نفر از پرسنل فعال این بخش در ماه {startYear}/{startMonth:00} تأیید نشده است: {string.Join("، ", unconfirmedUsers)}");
+                    }
                 }
 
                 return ApiResponse<List<string>>.Success(validationErrors);
@@ -784,6 +831,45 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 return
                     $"برای ماه شمسی {startYear}/{startMonth:00} قبلاً شیفت‌بندی ذخیره شده است. " +
                     "ابتدا با اکشن حذف شیفت‌بندی ماهانه، برنامه قبلی را حذف کنید و سپس دوباره اقدام کنید.";
+            }
+
+            if (_monthlyRequiredHourRepository != null)
+            {
+                var activeUsersResult = await _userRepository.GetByFilterAsync(
+                    new UserFilter
+                    {
+                        DepartmentId = departmentId,
+                        IsActive = true,
+                        PageNumber = 1,
+                        PageSize = 5000
+                    });
+
+                var activeUsers = activeUsersResult.Items
+                    .Where(u => u.Id.HasValue && u.IsActive == true)
+                    .ToList();
+
+                if (activeUsers.Count > 0)
+                {
+                    var (confirmedRecords, _) = await _monthlyRequiredHourRepository.GetByFilterAsync(
+                        new Application.Common.Filters.SimpleFilter<UserMonthlyRequiredHour>(r =>
+                            r.DepartmentId == departmentId &&
+                            r.PersianYear == startYear &&
+                            r.PersianMonth == startMonth));
+
+                    var confirmedUserIds = confirmedRecords.Select(r => r.UserId).ToHashSet();
+                    var missingUsers = activeUsers
+                        .Where(u => !confirmedUserIds.Contains(u.Id!.Value))
+                        .Select(u => u.FullName ?? $"کاربر {u.Id}")
+                        .ToList();
+
+                    if (missingUsers.Count > 0)
+                    {
+                        return
+                            $"ساعات موظفی تمام پرسنل فعال بخش برای ماه {startYear}/{startMonth:00} در پنجره بررسی ساعات موظفی تأیید نشده است. " +
+                            $"لطفاً ابتدا در پنجره بازبینی ساعات موظفی، ساعات موظفی پرسنل را بررسی و ذخیره نمایید. " +
+                            $"پرسنل فاقد موظفی تأییدشده: {string.Join("، ", missingUsers)}";
+                    }
+                }
             }
 
             return null;
@@ -2217,6 +2303,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 var monthlyQuotasByUserId = new Dictionary<int, UserMonthlyNightQuota>();
                 var monthlyDayShiftQuotasByUserId = new Dictionary<int, UserMonthlyDayShiftQuota>();
                 var monthlyComboShiftQuotasByUserId = new Dictionary<int, UserMonthlyComboShiftQuota>();
+                var monthlyRequiredHoursByUserId = new Dictionary<int, UserMonthlyRequiredHour>();
                 if (quotaUserIds.Count > 0)
                 {
                     var (monthlyQuotas, _) = await _monthlyNightQuotaRepository.GetByFilterAsync(
@@ -2249,9 +2336,23 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         .GroupBy(q => q.UserId)
                         .ToDictionary(g => g.Key, g => g.First());
 
+                    if (_monthlyRequiredHourRepository != null)
+                    {
+                        var (monthlyReqHours, _) = await _monthlyRequiredHourRepository.GetByFilterAsync(
+                            new Application.Common.Filters.SimpleFilter<UserMonthlyRequiredHour>(q =>
+                                q.PersianYear == quotaPersianYear &&
+                                q.PersianMonth == quotaPersianMonth &&
+                                q.DepartmentId == request.DepartmentId &&
+                                quotaUserIds.Contains(q.UserId)));
+
+                        monthlyRequiredHoursByUserId = monthlyReqHours
+                            .GroupBy(q => q.UserId)
+                            .ToDictionary(g => g.Key, g => g.First());
+                    }
+
                     _logger.LogInformation(
-                        "LoadConstraints: Loaded {NightQuotaCount} night, {DayShiftQuotaCount} day-shift, {ComboQuotaCount} combo quota(s) for Persian {Year}/{Month}",
-                        monthlyQuotasByUserId.Count, monthlyDayShiftQuotasByUserId.Count, monthlyComboShiftQuotasByUserId.Count, quotaPersianYear, quotaPersianMonth);
+                        "LoadConstraints: Loaded {NightQuotaCount} night, {DayShiftQuotaCount} day-shift, {ComboQuotaCount} combo, {ReqHoursCount} required hour(s) for Persian {Year}/{Month}",
+                        monthlyQuotasByUserId.Count, monthlyDayShiftQuotasByUserId.Count, monthlyComboShiftQuotasByUserId.Count, monthlyRequiredHoursByUserId.Count, quotaPersianYear, quotaPersianMonth);
                 }
 
                 var defaultDeptSpecialty = departmentUsers.FirstOrDefault(u => (u.SpecialtyId ?? 0) > 0)?.Specialty;
@@ -2515,6 +2616,22 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                     var productivitySnapshot = CalculateProductivitySnapshot(userEntity, userConstraint, constraints, deptSettingEarly, nightShiftDuration);
                     ProductivityRequiredHoursResolver.ApplyToUserConstraint(userEntity, userConstraint, productivitySnapshot);
+
+                    if (monthlyRequiredHoursByUserId.TryGetValue(userConstraint.UserId, out var approvedMonthlyHour))
+                    {
+                        var approvedHours = Math.Round(approvedMonthlyHour.ApprovedHours, 2, MidpointRounding.AwayFromZero);
+                        userConstraint.IncludedInProductivityPlan = true;
+                        userConstraint.ProductivityRequiredHours = approvedHours;
+                        if (productivitySnapshot != null)
+                        {
+                            productivitySnapshot.FinalMonthlyRequiredHours = approvedMonthlyHour.ApprovedHours;
+                            productivitySnapshot.Breakdown ??= new WorkingHoursCalculationBreakdownDto();
+                            productivitySnapshot.Breakdown.Notes ??= new List<string>();
+                            productivitySnapshot.Breakdown.Notes.Add(
+                                $"ساعت موظفی از جدول موظفی تأییدشده ماهانه اعمال شد: {approvedMonthlyHour.ApprovedHours} ساعت.");
+                            userConstraint.ProductivitySnapshot = productivitySnapshot;
+                        }
+                    }
                 }
 
                 // تطبیق تخصص کاربران فاقد تخصص در صورتی که شیفت‌های بخش دارای یک تخصص مشخص هستند

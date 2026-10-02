@@ -231,10 +231,11 @@
 #### ترتیب پیشنهادی کار سوپروایزر
 
 1. تکمیل `ShiftDates` ماه موردنظر  
-2. تنظیم سهمیه شب (`UserMonthlyNightQuota`) و سهمیه صبح/عصر (`UserMonthlyDayShiftQuota`)  
-3. ثبت/تأیید درخواست‌ها  
-4. در صورت نیاز حذف برنامه قبلی (`DeleteMonthlySchedule`) یا فعال بودن `allowMonthlyRescheduleWithAutoDelete`  
-5. `optimize-and-save` / `optimize-and-save-async`
+2. تنظیم سهمیه شب (`UserMonthlyNightQuota`)، سهمیه صبح/عصر (`UserMonthlyDayShiftQuota`) و ترکیبی (`UserMonthlyComboShiftQuota`)  
+3. **بررسی، اصلاح و تأیید ساعات موظفی پرسنل فعال ماه (`UserMonthlyRequiredHour`) — الزامی (بدون این مرحله شیفت‌بندی مسدود است)**  
+4. ثبت/تأیید درخواست‌های مرخصی و شیفت  
+5. در صورت نیاز حذف برنامه قبلی (`DeleteMonthlySchedule`) یا فعال بودن `allowMonthlyRescheduleWithAutoDelete`  
+6. اجرای بهینه‌سازی شیفت‌بندی (`optimize-and-save` / `optimize-and-save-async`)
 
 ### سهمیه ترکیبی صبح/عصر و صبح/شب — `UserMonthlyComboShiftQuota` (جدید)
 
@@ -268,6 +269,135 @@
 - ثبت سهمیه **صبح/شب** برای پرسنل **گردشی** (دو‌نوبته صبح/شب یا **سه‌نوبته**) با مجوز صبح+شب.
 - پرسنل **شیفت ثابت** (ثابت صبح یا ثابت عصر): درخواست **رد** می‌شود.
 - الگوریتم: ۱) سهمیه قطعی ۲) مازاد فقط بین کاربران با `fallback` برابر `null` یا `true`.
+
+### ساعت موظفی ماهانه پرسنل — پنجره پیش‌نیاز بررسی و تأیید (`UserMonthlyRequiredHour`) — جدید
+
+> 🚨 **قانون مسدودکننده شیفت‌بندی (Gating Blocker):**  
+> عملیات شیفت‌بندی ماهانه (`optimize-and-save` یا `OptimizeShiftSchedule`) برای یک بخش و ماه مشخص، منحصراً در صورتی مجاز است که **ساعات موظفی تمام پرسنل فعال آن بخش در آن ماه تأیید و ذخیره شده باشد**. در غیر این صورت، بک‌اند با خطای ۴۰۰ عملیات را مسدود کرده و نام پرسنل فاقد موظفی تأییدشده را اعلام می‌کند.
+
+#### هدف و منطق تجاری
+ساعات موظفی محاسباتی سیستم بر اساس تقویم ماه و قانون ارتقای بهره‌وری محاسبه می‌شود، اما در بیمارستان‌ها سیستم‌های منابع انسانی/کارگزینی ملاک نهایی و قانونی پرداخت حقوق هستند. سوپروایزر باید قبل از اجرای شیفت‌بندی، در یک پنجره متمرکز، ساعات موظفی پرسنل را بررسی کند:
+- اگر با سیستم هماهنگ بود، با یک کلیک تأیید می‌کند.
+- اگر مغایرتی وجود داشت، ساعت هر پرسنل را اصلاح و در صورت نیاز یادداشت ثبت می‌کند.
+- پس از ذخیره، ساعات موظفی در جدول `UserMonthlyRequiredHours` ذخیره شده و در اجراهای بعدی شیفت‌بندی برای همان ماه از همین جدول خوانده می‌شود (بدون نیاز به دوباره‌کاری).
+- اگر پرسنل جدیدی اضافه شود، با مقدار پیش‌فرض محاسباتی سیستم در پنجره نمایش داده می‌شود تا تأیید گردد.
+
+#### APIها (`UserMonthlyRequiredHourController`)
+
+| اکشن | روش | مسیر / پارامترها | توضیح |
+|------|------|------------------|--------|
+| `GetDepartmentMonthlyRequiredHoursPreview` | GET | `departmentId={id}&persianYear={y}&persianMonth={m}` | دریافت لیست پیش‌نمایش متمرکز تمام پرسنل فعال (شامل ساعات محاسباتی سیستم و ساعات قبلاً ذخیره‌شده) |
+| `CheckDepartmentRequiredHoursStatus` | GET | `departmentId={id}&persianYear={y}&persianMonth={m}` | بررسی وضعیت تکمیل موظفی بخش (آیا شیفت‌بندی مجاز است؟) |
+| `UpsertDepartmentMonthlyRequiredHours` | POST | بدنه `UserMonthlyRequiredHourBulkUpsertDto` | ذخیره گروهی ساعات موظفی تأییدشده پرسنل |
+| `GetUserMonthlyRequiredHours` | GET | فیلتر پجینیشن `UserMonthlyRequiredHourFilter` | دریافت لیست رکوردهای ذخیره‌شده |
+| `GetUserMonthlyRequiredHour` | GET | `id={id}` | دریافت یک رکورد با شناسه |
+| `GetUserMonthlyRequiredHourByUserMonth` | GET | `userId={u}&persianYear={y}&persianMonth={m}` | دریافت رکورد یک کاربر در یک ماه |
+
+#### مدل خروجی پیش‌نمایش (`DepartmentMonthlyRequiredHoursPreviewDto`)
+```json
+{
+  "isSuccess": true,
+  "data": {
+    "departmentId": 2,
+    "departmentName": "بخش جراحی مردان",
+    "persianYear": 1405,
+    "persianMonth": 7,
+    "totalActiveUsers": 15,
+    "totalConfirmedUsers": 14,
+    "allUsersConfirmed": false,
+    "totalDaysInMonth": 30,
+    "workingDaysCount": 22,
+    "users": [
+      {
+        "id": 105,
+        "userId": 12,
+        "fullName": "مریم رضایی",
+        "personnelCode": "981240",
+        "jobTitle": "پرستار",
+        "shiftType": "RotatingShift",
+        "shiftSubType": "ThreeShifts",
+        "departmentId": 2,
+        "departmentName": "بخش جراحی مردان",
+        "persianYear": 1405,
+        "persianMonth": 7,
+        "calculatedHours": 146.67,
+        "approvedHours": 144.0,
+        "isSaved": true,
+        "isManuallyEdited": true,
+        "notes": "کسر ساعت طبق نامه کارگزینی",
+        "confirmedAt": "2026-10-02T10:00:00Z",
+        "confirmedByUserId": 1,
+        "yearsOfService": 8,
+        "hardshipPercent": 50,
+        "weeklyReductionHours": 3.0,
+        "workingDaysCount": 22
+      },
+      {
+        "id": null,
+        "userId": 19,
+        "fullName": "علی محمدی",
+        "personnelCode": "993310",
+        "jobTitle": "بهیار",
+        "shiftType": "RotatingShift",
+        "shiftSubType": "TwoShifts",
+        "departmentId": 2,
+        "departmentName": "بخش جراحی مردان",
+        "persianYear": 1405,
+        "persianMonth": 7,
+        "calculatedHours": 154.0,
+        "approvedHours": 154.0,
+        "isSaved": false,
+        "isManuallyEdited": false,
+        "notes": null,
+        "confirmedAt": null,
+        "confirmedByUserId": null,
+        "yearsOfService": 2,
+        "hardshipPercent": 20,
+        "weeklyReductionHours": 1.0,
+        "workingDaysCount": 22
+      }
+    ]
+  }
+}
+```
+
+#### بدنه ذخیره گروهی (`UpsertDepartmentMonthlyRequiredHours`)
+```json
+{
+  "departmentId": 2,
+  "persianYear": 1405,
+  "persianMonth": 7,
+  "items": [
+    {
+      "userId": 12,
+      "approvedHours": 144.0,
+      "notes": "کسر ساعت طبق نامه کارگزینی"
+    },
+    {
+      "userId": 19,
+      "approvedHours": 154.0,
+      "notes": null
+    }
+  ]
+}
+```
+
+#### راهنمای پیاده‌سازی UI/UX در فرانت‌اند
+1. **پنجره مودال بررسی موظفی ماهانه:**
+   - جدول با ستون‌های: `ردیف`، `نام و نام خانوادگی`، `کد پرسنلی`، `عنوان شغلی`، `سابقه (سال)`، `سختی کار`، `روزهای کاری`، `موظفی سیستم (ساعت)`، `موظفی نهایی (قابل ویرایش)`، `وضعیت`، `یادداشت`.
+   - ستون موظفی نهایی: یک Input عددی که پیش‌فرض مقدار `approvedHours` دارد.
+   - وضعیت:
+     - 🟢 **تأییدشده سیستم:** `isSaved == true && !isManuallyEdited`
+     - 🟠 **ویرایش دستی:** `isSaved == true && isManuallyEdited`
+     - ⚪ **پیشنهادی (هنوز ذخیره نشده):** `isSaved == false`
+   - دکمه **«تأیید همه با مقادیر پیشنهادی سیستم»**: مقادیر Input همه ردیف‌ها را برابر با `calculatedHours` قرار می‌دهد تا سوپروایزر در صورت توافق با سیستم، با یک کلیک همه را تایید کند.
+   - دکمه **«ذخیره و تأیید نهایی ساعات موظفی»**: آرایه `items` را به `UpsertDepartmentMonthlyRequiredHours` ارسال می‌کند.
+
+2. **در صفحه اصلی شیفت‌بندی:**
+   - قبل از کلیک روی «شروع شیفت‌بندی»، فرانت می‌تواند با فراخوانی `CheckDepartmentRequiredHoursStatus`:
+     - اگر `isComplete == false`: دکمه شیفت‌بندی غیرفعال باشد، یا پیام اخطار همراه با دکمه مستقیم باز کردن پنجره موظفی ماهانه نشان داده شود.
+     - اگر کاربر دکمه شیفت‌بندی را بزند و ساعات ناقص باشد، بک‌اند پاسخ خطای ۴۰۰ واضح بازمی‌گرداند:
+       `«ساعات موظفی تمام پرسنل فعال بخش برای ماه ۱۴۰۵/۰۷ در پنجره بررسی ساعات موظفی تأیید نشده است. لطفاً ابتدا در پنجره بازبینی ساعات موظفی، ساعات موظفی پرسنل را بررسی و ذخیره نمایید. پرسنل فاقد موظفی تأییدشده: علی محمدی»`
 
 ### تنظیمات دپارتمان — سقف شیفت روزانه
 

@@ -1,4 +1,4 @@
-﻿using ShiftYar.Domain.Entities.BaseModel;
+using ShiftYar.Domain.Entities.BaseModel;
 using ShiftYar.Domain.Entities.HospitalModel;
 using ShiftYar.Domain.Entities.UserModel;
 using System;
@@ -28,6 +28,7 @@ namespace ShiftYar.Domain.Entities.DepartmentModel
         public bool? IsNightLover { get; set; }  //این بخش شب دوست است یا شب گریز. برای تقسیم شیفتهای شب
 
         public ICollection<User>? DepartmentUsers { get; set; } // لیست کاربرانی که به این دپارتمان تعلق دارند
+        public ICollection<UserMonthlyRequiredHour>? MonthlyRequiredHours { get; set; }
 
         public Department()
         {
@@ -41,6 +42,7 @@ namespace ShiftYar.Domain.Entities.DepartmentModel
             this.Supervisor = null;
             this.IsNightLover = null;
             this.DepartmentUsers = new List<User>();
+            this.MonthlyRequiredHours = new List<UserMonthlyRequiredHour>();
         }
     }
 }

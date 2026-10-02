@@ -39,6 +39,7 @@ namespace ShiftYar.Infrastructure.Persistence.AppDbContext
         public DbSet<UserMonthlyNightQuota> UserMonthlyNightQuotas { get; set; }
         public DbSet<UserMonthlyDayShiftQuota> UserMonthlyDayShiftQuotas { get; set; }
         public DbSet<UserMonthlyComboShiftQuota> UserMonthlyComboShiftQuotas { get; set; }
+        public DbSet<UserMonthlyRequiredHour> UserMonthlyRequiredHours { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
         public DbSet<LoginHistory> LoginHistories { get; set; }
         public DbSet<Role> Roles { get; set; }
@@ -122,6 +123,17 @@ namespace ShiftYar.Infrastructure.Persistence.AppDbContext
             modelBuilder.Entity<UserMonthlyComboShiftQuota>()
                 .HasIndex(q => new { q.UserId, q.PersianYear, q.PersianMonth })
                 .IsUnique();
+
+            modelBuilder.Entity<UserMonthlyRequiredHour>(entity =>
+            {
+                entity.HasIndex(q => new { q.UserId, q.PersianYear, q.PersianMonth }).IsUnique();
+                entity.Property(q => q.CalculatedHours).HasPrecision(18, 2);
+                entity.Property(q => q.ApprovedHours).HasPrecision(18, 2);
+                entity.HasOne(q => q.Department)
+                    .WithMany(d => d.MonthlyRequiredHours)
+                    .HasForeignKey(q => q.DepartmentId)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
 
             modelBuilder.Entity<Department>()
                 .HasMany(d => d.DepartmentUsers)

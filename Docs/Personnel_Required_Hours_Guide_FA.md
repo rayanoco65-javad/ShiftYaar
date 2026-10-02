@@ -152,33 +152,44 @@ flowchart TD
 
 ---
 
-## ۵. بازنویسی دستی ساعت موظفی (Manual Override)
+## ۵. بازبینی، تأیید و بازنویسی دستی ساعت موظفی (Monthly Review & Manual Override)
 
-در موجودیت کاربر (`User`) و فرم‌های پرسنل، فیلد اختیاری زیر قرار دارد:
-- **`MaxProductivityRequiredHours` (اعشاری)**
+برای پوشش تفاوت‌های احتمالی میان محاسبات نظری سیستم و ساعات اعلامی منابع انسانی/کارگزینی بیمارستان، سامانه شیفت‌یار از یک فرآیند دو لایه بهره می‌برد:
 
-### منطق تصمیم‌گیری (`ProductivityRequiredHoursResolver`):
+### ۵.۱. جدول ساعات موظفی ماهانه (`UserMonthlyRequiredHour`) — اولویت اول و قطعی
+سوپروایزر قبل از شیفت‌بندی هر ماه در یک پنجره متمرکز، ساعات موظفی پرسنل فعال بخش را بازبینی، اصلاح و تأیید می‌کند.
+- **ملاک نهایی شیفت‌بندی:** مقادیر ذخیره‌شده در این جدول (`ApprovedHours`) اولویت مطلق بر تمام محاسبات خودکار و فیلدهای دیگر دارند.
+- **مسدودکننده شیفت‌بندی:** تا زمانی که برای تمام پرسنل فعال بخش در ماه مورد نظر، رکورد موظفی تأیید نشده باشد، شیفت‌بندی قفل است.
+
+### ۵.۲. فیلد ثابت سقف موظفی روی کاربر (`User.MaxProductivityRequiredHours`)
+یک فیلد اختیاری روی پروفایل کاربر برای شرایط خاص (مانند قراردادهای پاره‌وقت ثابت دائمی). در صورت عدم وجود رکورد ماهانه یا به عنوان مقدار اولیه، این مقدار می‌تواند مورد استفاده قرار گیرد.
+
+### منطق تصمیم‌گیری و اولویت نهایی:
 ```mermaid
 graph TD
-    Start([بررسی کاربر]) --> CheckOverride{آیا MaxProductivityRequiredHours > 0 است؟}
-    CheckOverride -- بله --> SetManual[اعمال مستقیم عدد دستی به عنوان ساعت موظفی]
-    SetManual --> End([پایان - لغو محاسبه خودکار])
-    CheckOverride -- خیر / null --> RunAuto[محاسبه خودکار بر اساس تقویم، سابقه، سختی و الگوی شیفت]
+    Start([بررسی کاربر برای ماه مشخص]) --> CheckMonthly{آیا رکورد UserMonthlyRequiredHour تأییدشده وجود دارد؟}
+    CheckMonthly -- بله --> SetMonthly[اعمال قطعی ApprovedHours جدول ماهانه]
+    SetMonthly --> End([پایان])
+    CheckMonthly -- خیر --> CheckStatic{آیا MaxProductivityRequiredHours > 0 است؟}
+    CheckStatic -- بله --> SetStatic[اعمال فیلد دستی کاربر]
+    SetStatic --> End
+    CheckStatic -- خیر / null --> RunAuto[محاسبه خودکار تقویمی با WorkingHoursCalculator]
     RunAuto --> End
 ```
 
-| مقدار فیلد | رفتار سیستم |
-|:-----------|:-------------|
-| `null` یا `0` | ساعت موظفی به صورت خودکار با فرمول‌های تقویمی و بهره‌وری محاسبه می‌شود. |
-| عدد مثبت (مثلاً `140`) | محاسبه خودکار نادیده گرفته شده و **دقیقاً عدد وارد شده** به عنوان ساعت موظفی ماهانه پرسنل در الگوریتم زمان‌بندی اعمال می‌شود (ضمن حفظ اسنپ‌شات تقویمی برای مقایسه). |
+| اولویت | منبع ساعت موظفی | رفتار سیستم |
+|:---:|:---|:---|
+| **۱ (مطلق)** | جدول ماهانه `UserMonthlyRequiredHour.ApprovedHours` | ساعت تأیید/اصلاح‌شده توسط سوپروایزر مستقیماً در قیود الگوریتم اعمال می‌شود. |
+| **۲** | فیلد ثابت `User.MaxProductivityRequiredHours` | در صورت نبود رکورد ماهانه، به عنوان سقف دستی قرارداد اعمال می‌شود. |
+| **۳** | محاسبه خودکار سیستم (`WorkingHoursCalculator`) | بر اساس روزهای کاری ماه، سابقه، سختی کار و نوبت‌کاری محاسبه می‌شود. |
 
 ---
 
 ## ۶. یکپارچه‌سازی با الگوریتم زمان‌بندی (Simulated Annealing)
 
-ساعت موظفی خالص تقویمی محاسبه‌شده مستقیماً ورودی توابع جریمه و محدودیت موتور بهینه‌سازی شیفت می‌شود:
-- موجودیت `UserConstraint` در فضای شبیه‌سازی دارای دو فیلد کلیدی است:
-  * `ProductivityRequiredHours`: مقدار نهایی هدف موظفی ماهانه (یا سقف دستی).
+ساعت موظفی تأییدشده مستقیماً ورودی توابع جریمه و محدودیت موتور بهینه‌سازی شیفت می‌شود:
+- موجودیت `UserConstraint` در فضای شبیه‌سازی دارای فیلدهای کلیدی زیر است:
+  * `ProductivityRequiredHours`: مقدار نهایی هدف موظفی ماهانه تأییدشده توسط سوپروایزر.
   * `MonthlyCalendarSnapshot`: نگهداری کل نتایج تفصیلی DTO تقویمی (`MonthlyCalendarWorkingHoursResultDto`) برای استفاده در گزارش‌ها و مصورسازی‌ها.
 - **توزیع کارکرد طرحی و غیرطرحی (`ProjectPersonnelProductivityPriority`):**
   * پرسنل طرحی (`IsProjectPersonnel = true`) حداکثر تا ساعت موظفی شیفت می‌گیرند و اضافه‌کار به آن‌ها اختصاص نمی‌یابد.
@@ -190,15 +201,20 @@ graph TD
 
 | لایه | کلاس / واسط | شرح وظیفه |
 |:-----|:------------|:----------|
+| **Domain** | [UserMonthlyRequiredHour.cs](file:///d:/Hampadco/RealProjects/ShiftYar/ShiftYar.Domain/Entities/UserModel/UserMonthlyRequiredHour.cs) | موجودیت ساعت موظفی ماهانه تأییدشده پرسنل به تفکیک سال، ماه و دپارتمان. |
 | **Domain** | [ProductivityRuleConfig.cs](file:///d:/Hampadco/RealProjects/ShiftYar/ShiftYar.Domain/Entities/ProductivityModel/ProductivityRuleConfig.cs) | ثوابت آیین‌نامه (۴۴ ساعت، سقف ۸ ساعت، ضرایب پیش‌فرض و بازه‌ها). |
 | **Domain** | [StaffEmploymentInfo.cs](file:///d:/Hampadco/RealProjects/ShiftYar/ShiftYar.Domain/Entities/ProductivityModel/StaffEmploymentInfo.cs) | استخراج اطلاعات استخدامی، سابقه و الگوی شیفت از موجودیت `User`. |
+| **Application** | [IUserMonthlyRequiredHourService.cs](file:///d:/Hampadco/RealProjects/ShiftYar/ShiftYar.Application/Interfaces/UserModel/IUserMonthlyRequiredHourService.cs) | سرویس پیش‌نمایش، بررسی وضعیت و ذخیره گروهی ساعات موظفی ماهانه پرسنل بخش. |
+| **Application** | [UserMonthlyRequiredHourService.cs](file:///d:/Hampadco/RealProjects/ShiftYar/ShiftYar.Application/Features/UserModel/Services/UserMonthlyRequiredHourService.cs) | پیاده‌سازی سرویس مدیریت ساعات موظفی ماهانه. |
 | **Application** | [ICalendarHolidayProvider.cs](file:///d:/Hampadco/RealProjects/ShiftYar/ShiftYar.Application/Interfaces/ProductivityModel/ICalendarHolidayProvider.cs) | واسط محاسبات تقویمی ماه، جمعه‌ها و تعطیلات رسمی. |
 | **Application** | [CalendarHolidayProvider.cs](file:///d:/Hampadco/RealProjects/ShiftYar/ShiftYar.Application/Common/Utilities/CalendarHolidayProvider.cs) | پیاده‌سازی سرویس تقویم با پیشگیری از شمارش مضاعف تعطیلات جمعه. |
 | **Application** | [MonthlyCalendarWorkingHoursResultDto.cs](file:///d:/Hampadco/RealProjects/ShiftYar/ShiftYar.Application/DTOs/ProductivityModel/MonthlyCalendarWorkingHoursResultDto.cs) | مدل DTO تفصیلی خروجی شامل ساعات خام، کسورات و ساعت خالص ماهانه. |
 | **Application** | [IWorkingHoursCalculator.cs](file:///d:/Hampadco/RealProjects/ShiftYar/ShiftYar.Application/Interfaces/ProductivityModel/IWorkingHoursCalculator.cs) | واسط محاسبات موظفی تقویمی، تخفیف هفتگی و ساعت خالص. |
 | **Application** | [WorkingHoursCalculator.cs](file:///d:/Hampadco/RealProjects/ShiftYar/ShiftYar.Application/Features/ProductivityModel/Services/WorkingHoursCalculator.cs) | پیاده‌سازی متدهای `CalculateMonthlyRequiredHours` و `GetWeeklyProductivityReduction`. |
 | **Application** | [ProductivityRequiredHoursResolver.cs](file:///d:/Hampadco/RealProjects/ShiftYar/ShiftYar.Application/Common/Utilities/ProductivityRequiredHoursResolver.cs) | اتصال نتایج محاسباتی به قیود الگوریتم با اعمال اولویت بازنویسی دستی. |
-| **Application** | [IShiftSchedulingService.cs](file:///d:/Hampadco/RealProjects/ShiftYar/ShiftYar.Application/Interfaces/ShiftModel/IShiftSchedulingService.cs) | متد سطح ارکستراسیون زمان‌بندی `CalculateMonthlyRequiredHours(User, year, month)`. |
+| **Application** | [IShiftSchedulingService.cs](file:///d:/Hampadco/RealProjects/ShiftYar/ShiftYar.Application/Interfaces/ShiftModel/IShiftSchedulingService.cs) | ارکستراسیون زمان‌بندی و گارد مسدودکننده شیفت‌بندی در صورت عدم تأیید موظفی ماهانه. |
+| **API** | [UserMonthlyRequiredHourController.cs](file:///d:/Hampadco/RealProjects/ShiftYar/ShiftYar.Api/Controllers/UserModel/UserMonthlyRequiredHourController.cs) | اندپوینت‌های وب پیش‌نمایش، وضعیت و ذخیره گروهی موظفی ماهانه. |
+| **Tests** | [UserMonthlyRequiredHoursTests.cs](file:///d:/Hampadco/RealProjects/ShiftYar/tests/ShiftYar.Application.Tests/UserMonthlyRequiredHoursTests.cs) | تست‌های اعتبارسنجی فیلتر، DTOها و مقادیر ساعت موظفی ماهانه. |
 | **Tests** | [MonthlyCalendarRequiredHoursTests.cs](file:///d:/Hampadco/RealProjects/ShiftYar/tests/ShiftYar.Application.Tests/MonthlyCalendarRequiredHoursTests.cs) | آزمون‌های واحد جامع سناریوهای تقویمی، مقایسه ۰ در برابر ۸، نقش‌های مدیریتی و دقت اعشار. |
 
 ---
