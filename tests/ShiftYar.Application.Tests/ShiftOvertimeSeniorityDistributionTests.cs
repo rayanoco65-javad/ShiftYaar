@@ -300,6 +300,118 @@ public class ShiftOvertimeSeniorityDistributionTests
             $"Expected balanced overtime between peer staff; got ot1={ot1:F1}, ot2={ot2:F1}, diff={Math.Abs(ot1 - ot2):F1}");
     }
 
+    [Fact]
+    public void OvertimeBalanceGuard_WhenNonConsentingSeniorStaffHasEveningShift_RelievesViaIntraDayTriangularSlide()
+    {
+        // Arrange
+        var start = new DateTime(2026, 10, 1);
+        var targetDate = start.AddDays(5); // 2026-10-06
+        OvertimeBalanceGuard.LogAction = Console.WriteLine;
+
+        // u1: باسابقه (۱۱ سال) بدون رضایت اضافه کار، مسئول سطح ۱
+        var u1 = MakeUser(1, experienceYears: 11, requiredHours: 14m, overtimeConsent: false);
+        u1.ShiftManagerLevel = 1;
+
+        // u2: پرسنل میانی (۵ سال) با رضایت، مسئول سطح ۱
+        var u2 = MakeUser(2, experienceYears: 5, requiredHours: 14m, overtimeConsent: true);
+        u2.ShiftManagerLevel = 1;
+
+        // u3: پرسنل جوان (۱ سال) با رضایت
+        var u3 = MakeUser(3, experienceYears: 1, requiredHours: 14m, overtimeConsent: true);
+
+        var users = new List<UserConstraint> { u1, u2, u3 };
+
+        var morningReq = new ShiftRequirement
+        {
+            ShiftId = 1,
+            ShiftLabel = ShiftLabel.Morning,
+            DepartmentId = 1,
+            DurationHours = 7,
+            SpecialtyRequirements = [new SpecialtyRequirement { SpecialtyId = 10, RequiredTotalCount = 1 }]
+        };
+
+        var eveningReq = new ShiftRequirement
+        {
+            ShiftId = 2,
+            ShiftLabel = ShiftLabel.Evening,
+            DepartmentId = 1,
+            DurationHours = 7,
+            ManagerRequiredCount = 1,
+            ManagerMinLevel1Count = 1,
+            SpecialtyRequirements = [new SpecialtyRequirement { SpecialtyId = 10, RequiredTotalCount = 1 }]
+        };
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = start,
+            EndDate = start.AddDays(15),
+            UserConstraints = users,
+            ShiftRequirements = [morningReq, eveningReq],
+            HardRules = new HardRuleSet
+            {
+                EnforceSpecialtyCapacity = true,
+                EnforceMaxShiftsPerDay = true,
+                ForbidDuplicateDailyAssignments = true,
+                EnforceProductivityHours = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 },
+            SoftWeights = SoftRuleWeights.CreateDefault(),
+            EnableOvertimeDistributionBySeniority = true,
+            OvertimePreferenceType = 1, // گریزان از اضافه کار
+            SeniorityDistributionSlope = 1.0,
+            OvertimeSeniorityDistributionSlope = 1.0
+        };
+
+        var solution = new ShiftSolution();
+
+        // روزهای دیگر:
+        // u1 دو شیفت قبلی داشته که درخواستی تأییدشده هستند (محافظت‌شده = قابل انتقال نیستند)
+        u1.RequiredShiftSlots.Add(new ShiftSlotConstraint { Date = start.AddDays(1), ShiftLabel = ShiftLabel.Morning, ShiftId = morningReq.ShiftId });
+        u1.RequiredShiftSlots.Add(new ShiftSlotConstraint { Date = start.AddDays(2), ShiftLabel = ShiftLabel.Morning, ShiftId = morningReq.ShiftId });
+        solution.AddAssignment(u1.UserId, morningReq.ShiftId, start.AddDays(1), ShiftLabel.Morning, isOnCall: false);
+        solution.AddAssignment(u1.UserId, morningReq.ShiftId, start.AddDays(2), ShiftLabel.Morning, isOnCall: false);
+
+        // u2 یک شیفت در روز دیگر دارد (۷ ساعت) + شیفت صبح در روز هدف (۷ ساعت) = ۱۴ ساعت (بدون کسری کار)
+        solution.AddAssignment(u2.UserId, morningReq.ShiftId, start.AddDays(1), ShiftLabel.Morning, isOnCall: false);
+        solution.AddAssignment(u2.UserId, morningReq.ShiftId, targetDate, ShiftLabel.Morning, isOnCall: false);
+
+        // u3 در روز هدف کاملاً آف است و ۲ شیفت در روزهای دیگر دارد = ۱۴ ساعت (موظفی کامل، بدون کسری کار، دارای رضایت اضافه کار)
+        solution.AddAssignment(u3.UserId, morningReq.ShiftId, start.AddDays(3), ShiftLabel.Morning, isOnCall: false);
+        solution.AddAssignment(u3.UserId, morningReq.ShiftId, start.AddDays(4), ShiftLabel.Morning, isOnCall: false);
+
+        // در روز هدف:
+        // u1 در عصر چیده شده (شیفت غیردرخواستی مازاد -> جمع ساعات ۲۱ > ۱۴ موظفی)
+        solution.AddAssignment(u1.UserId, eveningReq.ShiftId, targetDate, ShiftLabel.Evening, isOnCall: false);
+
+        // Act
+        OvertimeBalanceGuard.Enforce(solution, constraints);
+
+        // Assert
+        // ۱) شیفت عصر u1 (فرد باسابقه بدون رضایت) باید با موفقیت حذف شده باشد
+        Assert.False(solution.HasAssignment(u1.UserId, eveningReq.ShiftId, targetDate),
+            "Non-consenting senior staff u1 should be relieved from unrequested evening shift via intra-day slide.");
+
+        // ۲) همکار سطح ۱ در صبح (u2) باید به عصر اسلاید کرده باشد تا سرپرستی عصر حفظ شود
+        Assert.True(solution.HasAssignment(u2.UserId, eveningReq.ShiftId, targetDate),
+            "Eligible manager u2 should slide from Morning to Evening to preserve manager mix.");
+
+        // ۳) جای خالی صبح باید توسط نیروی جوان متقاضی (u3) پر شده باشد
+        Assert.True(solution.HasAssignment(u3.UserId, morningReq.ShiftId, targetDate),
+            "Junior staff u3 should be assigned to the vacated Morning slot.");
+
+        // ۴) ظرفیت شیفت‌ها باید ۱۰۰٪ حفظ شده باشد و کمبودی نداشته باشیم
+        var morningAssignees = solution.GetShiftAssignments(morningReq.ShiftId, targetDate).Where(a => !a.IsOnCall).ToList();
+        var eveningAssignees = solution.GetShiftAssignments(eveningReq.ShiftId, targetDate).Where(a => !a.IsOnCall).ToList();
+
+        Assert.Single(morningAssignees);
+        Assert.Single(eveningAssignees);
+
+        // ۵) ساعات کار u1 باید به موظفی برگشته باشد (اضافه کار صفر)
+        var lookup = ProductivityWorkedHoursCalculator.BuildShiftInfoLookup(constraints.ShiftRequirements);
+        var u1Hours = OvertimeBalanceGuard.CalculateHours(solution, u1, lookup, constraints);
+        Assert.Equal(14.0, u1Hours);
+    }
+
     private static ShiftConstraints BuildConstraints(
         DateTime start,
         List<UserConstraint> users,

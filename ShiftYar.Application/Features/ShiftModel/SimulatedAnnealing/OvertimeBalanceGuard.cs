@@ -442,6 +442,7 @@ public static class OvertimeBalanceGuard
 
     /// <summary>
     /// انتقال شیفت‌های مازاد غیردرخواستی از پرسنلی که OvertimeConsent = false دارند به همکاران متقاضی.
+    /// شامل انتقال مستقیم ۱-به-۱ و اسلاید درون‌روزی ۳-طرفه (صبح به عصر).
     /// </summary>
     private static void EnforceNonConsentingRelief(
         ShiftSolution solution,
@@ -449,6 +450,8 @@ public static class OvertimeBalanceGuard
         List<UserConstraint> users,
         IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup)
     {
+        var attemptedSlides = new HashSet<(DateTime Date, int DonorId, int ReceiverId)>();
+
         for (var pass = 0; pass < 32; pass++)
         {
             var progressed = false;
@@ -461,7 +464,7 @@ public static class OvertimeBalanceGuard
                     Worked = CalculateHours(solution, u, lookup, constraints),
                     Required = (double)u.ProductivityRequiredHours!.Value
                 })
-                .Where(x => x.Worked > x.Required + 2.0)
+                .Where(x => x.Worked > x.Required + 1.0)
                 .OrderByDescending(x => x.Worked - x.Required)
                 .ToList();
 
@@ -482,7 +485,7 @@ public static class OvertimeBalanceGuard
                         Required = (double)u.ProductivityRequiredHours!.Value,
                         MaxAllowed = ProjectPersonnelProductivityPriority.GetMaxAllowedSchedulingHours(u)
                     })
-                    .Where(x => x.Worked + 8.0 <= x.MaxAllowed + 0.25)
+                    .Where(x => x.Worked + 6.0 <= x.MaxAllowed + 0.25)
                     .OrderBy(x => x.Worked < x.Required ? 0 : 1)
                     .ThenBy(x =>
                     {
@@ -496,45 +499,43 @@ public static class OvertimeBalanceGuard
                     })
                     .ToList();
 
-                if (candidates.Count == 0)
+                if (candidates.Count > 0)
                 {
-                    continue;
-                }
+                    var donorAssignments = solution.GetUserAllAssignments(donor.UserId)
+                        .Where(a => !a.IsOnCall && !IsProtected(constraints, donor, a))
+                        .Where(a => a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening)
+                        .OrderBy(a => a.ShiftLabel == ShiftLabel.Morning ? 0 : 1)
+                        .ToList();
 
-                var donorAssignments = solution.GetUserAllAssignments(donor.UserId)
-                    .Where(a => !a.IsOnCall && !IsProtected(constraints, donor, a))
-                    .Where(a => a.ShiftLabel == ShiftLabel.Morning || a.ShiftLabel == ShiftLabel.Evening)
-                    .OrderBy(a => a.ShiftLabel == ShiftLabel.Morning ? 0 : 1)
-                    .ToList();
-
-                foreach (var asg in donorAssignments)
-                {
-
-                    foreach (var receiverInfo in candidates)
+                    foreach (var asg in donorAssignments)
                     {
-                        var receiver = receiverInfo.User;
-                        if (!CanTakeShift(solution, constraints, lookup, receiver, asg))
+                        foreach (var receiverInfo in candidates)
                         {
-                            continue;
+                            var receiver = receiverInfo.User;
+                            if (!CanTakeShift(solution, constraints, lookup, receiver, asg))
+                            {
+                                continue;
+                            }
+
+                            if (!WouldPreserveManagerMix(solution, constraints, asg.ShiftId, asg.Date, donor.UserId, receiver.UserId))
+                            {
+                                continue;
+                            }
+
+                            // انجام انتقال ۱-به-۱ مستقیم
+                            solution.UnlockSkeletonAssignment(donor.UserId, asg.ShiftId, asg.Date);
+                            solution.RemoveAssignment(donor.UserId, asg.ShiftId, asg.Date, force: true);
+                            solution.AddAssignment(receiver.UserId, asg.ShiftId, asg.Date, asg.ShiftLabel, isOnCall: false);
+
+                            LogAction?.Invoke($"[NonConsentingDirectTransfer] Transferred {asg.ShiftLabel} on {asg.Date:yyyy-MM-dd} from {donor.UserName} to {receiver.UserName}");
+                            progressed = true;
+                            break;
                         }
 
-                        if (!WouldPreserveManagerMix(solution, constraints, asg.ShiftId, asg.Date, donor.UserId, receiver.UserId))
+                        if (progressed)
                         {
-                            continue;
+                            break;
                         }
-
-                        // انجام انتقال
-                        solution.UnlockSkeletonAssignment(donor.UserId, asg.ShiftId, asg.Date);
-                        solution.RemoveAssignment(donor.UserId, asg.ShiftId, asg.Date, force: true);
-                        solution.AddAssignment(receiver.UserId, asg.ShiftId, asg.Date, asg.ShiftLabel, isOnCall: false);
-
-                        progressed = true;
-                        break;
-                    }
-
-                    if (progressed)
-                    {
-                        break;
                     }
                 }
 
@@ -544,11 +545,164 @@ public static class OvertimeBalanceGuard
                 }
             }
 
+            // اگر انتقال مستقیم ۱-به-۱ ممکن نبود، تلاش برای اسلاید درون‌روزی ۳-طرفه
+            if (!progressed)
+            {
+                progressed = TryIntraDayNonConsentingReliefSlide(
+                    solution,
+                    constraints,
+                    lookup,
+                    nonConsentingDonors.Select(x => x.User).ToList(),
+                    users,
+                    attemptedSlides);
+            }
+
             if (!progressed)
             {
                 break;
             }
         }
+    }
+
+    /// <summary>
+    /// اسلاید درون‌روزی ۳ طرفه ویژه پرسنل بدون رضایت اضافه‌کار (یا پرسنل باسابقه در بخش‌های گریزان از اضافه‌کار):
+    /// ۱) همکار واجد شرایط از صبح همان روز به عصر منتقل می‌شود تا ترکیب سرپرستی عصر حفظ گردد.
+    /// ۲) دهنده بدون رضایت از شیفت عصر همان روز حذف می‌شود (کاهش اضافه‌کار ناخواسته).
+    /// ۳) جای خالی شیفت صبح توسط یک پرسنل متقاضی یا جوان‌تر پر می‌شود.
+    /// ظرفیت کل شیفت‌های صبح و عصر در طول این عملیات کاملاً ثابت و بدون کاهش باقی می‌ماند.
+    /// </summary>
+    private static bool TryIntraDayNonConsentingReliefSlide(
+        ShiftSolution solution,
+        ShiftConstraints constraints,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        List<UserConstraint> nonConsentingDonors,
+        List<UserConstraint> allUsers,
+        HashSet<(DateTime Date, int DonorId, int ReceiverId)> attemptedSlides)
+    {
+        foreach (var donor in nonConsentingDonors)
+        {
+            var donorWorked = CalculateHours(solution, donor, lookup, constraints);
+            var donorReq = (double)donor.ProductivityRequiredHours!.Value;
+            if (donorWorked <= donorReq + 1.0)
+            {
+                continue;
+            }
+
+            var donorAssignments = solution.GetUserAllAssignments(donor.UserId)
+                .Where(a => !a.IsOnCall && !IsProtected(constraints, donor, a))
+                .Where(a => a.ShiftLabel == ShiftLabel.Evening)
+                .OrderByDescending(a => a.Date)
+                .ToList();
+
+            foreach (var asg in donorAssignments)
+            {
+                var date = asg.Date.Date;
+                var donorShiftReq = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftId == asg.ShiftId);
+                if (donorShiftReq == null) continue;
+
+                var otherShiftReq = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftLabel == ShiftLabel.Morning);
+                if (otherShiftReq == null) continue;
+
+                var otherAssignees = solution.GetShiftAssignments(otherShiftReq.ShiftId, date)
+                    .Where(a => !a.IsOnCall)
+                    .ToList();
+                if (otherAssignees.Count == 0) continue;
+
+                var slideCandidates = otherAssignees
+                    .Select(a => (Assignment: a, User: constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)))
+                    .Where(x => x.User != null && !IsProtected(constraints, x.User!, x.Assignment) && x.User!.UserId != donor.UserId)
+                    .OrderBy(x =>
+                    {
+                        if (ShiftManagerRules.RequiresAnyManager(donorShiftReq))
+                        {
+                            return ShiftManagerRules.IsLevel1(x.User!) ? 0 : ShiftManagerRules.IsManager(x.User!) ? 1 : 2;
+                        }
+                        return 0;
+                    })
+                    .ToList();
+
+                foreach (var cand in slideCandidates)
+                {
+                    var mUser = cand.User!;
+
+                    if (mUser.UnavailableDates.Any(d => d.Date == date)) continue;
+                    if (mUser.UnavailableShiftSlots.Any(s => s.Date.Date == date && s.ShiftLabel == ShiftLabel.Evening)) continue;
+                    if (!ShiftEligibilityResolver.MayTakeLabelOnDate(mUser, ShiftLabel.Evening, date)) continue;
+
+                    var mAsgsWithoutCurrent = solution.GetUserAllAssignments(mUser.UserId)
+                        .Where(a => !(a.Date.Date == date && a.ShiftId == cand.Assignment.ShiftId))
+                        .ToList();
+                    if (AdjacentShiftRestRules.WouldConflict(mAsgsWithoutCurrent, date, ShiftLabel.Evening, constraints)) continue;
+
+                    if (!WouldPreserveManagerMix(solution, constraints, donorShiftReq.ShiftId, date, donor.UserId, mUser.UserId))
+                    {
+                        continue;
+                    }
+
+                    var receivers = allUsers
+                        .Where(u => u.UserId != donor.UserId && u.UserId != mUser.UserId && u.SpecialtyId == donor.SpecialtyId)
+                        .Select(u =>
+                        {
+                            var rWorked = CalculateHours(solution, u, lookup, constraints);
+                            var rReq = (double)u.ProductivityRequiredHours!.Value;
+                            var rMax = ProjectPersonnelProductivityPriority.GetMaxAllowedSchedulingHours(u);
+                            return (User: u, Worked: rWorked, Required: rReq, MaxAllowed: rMax);
+                        })
+                        .Where(x => x.Worked + 6.0 <= x.MaxAllowed + 0.25)
+                        .OrderBy(x => x.Worked < x.Required ? 0 : 1)
+                        .ThenBy(x => x.User.OvertimeConsent ? 0 : 1)
+                        .ThenBy(x =>
+                        {
+                            if (constraints.EnableOvertimeDistributionBySeniority && constraints.OvertimePreferenceType == 1)
+                                return x.User.ExperienceYears;
+
+                            if (constraints.EnableOvertimeDistributionBySeniority && constraints.OvertimePreferenceType == 0)
+                                return -x.User.ExperienceYears;
+
+                            return (int)(x.Worked - x.Required);
+                        })
+                        .ToList();
+
+                    foreach (var receiverInfo in receivers)
+                    {
+                        var receiver = receiverInfo.User;
+                        if (attemptedSlides.Contains((date, donor.UserId, receiver.UserId))) continue;
+
+                        var receiverEffectiveHours = ProductivityWorkedHoursCalculator.ResolveCreditedHours(
+                            lookup[otherShiftReq.ShiftId], constraints.IsHoliday(date), receiver.IncludedInProductivityPlan);
+
+                        if (receiverInfo.Worked + receiverEffectiveHours > receiverInfo.MaxAllowed + 0.25) continue;
+                        if (solution.GetUserAssignments(receiver.UserId, date).Any(a => !a.IsOnCall)) continue;
+                        if (receiver.UnavailableDates.Any(d => d.Date == date)) continue;
+                        if (receiver.UnavailableShiftSlots.Any(s => s.Date.Date == date && s.ShiftLabel == ShiftLabel.Morning)) continue;
+                        if (!ShiftEligibilityResolver.MayTakeLabelOnDate(receiver, ShiftLabel.Morning, date)) continue;
+
+                        var receiverAsgs = solution.GetUserAllAssignments(receiver.UserId);
+                        if (AdjacentShiftRestRules.WouldConflict(receiverAsgs, date, ShiftLabel.Morning, constraints)) continue;
+                        if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(solution, constraints, receiver, date)) continue;
+
+                        if (!WouldPreserveManagerMix(solution, constraints, otherShiftReq.ShiftId, date, mUser.UserId, receiver.UserId))
+                        {
+                            continue;
+                        }
+
+                        attemptedSlides.Add((date, donor.UserId, receiver.UserId));
+
+                        // انجام انتقال ۳ طرفه با تضمین حفظ کامل ظرفیت هر دو شیفت
+                        solution.UnlockSkeletonAssignment(donor.UserId, asg.ShiftId, asg.Date);
+                        solution.RemoveAssignment(donor.UserId, asg.ShiftId, asg.Date, force: true);
+                        solution.RemoveAssignment(mUser.UserId, cand.Assignment.ShiftId, cand.Assignment.Date, force: true);
+                        solution.AddAssignment(mUser.UserId, donorShiftReq.ShiftId, date, ShiftLabel.Evening, isOnCall: false);
+                        solution.AddAssignment(receiver.UserId, otherShiftReq.ShiftId, date, ShiftLabel.Morning, isOnCall: false);
+
+                        LogAction?.Invoke($"[NonConsentingReliefSlide] On {date:yyyy-MM-dd}: Removed {donor.UserName} (Exp={donor.ExperienceYears}) from Evening, moved {mUser.UserName} to Evening, assigned {receiver.UserName} (Exp={receiver.ExperienceYears}) to Morning");
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -807,18 +961,12 @@ public static class OvertimeBalanceGuard
 
                     if (mUser.UnavailableDates.Any(d => d.Date == date)) continue;
                     if (mUser.UnavailableShiftSlots.Any(s => s.Date.Date == date && s.ShiftLabel == ShiftLabel.Evening)) continue;
+                    if (!ShiftEligibilityResolver.MayTakeLabelOnDate(mUser, ShiftLabel.Evening, date)) continue;
 
                     var mAsgsWithoutCurrent = solution.GetUserAllAssignments(mUser.UserId)
                         .Where(a => !(a.Date.Date == date && a.ShiftId == cand.Assignment.ShiftId))
                         .ToList();
                     if (AdjacentShiftRestRules.WouldConflict(mAsgsWithoutCurrent, date, ShiftLabel.Evening, constraints)) continue;
-
-                    if (donor.UserId == 20)
-                    {
-                        var pres = WouldPreserveManagerMix(solution, constraints, donorShiftReq.ShiftId, date, donor.UserId, mUser.UserId);
-                        var rest = !AdjacentShiftRestRules.WouldConflict(mAsgsWithoutCurrent, date, ShiftLabel.Evening, constraints);
-                        LogAction?.Invoke($"[SlideDebug U20] Date={date:yyyy-MM-dd} cand={mUser.UserName}(Exp={mUser.ExperienceYears},L={mUser.ShiftManagerLevel}) candRest={rest} presMgr={pres}");
-                    }
 
                     if (!WouldPreserveManagerMix(solution, constraints, donorShiftReq.ShiftId, date, donor.UserId, mUser.UserId))
                     {
@@ -833,14 +981,6 @@ public static class OvertimeBalanceGuard
                         if (attemptedSlides.Contains((date, donor.UserId, receiver.UserId)))
                         {
                             continue;
-                        }
-
-                        if (donor.UserId == 20 && receiver.ExperienceYears <= 3)
-                        {
-                            var recOff = !solution.GetUserAssignments(receiver.UserId, date).Any(a => !a.IsOnCall);
-                            var recRest = !AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(receiver.UserId), date, ShiftLabel.Morning, constraints);
-                            var recConsec = !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(solution, constraints, receiver, date);
-                            LogAction?.Invoke($"  -> rec={receiver.UserName}(Exp={receiver.ExperienceYears}) recOff={recOff} recRest={recRest} recConsec={recConsec}");
                         }
 
                         if (constraints.EnableOvertimeDistributionBySeniority && constraints.OvertimePreferenceType == 1)
@@ -889,6 +1029,7 @@ public static class OvertimeBalanceGuard
 
                         if (receiver.UnavailableDates.Any(d => d.Date == date)) continue;
                         if (receiver.UnavailableShiftSlots.Any(s => s.Date.Date == date && s.ShiftLabel == ShiftLabel.Morning)) continue;
+                        if (!ShiftEligibilityResolver.MayTakeLabelOnDate(receiver, ShiftLabel.Morning, date)) continue;
 
                         var receiverAsgs = solution.GetUserAllAssignments(receiver.UserId);
                         if (AdjacentShiftRestRules.WouldConflict(receiverAsgs, date, ShiftLabel.Morning, constraints)) continue;
