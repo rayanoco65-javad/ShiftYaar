@@ -68,9 +68,43 @@ public static class ExactNightQuotaGuard
     {
         var nightShift = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftLabel == ShiftYar.Domain.Enums.ShiftModel.ShiftEnums.ShiftLabel.Night);
         if (nightShift == null) return;
-        foreach (var user in constraints.UserConstraints.Where(u => u.HasExactNightQuota || u.ExactHolidayWeekendNightShiftCount.HasValue))
+
+        for (var pass = 0; pass < 8; pass++)
         {
-            ImproveNightSpread(solution, constraints, user, nightShift);
+            var candidateUsers = constraints.UserConstraints
+                .Where(u => u.IsActive && u.ShiftType != ShiftTypes.FixedShift)
+                .Where(u => GetNights(solution, u.UserId).Count >= 2)
+                .OrderByDescending(u => CalculateSpreadPenalty(
+                    GetNights(solution, u.UserId).Select(a => a.Date).ToList(),
+                    constraints.StartDate,
+                    constraints.EndDate))
+                .ToList();
+
+            var improvedAny = false;
+            foreach (var user in candidateUsers)
+            {
+                var beforePen = CalculateSpreadPenalty(
+                    GetNights(solution, user.UserId).Select(a => a.Date).ToList(),
+                    constraints.StartDate,
+                    constraints.EndDate);
+
+                ImproveNightSpread(solution, constraints, user, nightShift);
+
+                var afterPen = CalculateSpreadPenalty(
+                    GetNights(solution, user.UserId).Select(a => a.Date).ToList(),
+                    constraints.StartDate,
+                    constraints.EndDate);
+
+                if (afterPen < beforePen - 0.5)
+                {
+                    improvedAny = true;
+                }
+            }
+
+            if (!improvedAny)
+            {
+                break;
+            }
         }
     }
 
@@ -2785,7 +2819,7 @@ public static class ExactNightQuotaGuard
             SaShiftAssignment? bestFrom = null;
             DateTime? bestTo = null;
             int? swapUserId = null;
-            var bestPenalty = currentPenalty;
+            var bestCombinedDelta = 0.0;
 
             foreach (var night in nights)
             {
@@ -2818,7 +2852,8 @@ public static class ExactNightQuotaGuard
                     }
 
                     var projectedPenalty = CalculateSpreadPenalty(projectedDates, constraints.StartDate, constraints.EndDate);
-                    if (projectedPenalty >= bestPenalty - 0.01)
+                    var userDelta = projectedPenalty - currentPenalty;
+                    if (userDelta >= -0.01)
                     {
                         continue;
                     }
@@ -2829,10 +2864,13 @@ public static class ExactNightQuotaGuard
                         && IsFeasibleNightDate(solution, constraints, user, nightShift, target, holidayOnly: false, ignoreUserNightOnDate: false)
                         && HasSpecialtyCapacity(solution, constraints, nightShift, target, user.SpecialtyId))
                     {
-                        bestPenalty = projectedPenalty;
-                        bestFrom = night;
-                        bestTo = target;
-                        swapUserId = null;
+                        if (userDelta < bestCombinedDelta - 0.01)
+                        {
+                            bestCombinedDelta = userDelta;
+                            bestFrom = night;
+                            bestTo = target;
+                            swapUserId = null;
+                        }
                         continue;
                     }
 
@@ -2847,9 +2885,35 @@ public static class ExactNightQuotaGuard
                     foreach (var occupant in occupants)
                     {
                         var other = constraints.UserConstraints.FirstOrDefault(u => u.UserId == occupant.UserId);
-                        if (other == null || !CanDonateNight(solution, constraints, other, occupant))
+                        if (other == null)
                         {
                             continue;
+                        }
+
+                        if (IsProtected(constraints, other.UserId, occupant))
+                        {
+                            continue;
+                        }
+
+                        if (ShiftManagerRules.IsCriticalForManagerMix(constraints, solution, occupant))
+                        {
+                            continue;
+                        }
+
+                        // در صورتی که طرف مقابل سهمیه شب تعطیل دارد، نباید سهمیه او دچار کسری شود
+                        if (other.ExactHolidayWeekendNightShiftCount.HasValue)
+                        {
+                            var toHol = constraints.IsHolidayWeekendNight(target);
+                            var fromHol = constraints.IsHolidayWeekendNight(night.Date);
+                            if (toHol && !fromHol)
+                            {
+                                var otherHols = solution.GetUserAllAssignments(other.UserId)
+                                    .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall && constraints.IsHolidayWeekendNight(a.Date));
+                                if (otherHols <= other.ExactHolidayWeekendNightShiftCount.Value)
+                                {
+                                    continue;
+                                }
+                            }
                         }
 
                         if (!HasSpecialtyCapacityIgnoring(solution, constraints, nightShift, target, user.SpecialtyId, other.UserId)
@@ -2863,14 +2927,55 @@ public static class ExactNightQuotaGuard
                             continue;
                         }
 
-                        bestPenalty = projectedPenalty;
+                        // بررسی تعادل جریمه پخش شب برای هر دو نفر: مجموع جریمه باید بهبود یابد
+                        var otherNightsList = solution.GetUserAllAssignments(other.UserId)
+                            .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall)
+                            .Select(a => a.Date.Date)
+                            .ToList();
+                        if (otherNightsList.Count < 2)
+                        {
+                            continue;
+                        }
+                        var otherProjNights = otherNightsList.Where(d => d != target).Append(night.Date.Date).ToList();
+                        var otherCurrentPen = CalculateSpreadPenalty(otherNightsList, constraints.StartDate, constraints.EndDate);
+                        var otherProjPen = CalculateSpreadPenalty(otherProjNights, constraints.StartDate, constraints.EndDate);
+
+                        var otherDelta = otherProjPen - otherCurrentPen;
+                        var combinedDelta = userDelta + otherDelta;
+
+                        var otherOrdered = otherProjNights.OrderBy(d => d).ToList();
+                        var createsTightClusterForOther = false;
+                        for (var k = 1; k < otherOrdered.Count; k++)
+                        {
+                            if ((otherOrdered[k] - otherOrdered[k - 1]).Days <= 2)
+                            {
+                                createsTightClusterForOther = true;
+                                break;
+                            }
+                        }
+
+                        // در صورتی که این جابه‌جایی برای همکار خوشه فشرده (فاصله ۱ روز استراحت) ایجاد کند، رد می‌شود
+                        if (createsTightClusterForOther && otherOrdered.Count <= 8)
+                        {
+                            continue;
+                        }
+
+                        if (otherDelta > 50.0 || combinedDelta >= bestCombinedDelta - 0.01)
+                        {
+                            continue;
+                        }
+
+
+                        bestCombinedDelta = combinedDelta;
                         bestFrom = night;
                         bestTo = target;
                         swapUserId = other.UserId;
                         break;
                     }
+
                 }
             }
+
 
             if (bestFrom == null || bestTo == null)
             {
@@ -2884,8 +2989,10 @@ public static class ExactNightQuotaGuard
             {
                 var userWasSkeleton = solution.TryGetAssignment(user.UserId, nightShift.ShiftId, fromDate, out var userFromAss) && userFromAss.IsSkeleton;
                 var swapWasSkeleton = solution.TryGetAssignment(swapUserId.Value, nightShift.ShiftId, toDate, out var swapToAss) && swapToAss.IsSkeleton;
-                solution.RemoveAssignment(user.UserId, nightShift.ShiftId, fromDate);
-                solution.RemoveAssignment(swapUserId.Value, nightShift.ShiftId, toDate);
+                solution.UnlockSkeletonAssignment(user.UserId, nightShift.ShiftId, fromDate);
+                solution.UnlockSkeletonAssignment(swapUserId.Value, nightShift.ShiftId, toDate);
+                solution.RemoveAssignment(user.UserId, nightShift.ShiftId, fromDate, force: true);
+                solution.RemoveAssignment(swapUserId.Value, nightShift.ShiftId, toDate, force: true);
                 solution.AddAssignment(user.UserId, nightShift.ShiftId, toDate, ShiftLabel.Night, false, isSkeleton: userWasSkeleton);
                 solution.AddAssignment(swapUserId.Value, nightShift.ShiftId, fromDate, ShiftLabel.Night, false, isSkeleton: swapWasSkeleton);
 
@@ -2893,8 +3000,10 @@ public static class ExactNightQuotaGuard
                     !IsSlotManagerMixSatisfied(solution, constraints, nightShift, toDate) ||
                     ShiftCoverageGuard.HasAnyOverCapacity(solution, constraints))
                 {
-                    solution.RemoveAssignment(user.UserId, nightShift.ShiftId, toDate);
-                    solution.RemoveAssignment(swapUserId.Value, nightShift.ShiftId, fromDate);
+                    solution.UnlockSkeletonAssignment(user.UserId, nightShift.ShiftId, toDate);
+                    solution.UnlockSkeletonAssignment(swapUserId.Value, nightShift.ShiftId, fromDate);
+                    solution.RemoveAssignment(user.UserId, nightShift.ShiftId, toDate, force: true);
+                    solution.RemoveAssignment(swapUserId.Value, nightShift.ShiftId, fromDate, force: true);
                     solution.AddAssignment(user.UserId, nightShift.ShiftId, fromDate, ShiftLabel.Night, false, isSkeleton: userWasSkeleton);
                     solution.AddAssignment(swapUserId.Value, nightShift.ShiftId, toDate, ShiftLabel.Night, false, isSkeleton: swapWasSkeleton);
                 }
@@ -2902,14 +3011,16 @@ public static class ExactNightQuotaGuard
             else
             {
                 var userWasSkeleton = solution.TryGetAssignment(user.UserId, nightShift.ShiftId, fromDate, out var userFromAss2) && userFromAss2.IsSkeleton;
-                solution.RemoveAssignment(user.UserId, nightShift.ShiftId, fromDate);
+                solution.UnlockSkeletonAssignment(user.UserId, nightShift.ShiftId, fromDate);
+                solution.RemoveAssignment(user.UserId, nightShift.ShiftId, fromDate, force: true);
                 solution.AddAssignment(user.UserId, nightShift.ShiftId, toDate, ShiftLabel.Night, false, isSkeleton: userWasSkeleton);
 
                 if (!IsSlotManagerMixSatisfied(solution, constraints, nightShift, fromDate) ||
                     !IsSlotManagerMixSatisfied(solution, constraints, nightShift, toDate) ||
                     ShiftCoverageGuard.HasAnyOverCapacity(solution, constraints))
                 {
-                    solution.RemoveAssignment(user.UserId, nightShift.ShiftId, toDate);
+                    solution.UnlockSkeletonAssignment(user.UserId, nightShift.ShiftId, toDate);
+                    solution.RemoveAssignment(user.UserId, nightShift.ShiftId, toDate, force: true);
                     solution.AddAssignment(user.UserId, nightShift.ShiftId, fromDate, ShiftLabel.Night, false, isSkeleton: userWasSkeleton);
                 }
             }
@@ -2940,14 +3051,14 @@ public static class ExactNightQuotaGuard
 
         if (AdjacentShiftRestRules.WouldConflict(
                 solution.GetUserAllAssignments(user.UserId).Where(a => !(a.ShiftLabel == ShiftLabel.Night && a.Date.Date == userFrom)),
-                userTo, ShiftLabel.Night, constraints))
+                userTo, ShiftLabel.Night, constraints, userId: user.UserId))
         {
             return false;
         }
 
         if (AdjacentShiftRestRules.WouldConflict(
                 solution.GetUserAllAssignments(other.UserId).Where(a => !(a.ShiftLabel == ShiftLabel.Night && a.Date.Date == userTo)),
-                userFrom, ShiftLabel.Night, constraints))
+                userFrom, ShiftLabel.Night, constraints, userId: other.UserId))
         {
             return false;
         }
@@ -3334,6 +3445,25 @@ public static class ExactNightQuotaGuard
             {
                 penalty += deficit * deficit;
             }
+
+            // جریمه مضاعف برای فاصله‌های بسیار کم (مثلاً فقط ۱ روز استراحت بین دو شب) وقتی امکان پخش هست
+            if (gap <= 2 && idealGap >= 3.5)
+            {
+                penalty += 60.0;
+            }
+            else if (gap <= 3 && idealGap >= 5.0)
+            {
+                penalty += 25.0;
+            }
+        }
+
+        // جریمه فاصله‌های خالی طولانی در ابتدا و انتهای ماه
+        var leadingGap = (ordered[0] - rangeStart.Date).Days;
+        var trailingGap = (rangeEnd.Date - ordered[^1]).Days;
+        var edgeDeficit = Math.Max(0, leadingGap - idealGap * 1.5) + Math.Max(0, trailingGap - idealGap * 1.5);
+        if (edgeDeficit > 0)
+        {
+            penalty += edgeDeficit * 6.0;
         }
 
         var mid = rangeStart.Date.AddDays(spanDays / 2.0);
@@ -3343,6 +3473,7 @@ public static class ExactNightQuotaGuard
 
         return penalty;
     }
+
 
     private static bool IsSlotManagerMixSatisfied(
         ShiftSolution solution,
