@@ -9,6 +9,9 @@ using System.Threading.Tasks;
 
 namespace ShiftYar.Api.Controllers.ShiftModel
 {
+    [ApiController]
+    [Route("api/[controller]")]
+    [Route("[controller]")]
     public class ShiftRequiredResponsibilityController : BaseController
     {
         private readonly IShiftRequiredResponsibilityService _responsibilityService;
@@ -19,7 +22,8 @@ namespace ShiftYar.Api.Controllers.ShiftModel
         }
 
         /// <summary>دریافت نیازمندی‌های مسئولیت برای یک شیفت مشخص</summary>
-        [HttpGet("shift/{shiftId}")]
+        [HttpGet("by-shift/{shiftId:int}")]
+        [HttpGet("shift/{shiftId:int}")]
         public async Task<ActionResult<ApiResponse<List<ShiftRequiredResponsibilityDtoGet>>>> GetByShiftId(int shiftId)
         {
             try
@@ -33,8 +37,16 @@ namespace ShiftYar.Api.Controllers.ShiftModel
             }
         }
 
+        /// <summary>دریافت نیازمندی‌های مسئولیت شیفت از طریق Query Parameter</summary>
+        [HttpGet("by-shift")]
+        [HttpGet("shift")]
+        public async Task<ActionResult<ApiResponse<List<ShiftRequiredResponsibilityDtoGet>>>> GetByShiftQuery([FromQuery] int shiftId)
+        {
+            return await GetByShiftId(shiftId);
+        }
+
         /// <summary>دریافت یک نیازمندی مسئولیت با شناسه</summary>
-        [HttpGet("{id}")]
+        [HttpGet("{id:int}")]
         public async Task<ActionResult<ApiResponse<ShiftRequiredResponsibilityDtoGet>>> GetById(int id)
         {
             try
@@ -51,6 +63,7 @@ namespace ShiftYar.Api.Controllers.ShiftModel
 
         /// <summary>ایجاد نیازمندی مسئولیت برای شیفت</summary>
         [HttpPost]
+        [HttpPost("create")]
         public async Task<ActionResult<ApiResponse<ShiftRequiredResponsibilityDtoGet>>> Create([FromBody] ShiftRequiredResponsibilityDtoAdd dto)
         {
             try
@@ -66,12 +79,19 @@ namespace ShiftYar.Api.Controllers.ShiftModel
         }
 
         /// <summary>ویرایش نیازمندی مسئولیت شیفت</summary>
-        [HttpPut("{id}")]
-        public async Task<ActionResult<ApiResponse<ShiftRequiredResponsibilityDtoGet>>> Update(int id, [FromBody] ShiftRequiredResponsibilityDtoAdd dto)
+        [HttpPut("{id:int}")]
+        [HttpPut]
+        public async Task<ActionResult<ApiResponse<ShiftRequiredResponsibilityDtoGet>>> Update([FromRoute] int? id, [FromBody] ShiftRequiredResponsibilityDtoAdd dto)
         {
             try
             {
-                var result = await _responsibilityService.UpdateAsync(id, dto);
+                int targetId = id ?? dto?.Id ?? 0;
+                if (targetId <= 0)
+                {
+                    return BadRequest(ApiResponse<ShiftRequiredResponsibilityDtoGet>.Fail("شناسه نیازمندی الزامی است."));
+                }
+
+                var result = await _responsibilityService.UpdateAsync(targetId, dto!);
                 if (!result.IsSuccess) return BadRequest(result);
                 return Ok(result);
             }
@@ -82,12 +102,19 @@ namespace ShiftYar.Api.Controllers.ShiftModel
         }
 
         /// <summary>حذف نیازمندی مسئولیت شیفت</summary>
-        [HttpDelete("{id}")]
-        public async Task<ActionResult<ApiResponse<string>>> Delete(int id)
+        [HttpDelete("{id:int}")]
+        [HttpDelete]
+        public async Task<ActionResult<ApiResponse<string>>> Delete([FromRoute] int? id, [FromQuery] int? itemId)
         {
+            int targetId = id ?? itemId ?? 0;
+            if (targetId <= 0)
+            {
+                return BadRequest(ApiResponse<string>.Fail("شناسه نیازمندی الزامی است."));
+            }
+
             try
             {
-                var result = await _responsibilityService.DeleteAsync(id);
+                var result = await _responsibilityService.DeleteAsync(targetId);
                 if (!result.IsSuccess) return BadRequest(result);
                 return Ok(result);
             }

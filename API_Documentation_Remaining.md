@@ -26,6 +26,8 @@
 18. [کنترلر تنظیمات الگوریتم (AlgorithmSettingsController)](#18-کنترلر-تنظیمات-الگوریتم-algorithmsettingscontroller)
 19. [کنترلر تقویم (CalendarSeederController)](#19-کنترلر-تقویم-calendarseedercontroller)
 20. [کنترلر سهمیه روزانه و تناوب هفتگی (UserMonthlyDayShiftQuotaController)](#20-کنترلر-سهمیه-روزانه-و-تناوب-هفتگی-usermonthlydayshiftquotacontroller)
+21. [کنترلر مسئولیت‌های دپارتمان (DepartmentResponsibilityController)](#21-کنترلر-مسئولیت‌های-دپارتمان-departmentresponsibilitycontroller)
+22. [کنترلر نیازمندی مسئولیت شیفت (ShiftRequiredResponsibilityController)](#22-کنترلر-نیازمندی-مسئولیت-شیفت-shiftrequiredresponsibilitycontroller)
 
 ---
 
@@ -1351,9 +1353,134 @@ Content-Type: application/json
 
 ---
 
-**تاریخ ایجاد مستندات:** 2024  
+## 21. کنترلر مسئولیت‌های دپارتمان (DepartmentResponsibilityController)
+
+### توضیح نقش کنترلر
+این کنترلر مسئول مدیریت عناوین مسئولیت‌ها و نقش‌های تخصصی بخش‌ها (نظیر سیرکولر، اسکراب اول، اسکراب دوم، اد و وینیست در اتاق عمل) و تخصیص تک‌نفره یا ماتریسی (گروهی) این نقش‌ها به پرسنل دپارتمان می‌باشد.
+
+> 📌 **نکته مسیردهی:** تمام متدهای این کنترلر با هر دو پیشوند `/api/DepartmentResponsibility/...` و `/DepartmentResponsibility/...` در دسترس هستند.
+
+### اکشن‌ها
+
+#### 21.1. GetByDepartmentId
+- **نوع اکشن:** GET
+- **آدرس Endpoint:** `/api/DepartmentResponsibility/by-department/{departmentId}`  
+  (همچنین پشتیبانی از Query Param: `/by-department?departmentId={id}` و آلیاس: `/department/{departmentId}`)
+- **توضیح:** دریافت لیست تمام مسئولیت‌های فعال یک بخش به همراه تعداد پرسنل تخصیص‌یافته به هر نقش.
+- **ورودی‌ها:** `departmentId` (int)
+- **خروجی:** `ApiResponse<List<DepartmentResponsibilityDtoGet>>`
+
+#### 21.2. GetById
+- **نوع اکشن:** GET
+- **آدرس Endpoint:** `/api/DepartmentResponsibility/{id}`
+- **توضیح:** دریافت جزئیات یک مسئولیت با شناسه
+- **خروجی:** `ApiResponse<DepartmentResponsibilityDtoGet>`
+
+#### 21.3. Create
+- **نوع اکشن:** POST
+- **آدرس Endpoint:** `/api/DepartmentResponsibility` (یا `/api/DepartmentResponsibility/create`)
+- **توضیح:** ایجاد مسئولیت و نقش جدید در یک بخش
+- **ورودی‌ها:** مدل `DepartmentResponsibilityDtoAdd`
+
+| فیلد | نوع داده | ضروری | توضیح |
+|------|---------|-------|-------|
+| `departmentId` | `int` | بله | شناسه دپارتمان |
+| `title` | `string` | بله | عنوان مسئولیت (حداکثر ۱۰۰ کاراکتر) |
+| `description` | `string?` | خیر | توضیحات نقش |
+| `priority` | `int?` | خیر | اولویت تخصیص در الگوریتم (عدد بالاتر = اولویت تخصیص بیشتر) |
+| `isDefault` | `bool?` | خیر | آیا نقش پیش‌فرض و پایه است؟ (مانند سیرکولر) |
+| `specialtyId` | `int?` | خیر | تخصص مرتبط |
+
+#### 21.4. Update
+- **نوع اکشن:** PUT
+- **آدرس Endpoint:** `/api/DepartmentResponsibility/{id}` (یا `/api/DepartmentResponsibility`)
+- **توضیح:** ویرایش اطلاعات مسئولیت
+- **ورودی‌ها:** مدل `DepartmentResponsibilityDtoUpdate`
+
+#### 21.5. Delete
+- **نوع اکشن:** DELETE
+- **آدرس Endpoint:** `/api/DepartmentResponsibility/{id}` (یا با Query Param: `?itemId={id}`)
+- **توضیح:** حذف مسئولیت از بخش
+
+#### 21.6. SeedOperatingRoom
+- **نوع اکشن:** POST
+- **آدرس Endpoint:** `/api/DepartmentResponsibility/seed-operating-room/{departmentId}`  
+  (پشتیبانی از Query Param: `?deptId={id}`)
+- **توضیح:** ایجاد خودکار و یک‌جای ۵ نقش استاندارد اتاق عمل شامل: سیرکولر (`isDefault=true`, `priority=10`)، اسکراب اول (`priority=1`)، اسکراب دوم (`priority=2`)، اد (`priority=3`) و وینیست (`priority=4`).
+- **خروجی:** `ApiResponse<List<DepartmentResponsibilityDtoGet>>`
+
+#### 21.7. GetStaffMatrix
+- **نوع اکشن:** GET
+- **آدرس Endpoint:** `/api/DepartmentResponsibility/staff-matrix/{departmentId}`  
+  (همچنین: `/staff-matrix?departmentId={id}` و آلیاس: `/matrix/{departmentId}`)
+- **توضیح:** دریافت ماتریس جامع دو بعدی پرسنل بخش و نقش‌های تعریف‌شده جهت رندر جدول چک‌باکس در فرانت‌اند.
+- **خروجی:** `ApiResponse<DepartmentStaffMatrixDto>` شامل لیست پرسنل با آرایه `assignedResponsibilityIds`.
+
+#### 21.8. AssignUserResponsibilities
+- **نوع اکشن:** POST
+- **آدرس Endpoint:** `/api/DepartmentResponsibility/assign-user`
+- **ورودی:** `UserResponsibilityAssignDto` شامل `userId` و آرایه `responsibilityIds`
+
+#### 21.9. BatchAssign
+- **نوع اکشن:** POST
+- **آدرس Endpoint:** `/api/DepartmentResponsibility/batch-assign`
+- **توضیح:** ذخیره یکپارچه ماتریس انتساب پرسنل بخش
+- **ورودی:** `BatchAssignResponsibilitiesDto` شامل `departmentId` و لیست انتساب‌ها `assignments`
+
+---
+
+## 22. کنترلر نیازمندی مسئولیت شیفت (ShiftRequiredResponsibilityController)
+
+### توضیح نقش کنترلر
+این کنترلر در دپارتمان‌های مسئولیت‌محور (نظیر اتاق عمل)، نیازمندی هر شیفت به تفکیک نقش‌های تخصصی را با پشتیبانی از تفکیک زن/مرد، سهمیه شناور کل و مقادیر روزهای تعطیل مدیریت می‌کند.
+
+> 📌 **نکته مسیردهی:** تمام متدهای این کنترلر با هر دو پیشوند `/api/ShiftRequiredResponsibility/...` و `/ShiftRequiredResponsibility/...` در دسترس هستند.
+
+### اکشن‌ها
+
+#### 22.1. GetByShiftId
+- **نوع اکشن:** GET
+- **آدرس Endpoint:** `/api/ShiftRequiredResponsibility/by-shift/{shiftId}`  
+  (همچنین Query Param: `?shiftId={id}` و آلیاس: `/shift/{shiftId}`)
+- **خروجی:** `ApiResponse<List<ShiftRequiredResponsibilityDtoGet>>`
+
+#### 22.2. GetById
+- **نوع اکشن:** GET
+- **آدرس Endpoint:** `/api/ShiftRequiredResponsibility/{id}`
+- **خروجی:** `ApiResponse<ShiftRequiredResponsibilityDtoGet>`
+
+#### 22.3. Create
+- **نوع اکشن:** POST
+- **آدرس Endpoint:** `/api/ShiftRequiredResponsibility` (یا `/create`)
+- **ورودی:** مدل `ShiftRequiredResponsibilityDtoAdd`
+
+| فیلد | نوع داده | ضروری | توضیح |
+|------|---------|-------|-------|
+| `shiftId` | `int` | بله | شناسه شیفت |
+| `departmentResponsibilityId` | `int` | بله | شناسه مسئولیت دپارتمان |
+| `requiredMaleCount` | `int?` | خیر | تعداد آقایان مورد نیاز (روز عادی) |
+| `requiredFemaleCount` | `int?` | خیر | تعداد خانم‌های مورد نیاز (روز عادی) |
+| `requiredTotalCount` | `int` | بله | سهمیه کل مورد نیاز برای این نقش (روز عادی) |
+| `holidayRequiredMaleCount` | `int?` | خیر | تعداد آقایان مورد نیاز (روز تعطیل) |
+| `holidayRequiredFemaleCount` | `int?` | خیر | تعداد خانم‌های مورد نیاز (روز تعطیل) |
+| `holidayRequiredTotalCount` | `int?` | خیر | سهمیه کل مورد نیاز (روز تعطیل) |
+
+#### 22.4. Update
+- **نوع اکشن:** PUT
+- **آدرس Endpoint:** `/api/ShiftRequiredResponsibility/{id}` (یا `/api/ShiftRequiredResponsibility`)
+- **ورودی:** مدل `ShiftRequiredResponsibilityDtoAdd` (امکان ارسال `Id` در URL یا در بدنه)
+
+#### 22.5. Delete
+- **نوع اکشن:** DELETE
+- **آدرس Endpoint:** `/api/ShiftRequiredResponsibility/{id}` (یا `?itemId={id}`)
+- **توضیح:** حذف رکورد نیازمندی نقش از شیفت
+
+---
+
+**تاریخ ایجاد مستندات:** 2024 (به‌روزرسانی: 2026)  
 **نسخه API:** v1  
 **پروژه:** ShiftYar
+
 
 
 

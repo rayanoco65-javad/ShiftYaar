@@ -15,5 +15,6 @@ namespace ShiftYar.Application.Interfaces.DepartmentModel
         Task<ApiResponse<string>> AssignUserResponsibilitiesAsync(UserResponsibilityAssignDto dto);
         Task<ApiResponse<string>> BatchAssignResponsibilitiesAsync(BatchAssignResponsibilitiesDto dto);
         Task<ApiResponse<DepartmentStaffMatrixDto>> GetStaffMatrixAsync(int departmentId);
+        Task<ApiResponse<List<DepartmentResponsibilityDtoGet>>> SeedOperatingRoomAsync(int departmentId);
     }
 }

@@ -219,5 +219,49 @@ namespace ShiftYar.Application.Features.DepartmentModel.Services
 
             return ApiResponse<DepartmentStaffMatrixDto>.Success(matrix);
         }
+
+        public async Task<ApiResponse<List<DepartmentResponsibilityDtoGet>>> SeedOperatingRoomAsync(int departmentId)
+        {
+            var dept = await _deptRepo.GetByIdAsync(departmentId);
+            if (dept == null)
+            {
+                return ApiResponse<List<DepartmentResponsibilityDtoGet>>.Fail("بخش مورد نظر یافت نشد.");
+            }
+
+            var (existingItems, _) = await _respRepo.GetByFilterAsync(
+                new Common.Filters.SimpleFilter<DepartmentResponsibility>(r => r.DepartmentId == departmentId));
+
+            var currentUserId = GetCurrentUserId();
+            var standardRoles = new List<(string Title, bool IsDefault, int Priority, string Description)>
+            {
+                ("سیرکولر", true, 10, "سیرکولر اتاق عمل (مسئولیت پایه و عمومی)"),
+                ("اسکراب اول", false, 1, "اسکراب اول و جراحی اصلی"),
+                ("اسکراب دوم", false, 2, "اسکراب دوم"),
+                ("اد", false, 3, "نقش اد اتاق عمل"),
+                ("وینیست", false, 4, "نقش وینیست اتاق عمل")
+            };
+
+            foreach (var role in standardRoles)
+            {
+                var exists = existingItems.Any(r => r.Title != null && r.Title.Trim().Equals(role.Title.Trim(), StringComparison.OrdinalIgnoreCase));
+                if (!exists)
+                {
+                    await _respRepo.AddAsync(new DepartmentResponsibility
+                    {
+                        DepartmentId = departmentId,
+                        Title = role.Title,
+                        Description = role.Description,
+                        IsDefault = role.IsDefault,
+                        Priority = role.Priority,
+                        IsActive = true,
+                        CreateDate = DateTime.Now,
+                        TheUserId = currentUserId
+                    });
+                }
+            }
+
+            await _respRepo.SaveAsync();
+            return await GetByDepartmentIdAsync(departmentId);
+        }
     }
 }

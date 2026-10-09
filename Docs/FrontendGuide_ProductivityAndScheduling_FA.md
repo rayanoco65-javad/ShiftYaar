@@ -1126,10 +1126,14 @@ $$\text{حداکثر مرخصی مجاز روزانه} = \max\Big(0, \text{کل 
 
 | متد | آدرس Endpoint | توضیح |
 |---|---|---|
-| `GET` | `/api/DepartmentResponsibility/by-department/{departmentId}` | دریافت لیست تمام نقش‌های تعریف‌شده برای یک بخش |
+| `GET` | `/api/DepartmentResponsibility/by-department/{departmentId}` | دریافت لیست تمام نقش‌های یک بخش (پشتیبانی از هر دو حالت URL param و Query Param: `?departmentId=X` و آلیاس `department/{id}`) |
+| `GET` | `/api/DepartmentResponsibility/{id}` | دریافت اطلاعات یک نقش با شناسه |
 | `POST` | `/api/DepartmentResponsibility` | ایجاد نقش جدید در بخش |
-| `PUT` | `/api/DepartmentResponsibility` | ویرایش عنوان، اولویت یا توضیحات نقش |
+| `PUT` | `/api/DepartmentResponsibility/{id}` یا `/api/DepartmentResponsibility` | ویرایش مشخصات نقش (امکان ارسال ID در URL یا بدنه JSON) |
 | `DELETE` | `/api/DepartmentResponsibility/{id}` | حذف نقش |
+| `POST` | `/api/DepartmentResponsibility/seed-operating-room/{departmentId}` | ایجاد خودکار و سریع ۵ نقش استاندارد اتاق عمل (سیرکولر، اسکراب ۱، اسکراب ۲، اد، وینیست) |
+
+> 📌 **نکته مسیردهی (Routing):** برای جلوگیری از خطای ۴۰۴ در کلاینت‌های مختلف فرانت، هر دو الگوی فراخوانی `/api/DepartmentResponsibility/...` و `/DepartmentResponsibility/...` در بک‌اند معتبر بوده و پاسخ می‌دهند.
 
 #### مدل ایجاد/ویرایش نقش (`DepartmentResponsibilityDtoAdd` / `Update`):
 
@@ -1254,10 +1258,13 @@ $$\text{حداکثر مرخصی مجاز روزانه} = \max\Big(0, \text{کل 
 
 | متد | آدرس Endpoint | توضیح |
 |---|---|---|
-| `GET` | `/api/ShiftRequiredResponsibility/by-shift/{shiftId}` | دریافت تمام نیازمندی‌های مسئولیت یک شیفت |
+| `GET` | `/api/ShiftRequiredResponsibility/by-shift/{shiftId}` | دریافت تمام نیازمندی‌های مسئولیت یک شیفت (پشتیبانی از URL param، Query param `?shiftId=X` و آلیاس `shift/{id}`) |
+| `GET` | `/api/ShiftRequiredResponsibility/{id}` | دریافت اطلاعات یک رکورد نیازمندی با شناسه |
 | `POST` | `/api/ShiftRequiredResponsibility` | ایجاد نیازمندی نقش برای شیفت |
-| `PUT` | `/api/ShiftRequiredResponsibility` | ویرایش نیازمندی نقش شیفت |
+| `PUT` | `/api/ShiftRequiredResponsibility/{id}` یا `/api/ShiftRequiredResponsibility` | ویرایش نیازمندی نقش شیفت |
 | `DELETE` | `/api/ShiftRequiredResponsibility/{id}` | حذف نیازمندی نقش از شیفت |
+
+> 📌 **نکته مسیردهی (Routing):** هر دو فرمت با پیشوند `/api/ShiftRequiredResponsibility/...` و بدون پیشوند `/ShiftRequiredResponsibility/...` در بک‌اند فعال هستند.
 
 #### مدل ایجاد / ویرایش نیازمندی شیفت (`ShiftRequiredResponsibilityDtoAdd`):
 
@@ -1657,7 +1664,7 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
     - `3` = ترکیبی (Hybrid)
 - **مدیریت نقش‌ها و مسئولیت‌های بخش (`DepartmentResponsibility`):**
   - صفحه یا تب مدیریت نقش‌های بخش (`GET /api/DepartmentResponsibility/by-department/{departmentId}`)
-  - فرم افزودن/ویرایش نقش با فیلدهای `title`، `priority` (اولویت پر شدن نقش در چیدمان)، و چک‌باکس `isDefaultFallback` (نقش پایه/عمومی مانند سیرکولر)
+  - فرم افزودن/ویرایش نقش با فیلدهای `title`، `priority` (اولویت پر شدن نقش در چیدمان)، و چک‌باکس `isDefault` (نقش پایه/عمومی مانند سیرکولر)
   - دکمه ایجاد نقش‌های پیش‌فرض اتاق عمل (`POST /api/DepartmentResponsibility/seed-operating-room/{departmentId}`) جهت راه‌اندازی با ۱ کلیک
 - **ماتریس انتساب نقش‌های پرسنل (Staff Responsibilities Matrix):**
   - جدول ماتریسی پرسنل (`GET /api/DepartmentResponsibility/staff-matrix/{departmentId}`) با امکان تیک زدن چند نقش برای هر پرسنل و ذخیره دسته‌جمعی با `POST /api/DepartmentResponsibility/batch-assign`

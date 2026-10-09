@@ -4,6 +4,8 @@ namespace ShiftYar.Application.DTOs.ShiftModel.ShiftRequiredResponsibilityModel
 {
     public class ShiftRequiredResponsibilityDtoAdd
     {
+        public int? Id { get; set; }
+
         [Required(ErrorMessage = "شناسه شیفت الزامی است")]
         public int ShiftId { get; set; }
 
