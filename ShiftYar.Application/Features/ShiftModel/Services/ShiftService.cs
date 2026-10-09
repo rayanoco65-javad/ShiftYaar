@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using ShiftYar.Application.Common.Models.ResponseModel;
@@ -40,7 +40,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     "Department.Hospital",
                     "Department.Supervisor",
                     "RequiredSpecialties",
-                    "RequiredSpecialties.Specialty");
+                    "RequiredSpecialties.Specialty",
+                    "RequiredResponsibilities",
+                    "RequiredResponsibilities.DepartmentResponsibility");
 
                 var shifts = items.Select(s => _mapper.Map<ShiftDtoGet>(s)).ToList();
 
@@ -72,7 +74,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     "Department.Hospital",
                     "Department.Supervisor",
                     "RequiredSpecialties",
-                    "RequiredSpecialties.Specialty");
+                    "RequiredSpecialties.Specialty",
+                    "RequiredResponsibilities",
+                    "RequiredResponsibilities.DepartmentResponsibility");
                 if (shift == null)
                 {
                     _logger.LogWarning("Shift with ID {Id} not found", id);

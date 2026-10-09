@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using ShiftYar.Application.DTOs.ProductivityModel;
 using ShiftYar.Application.Common.Utilities;
+using static ShiftYar.Domain.Enums.DepartmentModel.DepartmentEnums;
 using static ShiftYar.Domain.Enums.ShiftModel.ShiftEnums;
 using static ShiftYar.Domain.Enums.UserModel.UserEnums;
 
@@ -20,6 +21,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public DateTime EndDate { get; set; }
         public List<UserConstraint> UserConstraints { get; set; } = new List<UserConstraint>();
         public List<ShiftRequirement> ShiftRequirements { get; set; } = new List<ShiftRequirement>();
+        /// <summary>نحوه چیدمان و سازمان‌دهی نیروها: سطح‌بندی (۱)، مسئولیت‌محور (۲)، ترکیبی (۳)</summary>
+        public DepartmentStaffingMode StaffingMode { get; set; } = DepartmentStaffingMode.LevelBased;
+        /// <summary>عناوین مسئولیت‌های بخش جهت نمایش در خروجی</summary>
+        public Dictionary<int, string> ResponsibilityTitles { get; set; } = new Dictionary<int, string>();
+        /// <summary>شناسه نقش پیش‌فرض بخش (مانند سیرکولر که همه پرسنل به عنوان نقش پایه می‌توانند داشته باشند)</summary>
+        public int? DefaultDepartmentResponsibilityId { get; set; }
         /// <summary>روزهای تعطیل بازه (پرسنل فیکس در این روزها شیفت نمی‌گیرند؛ ظرفیت تخصص می‌تواند متفاوت باشد)</summary>
         public HashSet<DateTime> HolidayDates { get; set; } = new HashSet<DateTime>();
         /// <summary>سقف‌گذاری ساعت کار پایه بر مبنای ماه استاندارد (۱۷۶ ساعت / ۲۴ روز کاری). پیش‌فرض null (معادل false برای محاسبات تقویمی دقیق)</summary>
@@ -232,6 +239,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public bool CanBeShiftManager { get; set; }
         /// <summary>null = مسئول نیست؛ 1 = سطح ۱؛ 2 = سطح ۲</summary>
         public byte? ShiftManagerLevel { get; set; }
+        /// <summary>شناسه‌های مسئولیت‌های تخصصی این پرسنل (اتاق عمل و ...)</summary>
+        public HashSet<int> ResponsibilityIds { get; set; } = new HashSet<int>();
+        public bool CanPerformResponsibility(int respId, bool isDefault) => isDefault || ResponsibilityIds.Contains(respId);
         public bool IsActive { get; set; } = true; // وضعیت فعال بودن کاربر
         public ShiftTypes ShiftType { get; set; }
         public ShiftSubTypes ShiftSubType { get; set; }
@@ -310,6 +320,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public int ManagerMinLevel1Count { get; set; }
 
         public List<SpecialtyRequirement> SpecialtyRequirements { get; set; } = new List<SpecialtyRequirement>();
+        public List<ResponsibilityRequirement> ResponsibilityRequirements { get; set; } = new List<ResponsibilityRequirement>();
     }
 
     /// <summary>
@@ -367,6 +378,47 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         int OnCallMaleCount,
         int OnCallFemaleCount,
         int OnCallTotalCount);
+
+    /// <summary>
+    /// نیازمندی یک مسئولیت در شیفت (اسکراب اول، اسکراب دوم، سیرکولر، اد، وینیست و ...)
+    /// </summary>
+    public class ResponsibilityRequirement
+    {
+        public int DepartmentResponsibilityId { get; set; }
+        public string ResponsibilityTitle { get; set; } = string.Empty;
+        public bool IsDefault { get; set; }
+        public int Priority { get; set; }
+
+        public int RequiredMaleCount { get; set; }
+        public int RequiredFemaleCount { get; set; }
+        public int RequiredTotalCount { get; set; }
+
+        public int? HolidayRequiredMaleCount { get; set; }
+        public int? HolidayRequiredFemaleCount { get; set; }
+        public int? HolidayRequiredTotalCount { get; set; }
+
+        public ResponsibilityDayCounts ForDay(bool isHoliday)
+        {
+            if (!isHoliday)
+            {
+                return new ResponsibilityDayCounts(
+                    RequiredMaleCount,
+                    RequiredFemaleCount,
+                    RequiredTotalCount);
+            }
+
+            return new ResponsibilityDayCounts(
+                HolidayRequiredMaleCount ?? RequiredMaleCount,
+                HolidayRequiredFemaleCount ?? RequiredFemaleCount,
+                HolidayRequiredTotalCount ?? RequiredTotalCount);
+        }
+    }
+
+    /// <summary>نیازمندی مؤثر مسئولیت برای یک روز مشخص (تعطیل یا غیرتعطیل)</summary>
+    public readonly record struct ResponsibilityDayCounts(
+        int RequiredMaleCount,
+        int RequiredFemaleCount,
+        int RequiredTotalCount);
 
     /// <summary>
     /// محدودیت‌های سراسری

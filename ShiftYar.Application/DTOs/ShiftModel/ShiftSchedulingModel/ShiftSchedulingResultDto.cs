@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -36,6 +36,8 @@ namespace ShiftYar.Application.DTOs.ShiftModel.ShiftSchedulingModel
         public bool IsOnCall { get; set; } // آیا آماده‌باش است
         public int SpecialtyId { get; set; } // تخصص کاربر
         public string SpecialtyName { get; set; } = ""; // نام تخصص
+        public int? ResponsibilityId { get; set; } // شناسه مسئولیت منتسب‌شده (اسکراب ۱، سیرکولر، وینیست، ...)
+        public string? ResponsibilityTitle { get; set; } // عنوان مسئولیت منتسب‌شده
     }
 
     /// <summary>

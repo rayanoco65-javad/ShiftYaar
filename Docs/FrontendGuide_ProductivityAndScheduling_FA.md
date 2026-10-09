@@ -608,6 +608,8 @@
 - `MaxProductivityRequiredHours: decimal?` — **حداکثر ساعت موظفی (دستی)**
 - `ShiftManagerLevel: byte?` — سطح مسئول شیفت (`null`/`1`/`2`)
 - `CanBeShiftManager: bool?` — سازگاری؛ ترجیحاً از `ShiftManagerLevel` استفاده شود
+- `ResponsibilityIds: List<int>?` — شناسه‌های مسئولیت‌های تخصیص‌یافته به کاربر (در `UserDtoAdd` جهت ثبت اولیه نقش‌ها)
+- `Responsibilities: List<DepartmentResponsibilityDtoGet>?` — لیست کامل مسئولیت‌های تخصیص‌یافته به کاربر شامل `id`، `title`، `isDefault` و `priority` (در `UserDtoGet`)
 
 #### فیلد «حداکثر ساعت موظفی» (`MaxProductivityRequiredHours`)
 
@@ -1095,6 +1097,127 @@ $$\text{حداکثر مرخصی مجاز روزانه} = \max\Big(0, \text{کل 
 
 ستون `ExchangeType` روی `ShiftExchanges` — migration: `20260816120000_AddExchangeTypeToShiftExchange` (بعد از `Update-Database`).
 
+---
+
+## ۱.۸ سیستم مدیریت نقش‌ها و مسئولیت‌های تخصصی پرسنل (اتاق عمل و ...) — جدید
+
+در بخش‌هایی مانند **اتاق عمل**، پرسنل به‌جای یا در کنار «سطح‌بندی مسئول شیفت»، دارای **یک یا چند نقش/مسئولیت تخصصی** هستند (مانند اسکراب اول، اسکراب دوم، سیرکولر، اد، وینیست و ...). سیستم اکنون از تعیین پویای این مسئولیت‌ها، انتساب چندنقشی به پرسنل، و چیدمان هوشمند شیفت بر مبنای اولویت نقش‌ها پشتیبانی می‌کند.
+
+### ۱.۸.۱ حالت چیدمان دپارتمان (`DepartmentStaffingMode`)
+
+روی تنظیمات زمان‌بندی دپارتمان (`DepartmentSchedulingSettings`) فیلد `staffingMode` (عدد صحیح / Enum) اضافه شده است:
+
+| مقدار عددی | عنوان Enum | معنی و کاربرد | رفتار پیشنهادی در UI فرانت |
+|---|---|---|---|
+| `0` | `Simple` | چیدمان ساده (تعداد پرسنل بر اساس تخصص بدون سطح/مسئولیت) | نمایش فرم‌های استاندارد سابق |
+| `1` | `LevelBased` | سطح‌بندی مسئول شیفت (سطح ۱ و ۲ — مخصوص اورژانس اطفال) | نمایش فیلدهای `ShiftManagerLevel` در فرم پرسنل و نیاز شیفت |
+| `2` | `ResponsibilityBased` | مسئولیت‌محور / چندنقشی (مخصوص اتاق عمل و ...) | فعال‌سازی تب‌های «تعریف نقش‌ها»، «ماتریس پرسنل-نقش» و «نیاز مسئولیت شیفت» |
+| `3` | `Hybrid` | ترکیبی (هم سطح‌بندی و هم مسئولیت‌محور) | فعال بودن هم‌زمان هر دو قابلیت |
+
+> 💡 **نکته UI برای فرانت:** در صفحه تنظیمات دپارتمان، این فیلد را به صورت یک Dropdown یا Segmented Control چهار گزینه‌ای قرار دهید. با انتخاب گزینه `ResponsibilityBased`، بخش‌های مربوط به نقش‌های اتاق عمل در سایدبار یا تب‌های تنظیمات دپارتمان فعال و برجسته می‌شوند.
+
+---
+
+### ۱.۸.۲ تعریف مسئولیت‌های دپارتمان (`DepartmentResponsibility`)
+
+سوپروایزر یا مدیر سیستم می‌تواند برای هر بخش، عناوین مسئولیت‌ها را به صورت پویا تعریف کند.
+
+#### کنترلر: `DepartmentResponsibilityController`
+
+| متد | آدرس Endpoint | توضیح |
+|---|---|---|
+| `GET` | `/api/DepartmentResponsibility/by-department/{departmentId}` | دریافت لیست تمام نقش‌های تعریف‌شده برای یک بخش |
+| `POST` | `/api/DepartmentResponsibility` | ایجاد نقش جدید در بخش |
+| `PUT` | `/api/DepartmentResponsibility` | ویرایش عنوان، اولویت یا توضیحات نقش |
+| `DELETE` | `/api/DepartmentResponsibility/{id}` | حذف نقش |
+
+#### مدل ایجاد/ویرایش نقش (`DepartmentResponsibilityDtoAdd` / `Update`):
+
+```json
+{
+  "departmentId": 5,
+  "title": "اسکراب اول",
+  "description": "مسئول جراحی و آماده‌سازی ست استریل جراحی",
+  "priority": 10,
+  "isDefault": false,
+  "isActive": true,
+  "specialtyId": null
+}
+```
+
+* **`title` (اجباری):** عنوان فارسی مسئولیت (مانند "اسکراب اول"، "اسکراب دوم"، "سیرکولر"، "اد"، "وینیست").
+* **`priority` (اختیاری، پیش‌فرض ۰):** اولویت تخصیص در الگوریتم. نقش‌های تخصصی‌تر و کمیاب‌تر (مثل اسکراب ۱) اولویت بالاتری دارند (مثلاً ۱۰) تا در بهینه‌سازی، ابتدا نیروهای واجد شرایط به این نقش‌ها گماشته شوند و مهارت‌های خاص هدر نروند.
+* **`isDefault` (بولین):** نشان‌دهنده «نقش پایه/پیش‌فرض» بخش است (مانند **سیرکولر** که همه پرسنل قادر به انجام آن هستند). پرسنلی که برای شیفت انتخاب می‌شوند اما نقش خاصی به آن‌ها تعلق نمی‌گیرد، به‌طور خودکار نقش پیش‌فرض را دریافت می‌کنند.
+* **`specialtyId` (اختیاری):** در صورت وابستگی نقش به تخصصی خاص، شناسه تخصص قرار می‌گیرد.
+
+---
+
+### ۱.۸.۳ تخصیص نقش‌ها به پرسنل و ماتریس پرسنل-نقش (`Staff Roles Matrix`)
+
+از آنجا که یک پرسنل می‌تواند **چندین نقش** را پوشش دهد (مثلاً یک پرستار اتاق عمل هم می‌تواند اسکراب اول، هم اسکراب دوم و هم سیرکولر باشد):
+
+#### ۱. دریافت ماتریس جامع پرسنل-نقش جهت رندر جدول فرانت:
+**Endpoint:** `GET /api/DepartmentResponsibility/staff-matrix/{departmentId}`
+
+**نمونه پاسخ API:**
+```json
+{
+  "isSuccess": true,
+  "data": {
+    "departmentId": 5,
+    "responsibilities": [
+      { "id": 101, "title": "اسکراب اول", "priority": 10, "isDefault": false },
+      { "id": 102, "title": "اسکراب دوم", "priority": 5, "isDefault": false },
+      { "id": 103, "title": "سیرکولر", "priority": 1, "isDefault": true }
+    ],
+    "staff": [
+      {
+        "userId": 12,
+        "fullName": "سارا محمدی",
+        "gender": 2,
+        "specialtyName": "اتاق عمل",
+        "assignedResponsibilityIds": [101, 102, 103]
+      },
+      {
+        "userId": 15,
+        "fullName": "رضا احمدی",
+        "gender": 1,
+        "specialtyName": "اتاق عمل",
+        "assignedResponsibilityIds": [102, 103]
+      }
+    ]
+  }
+}
+```
+
+#### ۲. تخصیص نقش به یک پرسنل:
+**Endpoint:** `POST /api/DepartmentResponsibility/assign-user`
+```json
+{
+  "userId": 12,
+  "responsibilityIds": [101, 102, 103]
+}
+```
+
+#### ۳. ذخیره گروهی ماتریس پرسنل (Batch Assign):
+**Endpoint:** `POST /api/DepartmentResponsibility/batch-assign`
+```json
+{
+  "departmentId": 5,
+  "assignments": [
+    { "userId": 12, "responsibilityIds": [101, 102, 103] },
+    { "userId": 15, "responsibilityIds": [102, 103] }
+  ]
+}
+```
+
+> 🎨 **پیشنهاد پیاده‌سازی UI ماتریس نقش‌ها:**
+> - یک جدول طراحی کنید که سطرها نام پرسنل (به همراه جنسیت و تخصص) و ستون‌ها عناوین نقش‌های تعریف‌شده بخش باشند.
+> - در هر سلول یک Checkbox قرار دهید. با تیک زدن، نقش به پرسنل منتسب می‌شود.
+> - یک دکمه «ذخیره تغییرات ماتریس» در بالای جدول بگذارید که کل تغییرات را با متد `batch-assign` به سرور بفرستد.
+
+---
+
 ## 2. تغییرات مربوط به نیازمندی تخصص شیفت
 
 برای اینکه تعداد نیروی مورد نیاز در روزهای تعطیل با روزهای عادی متفاوت باشد، فیلدهای جدیدی به `ShiftRequiredSpecialty` اضافه شده‌اند.
@@ -1120,6 +1243,57 @@ $$\text{حداکثر مرخصی مجاز روزانه} = \max\Big(0, \text{کل 
   - مقادیر روزهای غیرتعطیل
   - مقادیر روزهای تعطیل
 - کنار فیلدهای تعطیل توضیح داده شود که «در صورت خالی بودن، مقدار روز عادی استفاده می‌شود».
+
+---
+
+## 2.1 تنظیم نیازمندی شیفت بر اساس مسئولیت (ShiftRequiredResponsibility) — جدید
+
+در بخش‌های مسئولیت‌محور (اتاق عمل و ...)، به ازای هر شیفت مشخص می‌شود که از هر نقش (اسکراب ۱، اسکراب ۲، سیرکولر و ...) به چه تعداد نیرو نیاز است. این تنظیمات از تفکیک زن و مرد و همچنین سهمیه شناور کل کاملاً پشتیبانی می‌کنند.
+
+### کنترلر: `ShiftRequiredResponsibilityController`
+
+| متد | آدرس Endpoint | توضیح |
+|---|---|---|
+| `GET` | `/api/ShiftRequiredResponsibility/by-shift/{shiftId}` | دریافت تمام نیازمندی‌های مسئولیت یک شیفت |
+| `POST` | `/api/ShiftRequiredResponsibility` | ایجاد نیازمندی نقش برای شیفت |
+| `PUT` | `/api/ShiftRequiredResponsibility` | ویرایش نیازمندی نقش شیفت |
+| `DELETE` | `/api/ShiftRequiredResponsibility/{id}` | حذف نیازمندی نقش از شیفت |
+
+#### مدل ایجاد / ویرایش نیازمندی شیفت (`ShiftRequiredResponsibilityDtoAdd`):
+
+```json
+{
+  "shiftId": 20,
+  "departmentResponsibilityId": 101,
+  "requiredMaleCount": 1,
+  "requiredFemaleCount": 1,
+  "requiredTotalCount": 3,
+  "holidayRequiredMaleCount": 0,
+  "holidayRequiredFemaleCount": 1,
+  "holidayRequiredTotalCount": 2
+}
+```
+
+### فیلدها و سناریوهای قابل پیاده‌سازی در UI:
+
+1. **تفکیک کامل جنسیتی:**
+   - اگر حضور جنسیت خاص الزامی باشد (مثلاً ۱ مرد و ۱ زن):
+     `requiredMaleCount = 1`, `requiredFemaleCount = 1`, `requiredTotalCount = 2`
+2. **سهمیه کلی و شناور (جنسیت مهم نباشد):**
+   - اگر فقط تعداد کل مهم باشد و جنسیت پرسنل اهمیتی نداشته باشد:
+     `requiredMaleCount = 0`, `requiredFemaleCount = 0`, `requiredTotalCount = 3`
+3. **ترکیبی (کف جنسیتی به همراه سهمیه شناور):**
+   - مثلاً حداقل ۱ مرد حضور داشته باشد اما کل نیاز ۳ نفر باشد (۲ نفر دیگر می‌توانند زن یا مرد باشند):
+     `requiredMaleCount = 1`, `requiredFemaleCount = 0`, `requiredTotalCount = 3`
+4. **تغییر نیازمندی در روزهای تعطیل (`Holiday*`):**
+   - فیلدهای `holidayRequiredMaleCount`، `holidayRequiredFemaleCount` و `holidayRequiredTotalCount` برای شرایط شیفت در روزهای تعطیل یا جمعه‌ها تعریف شده‌اند.
+
+> ⚠️ **اعتبارسنجی مهم سمت کلاینت (Validation Rules):**
+> 1. `requiredTotalCount >= (requiredMaleCount + requiredFemaleCount)`: سهمیه کل نمی‌تواند کمتر از جمع سهمیه مشخص‌شده مرد و زن باشد.
+> 2. `holidayRequiredTotalCount >= (holidayRequiredMaleCount + holidayRequiredFemaleCount)` (در صورت پر بودن فیلدهای تعطیل).
+> 3. جمع کل `requiredTotalCount` تمام نقش‌های ثبت‌شده برای یک شیفت، نباید از ظرفیت کل تعریف‌شده برای آن شیفت (`shift.totalCapacity`) فراتر رود. بک‌اند این مورد را بررسی کرده و در صورت نقض خطای ۴۰۰ بازمی‌گرداند.
+
+---
 
 ## 3. تغییرات در منطق شیفت‌بندی
 
@@ -1350,6 +1524,38 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 
 شرط: موظفی غیرطرحی‌ها باید پر شود، بعد نوبت پرسنل طرحی است. حتماً `IsProjectPersonnel` را برای هر کاربر درست تنظیم کنید.
 
+---
+
+### ۵.۷ فیلدهای اختصاصی نقش پرسنل در لیست انتساب‌ها (Assignments) — جدید
+
+در خروجی شیفت‌بندی (`ShiftSchedulingResultDto`)، لیست تمام انتساب‌ها در آرایه `data.assignments` بازگردانده می‌شود. هر آیتم از این لیست یک شیء از نوع `ShiftAssignmentDto` است که اکنون علاوه بر فیلدهای قبلی، مشخصات نقش تخصصی منتسب‌شده پرسنل را نیز در بر دارد:
+
+```json
+{
+  "userId": 12,
+  "userName": "سارا محمدی",
+  "shiftId": 20,
+  "shiftLabel": 1,
+  "date": "2026-10-10T00:00:00",
+  "isOnCall": false,
+  "specialtyId": 1,
+  "specialtyName": "اتاق عمل",
+  "responsibilityId": 101,
+  "responsibilityTitle": "اسکراب اول"
+}
+```
+
+| فیلد | نوع | توضیح |
+|---|---|---|
+| `responsibilityId` | `int?` | شناسه نقش تخصصی منتسب‌شده در این شیفت (مثلاً شناسه نقش «اسکراب اول»). اگر بخش نیازمندی نقشی نداشته باشد یا انتساب بدون نقش باشد، مقدار آن `null` است. |
+| `responsibilityTitle` | `string?` | عنوان فارسی یا نام نقش پرسنل در این شیفت (مثلاً «اسکراب اول»، «سیرکولر»، «اسکراب دوم»، «اد»، «وینیست»). |
+
+#### پیشنهاد UI برای نمایش در تقویم و خروجی شیفت‌بندی:
+- **نشان / برچسب رنگی (Badge) نقش:** در نمای تقویم ماهانه، جدول شیفت‌ها، یا کارت شیفت هر فرد، اگر `responsibilityTitle` مقدار داشت، یک Badge شکیل کنار یا زیر نام فرد قرار دهید (مثلاً: `سارا محمدی` [اسکراب اول]).
+- **فیلتر نقش‌ها در بالای تقویم:** در بخش فیلترهای بالای صفحه تقویم، یک دراپ‌داون یا دکمه‌های فیلتر نقش بگذارید تا کاربر بتواند با یک کلیک فقط شیفت‌های یک نقش مشخص (مثلاً فقط «اسکراب اول» یا فقط «سیرکولر») را رصد کند.
+
+---
+
 ## 6. پیشنهاد UI برای فرم کاربر
 
 در فرم ایجاد/ویرایش کاربر این فیلدها بهتر است کنار هم نمایش داده شوند:
@@ -1360,6 +1566,7 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - `IsProjectPersonnel` — پرسنل طرحی (`true`) / غیرطرحی (`false` یا خالی)
 - `MaxProductivityRequiredHours` — حداکثر ساعت موظفی (دستی؛ اختیاری)
 - `ShiftManagerLevel` — سطح مسئول شیفت (`null`/`1`/`2`)؛ به‌جای چک‌باکس `CanBeShiftManager`
+- `ResponsibilityIds` — نقش‌ها و مسئولیت‌های بخش (ماتریس چندانتخابی / Multi-select Chips برای بخش‌های مسئولیت‌محور مانند اتاق عمل)
 - `AllowedShiftPermissions` — مجوزهای نوع شیفت (۵ checkbox؛ `null` = مشتق از ShiftType)
 - `ShiftType`
 - `ShiftSubType`
@@ -1442,6 +1649,25 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - تفکیک UI روز عادی و روز تعطیل در نیازمندی تخصص
 - **چهار فیلد ساعت محاسبه‌شده روی فرم تعریف شیفت** (`weekday/holiday` × `nonPlan/plan`)
 - **دو فیلد مسئول روی فرم تعریف شیفت** (`managerRequiredCount` / `managerMinLevel1Count`)
+- **پیکربندی وضعیت چیدمان پرسنل بخش (`StaffingMode`):**
+  - اضافه کردن فیلد انتخابی `staffingMode` در فرم تنظیمات دپارتمان (`DepartmentSchedulingSettings`) با مقادیر:
+    - `0` = ساده (Simple)
+    - `1` = سطح‌بندی (LevelBased - اورژانس اطفال)
+    - `2` = مسئولیت‌محور (ResponsibilityBased - اتاق عمل)
+    - `3` = ترکیبی (Hybrid)
+- **مدیریت نقش‌ها و مسئولیت‌های بخش (`DepartmentResponsibility`):**
+  - صفحه یا تب مدیریت نقش‌های بخش (`GET /api/DepartmentResponsibility/by-department/{departmentId}`)
+  - فرم افزودن/ویرایش نقش با فیلدهای `title`، `priority` (اولویت پر شدن نقش در چیدمان)، و چک‌باکس `isDefaultFallback` (نقش پایه/عمومی مانند سیرکولر)
+  - دکمه ایجاد نقش‌های پیش‌فرض اتاق عمل (`POST /api/DepartmentResponsibility/seed-operating-room/{departmentId}`) جهت راه‌اندازی با ۱ کلیک
+- **ماتریس انتساب نقش‌های پرسنل (Staff Responsibilities Matrix):**
+  - جدول ماتریسی پرسنل (`GET /api/DepartmentResponsibility/staff-matrix/{departmentId}`) با امکان تیک زدن چند نقش برای هر پرسنل و ذخیره دسته‌جمعی با `POST /api/DepartmentResponsibility/batch-assign`
+  - افزودن انتخابگر چندنقشی (`responsibilityIds`) در فرم ایجاد/ویرایش کاربر
+- **تنظیم نیازمندی نقش برای شیفت‌ها (`ShiftRequiredResponsibility`):**
+  - جدول/فرم ثبت نیازمندی هر نقش در شیفت با فیلدهای عادی و تعطیل (`requiredMaleCount`, `requiredFemaleCount`, `requiredTotalCount`, `holiday*`)
+  - اعتبارسنجی فرانت: سهمیه کل نباید کمتر از جمع زن و مرد باشد و جمع کل نقش‌ها نباید از ظرفیت کل شیفت بیشتر باشد
+- **نمایش نقش در تقویم شیفت‌بندی:**
+  - خواندن `responsibilityTitle` از آرایه `assignments` و نمایش نشان/Badge نقش کنار نام پرسنل در تقویم
+  - امکان فیلتر کردن تقویم بر اساس نقش
 - نمایش آمار بهره‌وری در خروجی شیفت‌بندی
 - بررسی صحیح بودن استفاده از `ShiftLabel` در فرانت
 
@@ -1469,6 +1695,15 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - `ShiftYar.Application/DTOs/UserModel/UserMonthlyNightQuotaBulkUpsertDto.cs`
 - `ShiftYar.Api/Controllers/UserModel/UserMonthlyNightQuotaController.cs`
 - `ShiftYar.Domain/Entities/UserModel/UserMonthlyNightQuota.cs`
+- `ShiftYar.Domain/Entities/DepartmentModel/DepartmentResponsibility.cs` (جدید)
+- `ShiftYar.Domain/Entities/ShiftModel/ShiftRequiredResponsibility.cs` (جدید)
+- `ShiftYar.Domain/Entities/UserModel/UserDepartmentResponsibility.cs` (جدید)
+- `ShiftYar.Domain/Enums/DepartmentModel/DepartmentEnums.cs` (`DepartmentStaffingMode`) (جدید)
+- `ShiftYar.Api/Controllers/DepartmentModel/DepartmentResponsibilityController.cs` (جدید)
+- `ShiftYar.Api/Controllers/ShiftModel/ShiftRequiredResponsibilityModel/ShiftRequiredResponsibilityController.cs` (جدید)
+- `ShiftYar.Application/Common/Utilities/ShiftResponsibilityRules.cs` (موتور تخصیص نقش‌های اتاق عمل و اعتبارسنجی نیازمندی‌ها) (جدید)
+- `ShiftYar.Application/DTOs/DepartmentModel/DepartmentResponsibilityDtos.cs` (جدید)
+- `ShiftYar.Application/DTOs/ShiftModel/ShiftRequiredResponsibilityDtos.cs` (جدید)
 - `ShiftYar.Api/Controllers/ShiftModel/ShiftSchedulingController.cs`
 - `ShiftYar.Application/DTOs/ShiftModel/ShiftSchedulingModel/DeleteMonthlyScheduleRequestDto.cs`
 - `ShiftYar.Domain/Entities/DepartmentModel/DepartmentSchedulingSettings.cs`

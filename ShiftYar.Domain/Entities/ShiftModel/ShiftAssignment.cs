@@ -1,4 +1,5 @@
-﻿using ShiftYar.Domain.Entities.BaseModel;
+using ShiftYar.Domain.Entities.BaseModel;
+using ShiftYar.Domain.Entities.DepartmentModel;
 using ShiftYar.Domain.Entities.ShiftDateModel;
 using ShiftYar.Domain.Entities.UserModel;
 using System;
@@ -28,6 +29,13 @@ namespace ShiftYar.Domain.Entities.ShiftModel
         public int? UserId { get; set; }
         public User? User { get; set; }
 
+        /// <summary>
+        /// مسئولیت منتسب‌شده به پرسنل در این شیفت (مثلاً: اسکراب اول، سیرکولر، وینیست، ...)
+        /// </summary>
+        [ForeignKey("DepartmentResponsibility")]
+        public int? DepartmentResponsibilityId { get; set; }
+        public DepartmentResponsibility? DepartmentResponsibility { get; set; }
+
         public bool? IsOnCall { get; set; } // آیا آنکال بوده یا در محل حاضر
 
         public string? Notes { get; set; } // توضیحات اختیاری
@@ -40,6 +48,8 @@ namespace ShiftYar.Domain.Entities.ShiftModel
             this.Shift = null;
             this.UserId = 0;
             this.User = null;
+            this.DepartmentResponsibilityId = null;
+            this.DepartmentResponsibility = null;
             this.IsOnCall = null;
             this.Notes = null;
         }

@@ -29,6 +29,7 @@ namespace ShiftYar.Domain.Entities.DepartmentModel
 
         public ICollection<User>? DepartmentUsers { get; set; } // لیست کاربرانی که به این دپارتمان تعلق دارند
         public ICollection<UserMonthlyRequiredHour>? MonthlyRequiredHours { get; set; }
+        public ICollection<DepartmentResponsibility>? Responsibilities { get; set; }
 
         public Department()
         {
@@ -43,6 +44,7 @@ namespace ShiftYar.Domain.Entities.DepartmentModel
             this.IsNightLover = null;
             this.DepartmentUsers = new List<User>();
             this.MonthlyRequiredHours = new List<UserMonthlyRequiredHour>();
+            this.Responsibilities = new List<DepartmentResponsibility>();
         }
     }
 }

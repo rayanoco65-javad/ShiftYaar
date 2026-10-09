@@ -241,6 +241,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         /// </summary>
         public bool IsSkeleton { get; set; }
 
+        /// <summary>
+        /// مسئولیت منتسب‌شده در این شیفت (اسکراب ۱، سیرکولر، وینیست، ...)
+        /// </summary>
+        public int? ResponsibilityId { get; set; }
+
         public SaShiftAssignment Clone()
         {
             return new SaShiftAssignment
@@ -250,7 +255,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
                 Date = this.Date,
                 ShiftLabel = this.ShiftLabel,
                 IsOnCall = this.IsOnCall,
-                IsSkeleton = this.IsSkeleton
+                IsSkeleton = this.IsSkeleton,
+                ResponsibilityId = this.ResponsibilityId
             };
         }
     }

@@ -55,6 +55,9 @@ namespace ShiftYar.Application.DTOs.UserModel
         public int? SpecialtyId { get; set; }
         public UserSpecialtyDtoGet? Specialty { get; set; }
 
+        /// <summary>لیست مسئولیت‌های تخصصی این پرسنل در بخش (اسکراب ۱، سیرکولر، وینیست، ...)</summary>
+        public List<DepartmentModel.DepartmentResponsibilityModel.UserDepartmentResponsibilityDtoGet>? Responsibilities { get; set; }
+
         //کاربر چه نوع شیفتی میدهد؟
         public ShiftTypes? ShiftType { get; set; }
         public ShiftSubTypes? ShiftSubType { get; set; }

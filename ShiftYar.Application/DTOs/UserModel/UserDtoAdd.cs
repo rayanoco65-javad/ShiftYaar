@@ -70,6 +70,9 @@ namespace ShiftYar.Application.DTOs.UserModel
         public int? DepartmentId { get; set; }
         public int? SpecialtyId { get; set; }
 
+        /// <summary>شناسه‌های مسئولیت‌های منتسب به این کاربر در بخش</summary>
+        public List<int>? ResponsibilityIds { get; set; }
+
         //کاربر چه نوع شیفتی میدهد؟
         public ShiftTypes? ShiftType { get; set; }
         public ShiftSubTypes? ShiftSubType { get; set; }

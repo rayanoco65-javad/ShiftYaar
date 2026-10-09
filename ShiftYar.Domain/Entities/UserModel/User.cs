@@ -141,6 +141,9 @@ namespace ShiftYar.Domain.Entities.UserModel
 
         public List<UserPhoneNumber>? OtherPhoneNumbers { get; set; }
 
+        /// <summary>مسئولیت‌ها/صلاحیت‌های تخصصی این پرسنل در بخش (اتاق عمل و ...)</summary>
+        public ICollection<UserDepartmentResponsibility>? UserResponsibilities { get; set; }
+
         //هر کاربر می تواند یک یا چند نقش داشته باشد
         public ICollection<UserRole>? UserRoles { get; set; } // Admin, User, etc.
         public ICollection<RefreshToken> RefreshTokens { get; set; }

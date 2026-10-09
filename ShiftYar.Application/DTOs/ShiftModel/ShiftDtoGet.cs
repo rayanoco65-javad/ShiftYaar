@@ -1,4 +1,4 @@
-﻿using ShiftYar.Domain.Entities.DepartmentModel;
+using ShiftYar.Domain.Entities.DepartmentModel;
 using ShiftYar.Domain.Entities.ShiftModel;
 using System;
 using System.Collections.Generic;
@@ -27,6 +27,7 @@ namespace ShiftYar.Application.DTOs.ShiftModel
         /// <summary>حداقل تعداد مسئول سطح ۱ در این نوبت</summary>
         public int ManagerMinLevel1Count { get; set; }
         public List<ShiftRequiredSpecialtyDto>? RequiredSpecialties { get; set; }
+        public List<ShiftRequiredResponsibilityModel.ShiftRequiredResponsibilityDtoGet>? RequiredResponsibilities { get; set; }
     }
 
     public class DepartmentInfoDto

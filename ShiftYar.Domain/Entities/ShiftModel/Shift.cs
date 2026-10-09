@@ -1,4 +1,4 @@
-﻿using ShiftYar.Domain.Entities.BaseModel;
+using ShiftYar.Domain.Entities.BaseModel;
 using ShiftYar.Domain.Entities.DepartmentModel;
 using ShiftYar.Domain.Entities.HospitalModel;
 using ShiftYar.Domain.Entities.UserModel;
@@ -46,5 +46,6 @@ namespace ShiftYar.Domain.Entities.ShiftModel
         public int ManagerMinLevel1Count { get; set; }
 
         public ICollection<ShiftRequiredSpecialty>? RequiredSpecialties { get; set; }
+        public ICollection<ShiftRequiredResponsibility>? RequiredResponsibilities { get; set; }
     }
 }

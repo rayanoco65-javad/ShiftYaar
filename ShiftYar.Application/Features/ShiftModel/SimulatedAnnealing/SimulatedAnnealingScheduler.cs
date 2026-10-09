@@ -130,6 +130,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             OvertimeBalanceGuard.Enforce(bestSolution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSolution, _constraints);
             ApprovedRequestGuard.ForceApply(bestSolution, _constraints);
+            if (ShiftResponsibilityRules.IsApplicable(_constraints))
+            {
+                ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(bestSolution, _constraints);
+            }
             RefreshSolutionViolations(bestSolution);
             stopwatch.Stop();
             _statistics.ExecutionTime = stopwatch.Elapsed;
@@ -195,6 +199,10 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             {
                 ShiftCoverageGuard.ForceFillAllMissingCoverage(bestSolution, _constraints);
                 ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
+            }
+            if (ShiftResponsibilityRules.IsApplicable(_constraints))
+            {
+                ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(bestSolution, _constraints);
             }
             RefreshSolutionViolations(bestSolution);
             stopwatch.Stop();
@@ -383,6 +391,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ExactDayShiftQuotaGuard.EnforceAll(solution, _constraints);
             ExactComboShiftQuotaGuard.Enforce(solution, _constraints);
 
+            if (ShiftResponsibilityRules.IsApplicable(_constraints))
+            {
+                ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(solution, _constraints);
+            }
+
             solution.Score = CalculateSolutionScore(solution);
 
             return solution;
@@ -531,6 +544,12 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                      * EffectiveSeniorityWeight(
                          _constraints.EnableNightShiftDistributionBySeniority,
                          _constraints.SoftWeights.NightShiftDistributionBySeniorityWeight);
+
+            // جریمه برای عدم پوشش مسئولیت‌های تخصصی (اتاق عمل و ...)
+            if (ShiftResponsibilityRules.IsApplicable(_constraints))
+            {
+                score += ShiftResponsibilityRules.CalculateDeficitPenalty(solution, _constraints);
+            }
 
             solution.Violations = violations;
 
@@ -1779,6 +1798,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             solution.Violations.AddRange(GetExactDayShiftQuotaViolations(solution));
             solution.Violations.AddRange(ExactDayShiftQuotaGuard.GetFallbackPoolWarnings(solution, _constraints));
             solution.Violations.AddRange(MaxConsecutiveWorkdayRules.GetViolations(solution, _constraints));
+
+            if (ShiftResponsibilityRules.IsApplicable(_constraints))
+            {
+                solution.Violations.AddRange(ShiftResponsibilityRules.GetViolations(solution, _constraints));
+            }
         }
 
         public bool AreExactDayShiftQuotasSatisfied(ShiftSolution solution, out List<string> unmet)

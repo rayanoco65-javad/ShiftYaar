@@ -19,6 +19,9 @@ public static class DepartmentSchedulingDefaultSettingsBuilder
         return new DepartmentSchedulingSettingsDtoAdd
         {
             DepartmentId = profile.DepartmentId,
+            StaffingMode = profile.ShiftManagerCount > 0
+                ? Domain.Enums.DepartmentModel.DepartmentEnums.DepartmentStaffingMode.LevelBased
+                : Domain.Enums.DepartmentModel.DepartmentEnums.DepartmentStaffingMode.Simple,
 
             ForbidDuplicateDailyAssignments = true,
             EnforceMaxShiftsPerDay = true,

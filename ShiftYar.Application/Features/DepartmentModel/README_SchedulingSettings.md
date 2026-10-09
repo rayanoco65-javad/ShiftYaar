@@ -200,6 +200,33 @@
 5. **مسئول شیفت**: فیلد `CanBeShiftManager` در مدل `User` تعیین می‌کند که کدام کاربران می‌توانند مسئول شیفت باشند
 6. **الزام مسئول**: اگر برای شیفتی الزام مسئول فعال باشد، حداقل یک کاربر با `CanBeShiftManager = true` باید در آن شیفت حضور داشته باشد
 
+## وضعیت چیدمان پرسنل دپارتمان (StaffingMode)
+
+فیلد `StaffingMode` نحوه تخصیص و نیازمندی‌های نیروی انسانی در دپارتمان را تعیین می‌کند:
+
+| مقدار عددی | عنوان | توضیح و کاربرد |
+|:---:|:---:|---|
+| `0` | **Simple (ساده)** | حالت پایه بدون قید سطح یا نقش اختصاصی |
+| `1` | **LevelBased (سطح‌بندی)** | سیستم سطح‌بندی پرسنل (مانند اورژانس اطفال با سطوح ۱ و ۲) |
+| `2` | **ResponsibilityBased (مسئولیت‌محور)** | سیستم چندنقشی بخش‌ها (مانند اتاق عمل با نقش‌های اسکراب، سیرکولر و ...) |
+| `3` | **Hybrid (ترکیبی)** | ترکیب هم‌زمان سطح‌بندی و مسئولیت‌های تخصصی |
+
+### مدیریت نقش‌های بخش و ماتریس پرسنل (DepartmentResponsibility)
+
+- ایجاد نقش جدید: `POST /api/DepartmentResponsibility`
+- ایجاد سریع ۵ نقش استاندارد اتاق عمل (سیرکولر، اسکراب ۱، اسکراب ۲، اد، وینیست):  
+  `POST /api/DepartmentResponsibility/seed-operating-room/{departmentId}`
+- دریافت لیست نقش‌های بخش: `GET /api/DepartmentResponsibility/by-department/{departmentId}`
+- دریافت ماتریس پرسنل-نقش‌ها: `GET /api/DepartmentResponsibility/staff-matrix/{departmentId}`
+- انتساب دسته‌جمعی پرسنل به نقش‌ها: `POST /api/DepartmentResponsibility/batch-assign`
+
+### تنظیم نیازمندی شیفت بر اساس نقش (ShiftRequiredResponsibility)
+
+- ثبت نیازمندی نقش برای شیفت (پشتیبانی از تفکیک زن/مرد، کل و روزهای تعطیل):  
+  `POST /api/ShiftRequiredResponsibility`
+- دریافت نیازمندی‌های نقش یک شیفت:  
+  `GET /api/ShiftRequiredResponsibility/by-shift/{shiftId}`
+
 ## API Endpoints
 
 ### دریافت تنظیمات

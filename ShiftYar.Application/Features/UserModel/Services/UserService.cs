@@ -57,7 +57,9 @@ namespace ShiftYar.Application.Features.UserModel.Services
                     "UserRoles",
                     "UserRoles.Role",
                     "Department",
-                    "Specialty"
+                    "Specialty",
+                    "UserResponsibilities",
+                    "UserResponsibilities.DepartmentResponsibility"
                 );
                 var data = _mapper.Map<List<UserDtoGet>>(result.Items);
 
@@ -87,7 +89,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
             try
             {
                 _logger.LogInformation("Fetching user with ID: {Id}", id);
-                var user = await _repository.GetByIdAsync(id, "OtherPhoneNumbers", "UserRoles", "UserRoles.Role", "Department", "Specialty");
+                var user = await _repository.GetByIdAsync(id, "OtherPhoneNumbers", "UserRoles", "UserRoles.Role", "Department", "Specialty", "UserResponsibilities", "UserResponsibilities.DepartmentResponsibility");
                 if (user == null)
                 {
                     _logger.LogWarning("User with ID {Id} not found", id);

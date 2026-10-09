@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using ShiftYar.Application.Common.Utilities;
 using ShiftYar.Application.DTOs.DepartmentModel;
 using ShiftYar.Application.DTOs.RoleModel;
@@ -21,7 +21,9 @@ namespace ShiftYar.Application.Common.Mappings
                 .ForMember(dest => dest.UserRoles, opt => opt.MapFrom(src =>
                     src.UserRoles != null ? src.UserRoles.Select(r => r.RoleId).ToList() : null))
                 .ForMember(dest => dest.DateOfEmployment, opt => opt.MapFrom(src =>
-                    DateConverter.EmploymentDateToPersianString(src.DateOfEmployment)));
+                    DateConverter.EmploymentDateToPersianString(src.DateOfEmployment)))
+                .ForMember(dest => dest.ResponsibilityIds, opt => opt.MapFrom(src =>
+                    src.UserResponsibilities != null ? src.UserResponsibilities.Where(r => r.DepartmentResponsibilityId.HasValue).Select(r => r.DepartmentResponsibilityId!.Value).ToList() : null));
 
             CreateMap<UserDtoAdd, User>()
                 .ForMember(dest => dest.OtherPhoneNumbers, opt => opt.MapFrom(src =>
@@ -39,7 +41,8 @@ namespace ShiftYar.Application.Common.Mappings
 
             CreateMap<User, UserDtoGet>()
                 .ForMember(dest => dest.DateOfEmployment, opt => opt.MapFrom(src =>
-                    DateConverter.NormalizeEmploymentDate(src.DateOfEmployment)));
+                    DateConverter.NormalizeEmploymentDate(src.DateOfEmployment)))
+                .ForMember(dest => dest.Responsibilities, opt => opt.MapFrom(src => src.UserResponsibilities));
 
             CreateMap<Department, UserDepartmentDtoGet>();
             CreateMap<Specialty, UserSpecialtyDtoGet>();

@@ -18,6 +18,11 @@ namespace ShiftYar.Domain.Entities.DepartmentModel
         public int? DepartmentId { get; set; } // شناسه دپارتمان
         public Department? Department { get; set; } // دپارتمان مربوطه
 
+        /// <summary>
+        /// نحوه سازمان‌دهی چیدمان و مهارت‌های نیروها: ساده (۰)، سطح‌بندی (۱)، مسئولیت‌محور (۲)، ترکیبی (۳)
+        /// </summary>
+        public Enums.DepartmentModel.DepartmentEnums.DepartmentStaffingMode? StaffingMode { get; set; }
+
         //قوانین سخت و غیرقابل نقض
         public bool? ForbidDuplicateDailyAssignments { get; set; } // ممنوعیت بیش از یک شیفت در روز برای کاربر
         public bool? EnforceMaxShiftsPerDay { get; set; } // اعمال حداکثر شیفت روزانه مطابق تنظیمات سراسری

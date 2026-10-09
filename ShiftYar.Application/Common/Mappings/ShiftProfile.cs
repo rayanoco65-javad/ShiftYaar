@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using ShiftYar.Application.DTOs.ShiftModel;
 using ShiftYar.Domain.Entities.DepartmentModel;
 using ShiftYar.Domain.Entities.HospitalModel;
@@ -13,7 +13,8 @@ namespace ShiftYar.Application.Common.Mappings
         {
             CreateMap<Shift, ShiftDtoGet>()
                 .ForMember(dest => dest.Department, opt => opt.MapFrom(src => src.Department))
-                .ForMember(dest => dest.RequiredSpecialties, opt => opt.MapFrom(src => src.RequiredSpecialties));
+                .ForMember(dest => dest.RequiredSpecialties, opt => opt.MapFrom(src => src.RequiredSpecialties))
+                .ForMember(dest => dest.RequiredResponsibilities, opt => opt.MapFrom(src => src.RequiredResponsibilities));
 
             CreateMap<Department, DepartmentInfoDto>();
             CreateMap<Hospital, HospitalInfoDto>();

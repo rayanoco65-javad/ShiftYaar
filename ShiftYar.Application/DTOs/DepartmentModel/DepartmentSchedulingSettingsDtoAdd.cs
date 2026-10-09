@@ -4,6 +4,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using static ShiftYar.Domain.Enums.DepartmentModel.DepartmentEnums;
 
 namespace ShiftYar.Application.DTOs.DepartmentModel
 {
@@ -11,6 +12,11 @@ namespace ShiftYar.Application.DTOs.DepartmentModel
     {
         [Required]
         public int DepartmentId { get; set; }
+
+        /// <summary>
+        /// نحوه سازمان‌دهی چیدمان و مهارت‌های نیروها: ساده (۰)، سطح‌بندی (۱)، مسئولیت‌محور (۲)، ترکیبی (۳)
+        /// </summary>
+        public DepartmentStaffingMode? StaffingMode { get; set; }
 
         //قوانین سخت
         public bool? ForbidDuplicateDailyAssignments { get; set; }  //ممنوعیت تکالیف تکراری روزانه

@@ -16,6 +16,8 @@ using ShiftYar.Application.Interfaces.SpecialtyModel;
 using ShiftYar.Application.Features.SpecialtyModel.Services;
 using ShiftYar.Application.Interfaces.ShiftRequiredSpecialtyModel;
 using ShiftYar.Application.Features.ShiftRequiredSpecialtyModel.Services;
+using ShiftYar.Application.Interfaces.ShiftRequiredResponsibilityModel;
+using ShiftYar.Application.Features.ShiftRequiredResponsibilityModel.Services;
 using ShiftYar.Application.Interfaces.ShiftModel;
 using ShiftYar.Application.Features.ShiftModel.Services;
 using ShiftYar.Application.Features.ShiftModel.Rescheduling;
@@ -69,6 +71,8 @@ namespace ShiftYar.Application
             services.AddScoped<ISpecialtyService, SpecialtyService>();
             services.AddScoped<ISpecialtyNameService, SpecialtyNameService>();
             services.AddScoped<IShiftRequiredSpecialtyService, ShiftRequiredSpecialtyService>();
+            services.AddScoped<IDepartmentResponsibilityService, DepartmentResponsibilityService>();
+            services.AddScoped<IShiftRequiredResponsibilityService, ShiftRequiredResponsibilityService>();
             services.AddScoped<IShiftService, ShiftService>();
             services.AddScoped<IFileUploader, FileUploaderService>();
             services.AddScoped<ICalendarSeederService, CalendarSeederService>();

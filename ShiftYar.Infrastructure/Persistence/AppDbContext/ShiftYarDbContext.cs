@@ -52,6 +52,12 @@ namespace ShiftYar.Infrastructure.Persistence.AppDbContext
         public DbSet<SpecialtyName> SpecialtyNames { get; set; }
         public DbSet<Shift> Shifts { get; set; }
         public DbSet<ShiftRequiredSpecialty> ShiftRequiredSpecialties { get; set; }
+
+        // جداول مسئولیت‌ها و نقش‌های تخصصی در بخش و شیفت
+        public DbSet<DepartmentResponsibility> DepartmentResponsibilities { get; set; }
+        public DbSet<UserDepartmentResponsibility> UserDepartmentResponsibilities { get; set; }
+        public DbSet<ShiftRequiredResponsibility> ShiftRequiredResponsibilities { get; set; }
+
         public DbSet<ShiftAssignment> ShiftAssignments { get; set; }
         public DbSet<ShiftRequest> ShiftRequests { get; set; }
         public DbSet<ShiftExchange> ShiftExchanges { get; set; }
@@ -140,6 +146,54 @@ namespace ShiftYar.Infrastructure.Persistence.AppDbContext
                 .WithOne(u => u.Department)
                 .HasForeignKey(u => u.DepartmentId);
 
+            modelBuilder.Entity<DepartmentResponsibility>(entity =>
+            {
+                entity.HasOne(r => r.Department)
+                    .WithMany(d => d.Responsibilities)
+                    .HasForeignKey(r => r.DepartmentId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasOne(r => r.Specialty)
+                    .WithMany()
+                    .HasForeignKey(r => r.SpecialtyId)
+                    .OnDelete(DeleteBehavior.SetNull);
+            });
+
+            modelBuilder.Entity<UserDepartmentResponsibility>(entity =>
+            {
+                entity.HasIndex(u => new { u.UserId, u.DepartmentResponsibilityId }).IsUnique();
+
+                entity.HasOne(u => u.User)
+                    .WithMany(u => u.UserResponsibilities)
+                    .HasForeignKey(u => u.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasOne(u => u.DepartmentResponsibility)
+                    .WithMany(r => r.UserResponsibilities)
+                    .HasForeignKey(u => u.DepartmentResponsibilityId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<ShiftRequiredResponsibility>(entity =>
+            {
+                entity.HasIndex(s => new { s.ShiftId, s.DepartmentResponsibilityId }).IsUnique();
+
+                entity.HasOne(s => s.Shift)
+                    .WithMany(s => s.RequiredResponsibilities)
+                    .HasForeignKey(s => s.ShiftId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasOne(s => s.DepartmentResponsibility)
+                    .WithMany(r => r.ShiftRequiredResponsibilities)
+                    .HasForeignKey(s => s.DepartmentResponsibilityId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<ShiftAssignment>()
+                .HasOne(a => a.DepartmentResponsibility)
+                .WithMany()
+                .HasForeignKey(a => a.DepartmentResponsibilityId)
+                .OnDelete(DeleteBehavior.SetNull);
 
             modelBuilder.Entity<AlgorithmSettings>()
                 .HasOne(a => a.Department)
