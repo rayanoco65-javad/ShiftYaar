@@ -1358,16 +1358,15 @@ Content-Type: application/json
 ### توضیح نقش کنترلر
 این کنترلر مسئول مدیریت عناوین مسئولیت‌ها و نقش‌های تخصصی بخش‌ها (نظیر سیرکولر، اسکراب اول، اسکراب دوم، اد و وینیست در اتاق عمل) و تخصیص تک‌نفره یا ماتریسی (گروهی) این نقش‌ها به پرسنل دپارتمان می‌باشد.
 
-> 📌 **نکته مسیردهی:** تمام متدهای این کنترلر با هر دو پیشوند `/api/DepartmentResponsibility/...` و `/DepartmentResponsibility/...` در دسترس هستند.
+> 📌 **نکته مسیردهی:** تمام متدهای این کنترلر با پیشوند استاندارد `/api/DepartmentResponsibility/...` در دسترس هستند. اکشن‌های تکراری و روت‌های متناقض طبق معماری تمیز RESTful یکپارچه‌سازی و حذف شده‌اند.
 
 ### اکشن‌ها
 
 #### 21.1. GetByDepartmentId
 - **نوع اکشن:** GET
-- **آدرس Endpoint:** `/api/DepartmentResponsibility/by-department/{departmentId}`  
-  (همچنین پشتیبانی از Query Param: `/by-department?departmentId={id}` و آلیاس: `/department/{departmentId}`)
+- **آدرس Endpoint:** `/api/DepartmentResponsibility/by-department/{departmentId}`
 - **توضیح:** دریافت لیست تمام مسئولیت‌های فعال یک بخش به همراه تعداد پرسنل تخصیص‌یافته به هر نقش.
-- **ورودی‌ها:** `departmentId` (int)
+- **ورودی‌ها:** `departmentId` (int) در Route
 - **خروجی:** `ApiResponse<List<DepartmentResponsibilityDtoGet>>`
 
 #### 21.2. GetById
@@ -1378,7 +1377,7 @@ Content-Type: application/json
 
 #### 21.3. Create
 - **نوع اکشن:** POST
-- **آدرس Endpoint:** `/api/DepartmentResponsibility` (یا `/api/DepartmentResponsibility/create`)
+- **آدرس Endpoint:** `/api/DepartmentResponsibility`
 - **توضیح:** ایجاد مسئولیت و نقش جدید در یک بخش
 - **ورودی‌ها:** مدل `DepartmentResponsibilityDtoAdd`
 
@@ -1393,26 +1392,24 @@ Content-Type: application/json
 
 #### 21.4. Update
 - **نوع اکشن:** PUT
-- **آدرس Endpoint:** `/api/DepartmentResponsibility/{id}` (یا `/api/DepartmentResponsibility`)
-- **توضیح:** ویرایش اطلاعات مسئولیت
+- **آدرس Endpoint:** `/api/DepartmentResponsibility/{id}`
+- **توضیح:** ویرایش اطلاعات مسئولیت (شناسه در URL)
 - **ورودی‌ها:** مدل `DepartmentResponsibilityDtoUpdate`
 
 #### 21.5. Delete
 - **نوع اکشن:** DELETE
-- **آدرس Endpoint:** `/api/DepartmentResponsibility/{id}` (یا با Query Param: `?itemId={id}`)
-- **توضیح:** حذف مسئولیت از بخش
+- **آدرس Endpoint:** `/api/DepartmentResponsibility/{id}`
+- **توضیح:** حذف مسئولیت از بخش با شناسه مشخص در URL
 
 #### 21.6. SeedOperatingRoom
 - **نوع اکشن:** POST
-- **آدرس Endpoint:** `/api/DepartmentResponsibility/seed-operating-room/{departmentId}`  
-  (پشتیبانی از Query Param: `?deptId={id}`)
+- **آدرس Endpoint:** `/api/DepartmentResponsibility/seed-operating-room/{departmentId}`
 - **توضیح:** ایجاد خودکار و یک‌جای ۵ نقش استاندارد اتاق عمل شامل: سیرکولر (`isDefault=true`, `priority=10`)، اسکراب اول (`priority=1`)، اسکراب دوم (`priority=2`)، اد (`priority=3`) و وینیست (`priority=4`).
 - **خروجی:** `ApiResponse<List<DepartmentResponsibilityDtoGet>>`
 
 #### 21.7. GetStaffMatrix
 - **نوع اکشن:** GET
-- **آدرس Endpoint:** `/api/DepartmentResponsibility/staff-matrix/{departmentId}`  
-  (همچنین: `/staff-matrix?departmentId={id}` و آلیاس: `/matrix/{departmentId}`)
+- **آدرس Endpoint:** `/api/DepartmentResponsibility/staff-matrix/{departmentId}`
 - **توضیح:** دریافت ماتریس جامع دو بعدی پرسنل بخش و نقش‌های تعریف‌شده جهت رندر جدول چک‌باکس در فرانت‌اند.
 - **خروجی:** `ApiResponse<DepartmentStaffMatrixDto>` شامل لیست پرسنل با آرایه `assignedResponsibilityIds`.
 
@@ -1434,24 +1431,26 @@ Content-Type: application/json
 ### توضیح نقش کنترلر
 این کنترلر در دپارتمان‌های مسئولیت‌محور (نظیر اتاق عمل)، نیازمندی هر شیفت به تفکیک نقش‌های تخصصی را با پشتیبانی از تفکیک زن/مرد، سهمیه شناور کل و مقادیر روزهای تعطیل مدیریت می‌کند.
 
-> 📌 **نکته مسیردهی:** تمام متدهای این کنترلر با هر دو پیشوند `/api/ShiftRequiredResponsibility/...` و `/ShiftRequiredResponsibility/...` در دسترس هستند.
+> 📌 **نکته مسیردهی:** تمام متدهای این کنترلر با پیشوند استاندارد `/api/ShiftRequiredResponsibility/...` در دسترس هستند. اکشن‌های تکراری و آلیاس‌های اضافه مطابق استانداردهای RESTful پاک‌سازی شده‌اند.
 
 ### اکشن‌ها
 
 #### 22.1. GetByShiftId
 - **نوع اکشن:** GET
-- **آدرس Endpoint:** `/api/ShiftRequiredResponsibility/by-shift/{shiftId}`  
-  (همچنین Query Param: `?shiftId={id}` و آلیاس: `/shift/{shiftId}`)
+- **آدرس Endpoint:** `/api/ShiftRequiredResponsibility/by-shift/{shiftId}`
+- **توضیح:** دریافت تمام نیازمندی‌های مسئولیت یک شیفت بر اساس شناسه شیفت
 - **خروجی:** `ApiResponse<List<ShiftRequiredResponsibilityDtoGet>>`
 
 #### 22.2. GetById
 - **نوع اکشن:** GET
 - **آدرس Endpoint:** `/api/ShiftRequiredResponsibility/{id}`
+- **توضیح:** دریافت جزئیات یک نیازمندی با شناسه
 - **خروجی:** `ApiResponse<ShiftRequiredResponsibilityDtoGet>`
 
 #### 22.3. Create
 - **نوع اکشن:** POST
-- **آدرس Endpoint:** `/api/ShiftRequiredResponsibility` (یا `/create`)
+- **آدرس Endpoint:** `/api/ShiftRequiredResponsibility`
+- **توضیح:** ایجاد نیازمندی نقش برای شیفت
 - **ورودی:** مدل `ShiftRequiredResponsibilityDtoAdd`
 
 | فیلد | نوع داده | ضروری | توضیح |
@@ -1467,13 +1466,14 @@ Content-Type: application/json
 
 #### 22.4. Update
 - **نوع اکشن:** PUT
-- **آدرس Endpoint:** `/api/ShiftRequiredResponsibility/{id}` (یا `/api/ShiftRequiredResponsibility`)
-- **ورودی:** مدل `ShiftRequiredResponsibilityDtoAdd` (امکان ارسال `Id` در URL یا در بدنه)
+- **آدرس Endpoint:** `/api/ShiftRequiredResponsibility/{id}`
+- **توضیح:** ویرایش نیازمندی نقش شیفت (شناسه در URL)
+- **ورودی:** مدل `ShiftRequiredResponsibilityDtoAdd`
 
 #### 22.5. Delete
 - **نوع اکشن:** DELETE
-- **آدرس Endpoint:** `/api/ShiftRequiredResponsibility/{id}` (یا `?itemId={id}`)
-- **توضیح:** حذف رکورد نیازمندی نقش از شیفت
+- **آدرس Endpoint:** `/api/ShiftRequiredResponsibility/{id}`
+- **توضیح:** حذف رکورد نیازمندی نقش از شیفت با شناسه مشخص در URL
 
 ---
 

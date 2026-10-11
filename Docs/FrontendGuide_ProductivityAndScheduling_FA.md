@@ -1126,14 +1126,17 @@ $$\text{حداکثر مرخصی مجاز روزانه} = \max\Big(0, \text{کل 
 
 | متد | آدرس Endpoint | توضیح |
 |---|---|---|
-| `GET` | `/api/DepartmentResponsibility/by-department/{departmentId}` | دریافت لیست تمام نقش‌های یک بخش (پشتیبانی از هر دو حالت URL param و Query Param: `?departmentId=X` و آلیاس `department/{id}`) |
+| `GET` | `/api/DepartmentResponsibility/by-department/{departmentId}` | دریافت لیست تمام نقش‌های یک بخش بر اساس شناسه دپارتمان |
 | `GET` | `/api/DepartmentResponsibility/{id}` | دریافت اطلاعات یک نقش با شناسه |
 | `POST` | `/api/DepartmentResponsibility` | ایجاد نقش جدید در بخش |
-| `PUT` | `/api/DepartmentResponsibility/{id}` یا `/api/DepartmentResponsibility` | ویرایش مشخصات نقش (امکان ارسال ID در URL یا بدنه JSON) |
-| `DELETE` | `/api/DepartmentResponsibility/{id}` | حذف نقش |
+| `PUT` | `/api/DepartmentResponsibility/{id}` | ویرایش مشخصات نقش (شناسه در URL) |
+| `DELETE` | `/api/DepartmentResponsibility/{id}` | حذف نقش با شناسه |
 | `POST` | `/api/DepartmentResponsibility/seed-operating-room/{departmentId}` | ایجاد خودکار و سریع ۵ نقش استاندارد اتاق عمل (سیرکولر، اسکراب ۱، اسکراب ۲، اد، وینیست) |
+| `GET` | `/api/DepartmentResponsibility/staff-matrix/{departmentId}` | دریافت ماتریس جامع پرسنل و نقش‌های بخش جهت رندر جدول فرانت |
+| `POST` | `/api/DepartmentResponsibility/assign-user` | تخصیص نقش‌ها به یک پرسنل |
+| `POST` | `/api/DepartmentResponsibility/batch-assign` | ذخیره گروهی ماتریس پرسنل (Batch Assign) |
 
-> 📌 **نکته مسیردهی (Routing):** برای جلوگیری از خطای ۴۰۴ در کلاینت‌های مختلف فرانت، هر دو الگوی فراخوانی `/api/DepartmentResponsibility/...` و `/DepartmentResponsibility/...` در بک‌اند معتبر بوده و پاسخ می‌دهند.
+> 📌 **نکته مسیردهی استاندارد (Standard REST Routing):** کنترلر مسئولیت‌های دپارتمان بر اساس استانداردهای تمیز RESTful بازطراحی و ساده‌سازی شده است. اکشن‌های تکراری و آلیاس‌های اضافه حذف شده و تمامی درخواست‌ها به صورت یکپارچه با پیشوند `/api/DepartmentResponsibility/...` و با شناسه‌های مسیر (`Route Parameters`) پردازش می‌شوند.
 
 #### مدل ایجاد/ویرایش نقش (`DepartmentResponsibilityDtoAdd` / `Update`):
 
@@ -1258,13 +1261,13 @@ $$\text{حداکثر مرخصی مجاز روزانه} = \max\Big(0, \text{کل 
 
 | متد | آدرس Endpoint | توضیح |
 |---|---|---|
-| `GET` | `/api/ShiftRequiredResponsibility/by-shift/{shiftId}` | دریافت تمام نیازمندی‌های مسئولیت یک شیفت (پشتیبانی از URL param، Query param `?shiftId=X` و آلیاس `shift/{id}`) |
+| `GET` | `/api/ShiftRequiredResponsibility/by-shift/{shiftId}` | دریافت تمام نیازمندی‌های مسئولیت یک شیفت بر اساس شناسه شیفت |
 | `GET` | `/api/ShiftRequiredResponsibility/{id}` | دریافت اطلاعات یک رکورد نیازمندی با شناسه |
 | `POST` | `/api/ShiftRequiredResponsibility` | ایجاد نیازمندی نقش برای شیفت |
-| `PUT` | `/api/ShiftRequiredResponsibility/{id}` یا `/api/ShiftRequiredResponsibility` | ویرایش نیازمندی نقش شیفت |
-| `DELETE` | `/api/ShiftRequiredResponsibility/{id}` | حذف نیازمندی نقش از شیفت |
+| `PUT` | `/api/ShiftRequiredResponsibility/{id}` | ویرایش نیازمندی نقش شیفت (شناسه در URL) |
+| `DELETE` | `/api/ShiftRequiredResponsibility/{id}` | حذف نیازمندی نقش از شیفت با شناسه |
 
-> 📌 **نکته مسیردهی (Routing):** هر دو فرمت با پیشوند `/api/ShiftRequiredResponsibility/...` و بدون پیشوند `/ShiftRequiredResponsibility/...` در بک‌اند فعال هستند.
+> 📌 **نکته مسیردهی استاندارد (Standard REST Routing):** اکشن‌های این کنترلر بر اساس استاندارد RESTful بازطراحی و ساده‌سازی شده‌اند و کلیه فراخوانی‌ها با پیشوند `/api/ShiftRequiredResponsibility/...` و با شناسه‌های مسیر (`Route Parameters`) پردازش می‌شوند.
 
 #### مدل ایجاد / ویرایش نیازمندی شیفت (`ShiftRequiredResponsibilityDtoAdd`):
 
