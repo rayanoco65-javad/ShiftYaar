@@ -70,6 +70,15 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         /// <summary>شیب اختصاصی وزن‌دهی سابقه برای توزیع اضافه کار (پیش‌فرض: 1.0).</summary>
         public double OvertimeSeniorityDistributionSlope { get; set; } = 1.0;
 
+        /// <summary>فعال‌سازی توزیع هوشمند شیفت‌های روزهای تعطیل بین پرسنل.</summary>
+        public bool EnableHolidayShiftDistribution { get; set; } = true;
+
+        /// <summary>نوع توزیع شیفت‌های تعطیل: ۰=تعداد مساوی، ۱=سابقه بیشتر شیفت تعطیل بیشتر (نزولی)، ۲=سابقه بیشتر شیفت تعطیل کمتر (صعودی).</summary>
+        public int HolidayShiftDistributionType { get; set; } = 0;
+
+        /// <summary>شیب حساسیت به سنوات در توزیع شیفت‌های تعطیل (پیش‌فرض: 1.0).</summary>
+        public double HolidaySeniorityDistributionSlope { get; set; } = 1.0;
+
         public GlobalConstraints GlobalConstraints { get; set; } = new GlobalConstraints();
         // قوانین قطعی (سراسری برای همه دپارتمان‌ها)
         public HardRuleSet HardRules { get; set; } = HardRuleSet.CreateDefault();
@@ -126,6 +135,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         /// <summary>مشارکت در توزیع مازاد شیفت عصر در روزهای تعطیل.</summary>
         public bool? EveningHolidayFallbackParticipation { get; set; }
         public bool HasExactEveningQuota => ExactEveningShiftCount.HasValue;
+
+        /// <summary>حداقل/تعداد کل شیفت‌های تعطیل در ماه (صرف‌نظر از نوع شیفت صبح/عصر/شب). ۰ = ممنوعیت کامل شیفت تعطیل.</summary>
+        public int? ExactHolidayShiftCount { get; set; }
 
         /// <summary>حداقل/هدف تعداد کل انتساب صبح+عصر (سهمیه ترکیبی).</summary>
         public int? MorningEveningShiftCount { get; set; }
@@ -516,6 +528,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
         public double FairMorningEveningPeerWeight { get; set; } = 4.0;
         /// <summary>تعادل صبح/عصر روزهای تعطیل بین کاربران گردشی (جدا از تعادل ماهانه).</summary>
         public double FairHolidayMorningEveningPeerWeight { get; set; } = 8.0;
+        public double HolidayShiftDistributionWeight { get => FairHolidayMorningEveningPeerWeight; set => FairHolidayMorningEveningPeerWeight = value; }
         /// <summary>جریمه تراکم روزهای کاری (چند روز متوالی یا پر کردن کل هفته).</summary>
         public double WorkdaySpreadWeight { get; set; } = 1.5;
         /// <summary>جریمه OFFهای طولانی بدون درخواست OFF تمام‌روز تأییدشده.</summary>

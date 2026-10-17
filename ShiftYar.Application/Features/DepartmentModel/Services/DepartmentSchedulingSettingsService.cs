@@ -222,11 +222,24 @@ namespace ShiftYar.Application.Features.DepartmentModel.Services
                 return false;
             }
 
+            // اعتبارسنجی تنظیمات مدیریت و توزیع شیفت‌های روزهای تعطیل
+            if (dto.HolidayShiftDistributionType.HasValue && (dto.HolidayShiftDistributionType < 0 || dto.HolidayShiftDistributionType > 2))
+            {
+                message = "نوع توزیع شیفت‌های روزهای تعطیل باید بین 0 تا 2 باشد (0=تعداد مساوی، 1=سابقه بیشتر شیفت تعطیل بیشتر، 2=سابقه بیشتر شیفت تعطیل کمتر).";
+                return false;
+            }
+            if (!ok(dto.HolidayShiftDistributionWeight)) { message = "وزن توزیع شیفت‌های تعطیل باید نامنفی باشد."; return false; }
+            if (dto.HolidaySeniorityDistributionSlope.HasValue && (dto.HolidaySeniorityDistributionSlope.Value < 0.05 || dto.HolidaySeniorityDistributionSlope.Value > 10.0))
+            {
+                message = "شیب توزیع شیفت‌های تعطیل بر اساس سابقه باید بین 0.1 تا 10 باشد.";
+                return false;
+            }
+
             return true;
         }
 
         /// <summary>
-        /// اعمال تنظیمات پیش‌فرض برای توزیع بر اساس سابقه (صبح/عصر/شب و اضافه کار)
+        /// اعمال تنظیمات پیش‌فرض برای توزیع بر اساس سابقه (صبح/عصر/شب و اضافه کار) و تعطیلات
         /// </summary>
         private void ApplyDefaultNightShiftDistributionSettings(DepartmentSchedulingSettingsDtoAdd dto)
         {
@@ -252,6 +265,15 @@ namespace ShiftYar.Application.Features.DepartmentModel.Services
                 dto.NightShiftDistributionWeight = 0.0;
             if (!dto.SeniorityDistributionSlope.HasValue)
                 dto.SeniorityDistributionSlope = 1.0;
+
+            if (!dto.EnableHolidayShiftDistribution.HasValue)
+                dto.EnableHolidayShiftDistribution = true;
+            if (!dto.HolidayShiftDistributionType.HasValue)
+                dto.HolidayShiftDistributionType = 0;
+            if (!dto.HolidayShiftDistributionWeight.HasValue)
+                dto.HolidayShiftDistributionWeight = 8.0;
+            if (!dto.HolidaySeniorityDistributionSlope.HasValue)
+                dto.HolidaySeniorityDistributionSlope = 1.0;
 
             if (!dto.EnableOvertimeDistributionBySeniority.HasValue)
                 dto.EnableOvertimeDistributionBySeniority = dto.OvertimePreferenceType is 0 or 1;

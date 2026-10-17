@@ -78,6 +78,11 @@ public static class DepartmentSchedulingDefaultSettingsBuilder
             NightShiftDistributionWeight = 0.0,
             SeniorityDistributionSlope = 1.0,
 
+            EnableHolidayShiftDistribution = true,
+            HolidayShiftDistributionType = 0,
+            HolidayShiftDistributionWeight = 8.0,
+            HolidaySeniorityDistributionSlope = 1.0,
+
             AllowCurrentMonthScheduling = false,
             AllowMonthlyRescheduleWithAutoDelete = false
         };

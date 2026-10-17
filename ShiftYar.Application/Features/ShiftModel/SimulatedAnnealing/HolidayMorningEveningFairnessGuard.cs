@@ -9,13 +9,24 @@ using static ShiftYar.Domain.Enums.UserModel.UserEnums;
 namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 
 /// <summary>
-/// پخش عادلانهٔ شیفت صبح/عصر روزهای تعطیل بین پرسنل گردشی.
-/// بدون این پاس، تعادل ماهانهٔ M/E می‌تواند همزمان با تمرکز تعطیلات روی چند نفر برقرار باشد.
+/// مدیریت و پخش عادلانهٔ شیفت‌های روزهای تعطیل بین پرسنل گردشی بخش.
+/// پشتیبانی از ۳ مود دپارتمان:
+/// ۰ = تعداد مساوی (Equal)
+/// ۱ = سابقه بیشتر شیفت تعطیل بیشتر (SeniorityDescending)
+/// ۲ = سابقه بیشتر شیفت تعطیل کمتر (SeniorityAscending)
+/// اولویت قطعی با درخواست‌های تأییدشده پرسنل (مرخصی/حضور) و سهمیه‌های انفرادی سوپروایزر است.
 /// </summary>
 public static class HolidayMorningEveningFairnessGuard
 {
+    private const double HourTolerance = 0.25;
+
     public static void Enforce(ShiftSolution solution, ShiftConstraints constraints)
     {
+        if (!constraints.EnableHolidayShiftDistribution)
+        {
+            return;
+        }
+
         var holidayDates = Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
             .Select(i => constraints.StartDate.Date.AddDays(i))
             .Where(constraints.IsHoliday)
@@ -66,7 +77,9 @@ public static class HolidayMorningEveningFairnessGuard
             return;
         }
 
-        var fairShares = BuildHolidayFairShares(eligible, totalHolidayShifts, constraints.StartDate);
+        var distributionType = constraints.HolidayShiftDistributionType;
+        var slope = constraints.HolidaySeniorityDistributionSlope;
+        var fairShares = BuildHolidayFairShares(eligible, totalHolidayShifts, constraints.StartDate, distributionType, slope, label);
 
         for (var pass = 0; pass < 64; pass++)
         {
@@ -79,18 +92,42 @@ public static class HolidayMorningEveningFairnessGuard
                     var surplus = GetSurplus(u, worked);
                     var fair = fairShares.TryGetValue(u.UserId, out var f) ? f : 0;
                     var years = ResolveSeniorityYears(u, constraints.StartDate);
-                    return (User: u, Count: count, Fair: fair, Years: years, Worked: worked, Deficit: deficit, Surplus: surplus);
+                    var exactQuota = GetExactHolidayQuota(u, label);
+                    var fallback = GetHolidayFallbackParticipation(u, label);
+                    return (User: u, Count: count, Fair: fair, Years: years, Worked: worked, Deficit: deficit, Surplus: surplus, ExactQuota: exactQuota, Fallback: fallback);
                 })
                 .ToList();
 
-            var donorCandidates = userStats
+            // انتخاب اهداکنندگان (Donors):
+            // ۱. کاربرانی که سهمیه تعطیل‌شان ۰ است و شیفت دارند در بالاترین اولویت اهدا هستند
+            // ۲. سایر کاربران بر اساس مود دپارتمان سورت می‌شوند
+            var donorQuery = userStats
                 .Where(x => x.Count > 0)
-                .Where(x => x.Count > x.Fair + 0.35 || x.Surplus > 2.0 || x.Count >= 1)
-                .OrderByDescending(x => x.Surplus > 5.0 ? 1 : 0)
-                .ThenByDescending(x => x.Count - x.Fair)
-                .ThenBy(x => x.Years)
-                .ThenByDescending(x => x.Surplus)
-                .ToList();
+                .Where(x => x.ExactQuota == 0 || x.User.ExactHolidayShiftCount == 0 || !x.ExactQuota.HasValue || x.Count > x.ExactQuota.Value)
+                .Where(x => x.ExactQuota == 0 || x.User.ExactHolidayShiftCount == 0 || x.Count > x.Fair + 0.35 || x.Surplus > 2.0 || (distributionType != 0 && x.Count >= 1));
+
+            var donorCandidates = distributionType switch
+            {
+                1 => donorQuery // سابقه بیشتر شیفت بیشتر -> جوان‌ترها اهداکننده باشند
+                    .OrderByDescending(x => (x.ExactQuota == 0 || x.User.ExactHolidayShiftCount == 0) ? 1 : 0)
+                    .ThenBy(x => x.Years)
+                    .ThenByDescending(x => x.Count - x.Fair)
+                    .ThenByDescending(x => x.Surplus)
+                    .ToList(),
+                2 => donorQuery // سابقه بیشتر شیفت کمتر -> با‌سابقه‌ها اهداکننده باشند
+                    .OrderByDescending(x => (x.ExactQuota == 0 || x.User.ExactHolidayShiftCount == 0) ? 1 : 0)
+                    .ThenByDescending(x => x.Years)
+                    .ThenByDescending(x => x.Count - x.Fair)
+                    .ThenByDescending(x => x.Surplus)
+                    .ToList(),
+                _ => donorQuery // مساوی (Equal)
+                    .OrderByDescending(x => (x.ExactQuota == 0 || x.User.ExactHolidayShiftCount == 0) ? 1 : 0)
+                    .ThenByDescending(x => x.Surplus > 5.0 ? 1 : 0)
+                    .ThenByDescending(x => x.Count - x.Fair)
+                    .ThenBy(x => x.Years)
+                    .ThenByDescending(x => x.Surplus)
+                    .ToList()
+            };
 
             if (donorCandidates.Count == 0)
             {
@@ -111,14 +148,37 @@ public static class HolidayMorningEveningFairnessGuard
                     continue;
                 }
 
-                var receiverCandidates = userStats
+                // انتخاب گیرندگان (Receivers):
+                // ۱. کاربران با سهمیه ۰ هرگز گیرنده شیفت تعطیل نمی‌شوند
+                // ۲. کاربرانی که به سقف سهمیه کلی تعطیل خود رسیده‌اند و fallback ندارند حذف می‌شوند
+                // ۳. انصراف صریح از مازاد نداشته باشند
+                // ۴. نیاز به شیفت داشته باشند بر اساس مود انتخابی
+                var receiverQuery = userStats
                     .Where(x => x.User.UserId != donorEntry.User.UserId)
-                    .Where(x => x.Deficit > 1.0 || x.Fair - x.Count > 0.35 || (x.Years > donorEntry.Years && x.Count <= donorEntry.Count - 1))
-                    .OrderByDescending(x => x.Deficit > 2.0 ? 1 : 0)
-                    .ThenByDescending(x => x.Deficit)
-                    .ThenByDescending(x => x.Fair - x.Count)
-                    .ThenByDescending(x => x.Years)
-                    .ToList();
+                    .Where(x => x.ExactQuota != 0 && x.User.ExactHolidayShiftCount != 0)
+                    .Where(x => !(x.User.ExactHolidayShiftCount.HasValue && HolidayQuotaRules.CountTotalHolidayShifts(solution, constraints, x.User.UserId) >= x.User.ExactHolidayShiftCount.Value && x.Fallback != true))
+                    .Where(x => !(x.Fallback == false && x.Count >= (x.ExactQuota ?? 0)))
+                    .Where(x => x.Deficit > 1.0 || x.Fair - x.Count > 0.35 || (distributionType == 1 && x.Years > donorEntry.Years && x.Count <= donorEntry.Count - 1) || (distributionType == 2 && x.Years < donorEntry.Years && x.Count <= donorEntry.Count - 1));
+
+                var receiverCandidates = distributionType switch
+                {
+                    1 => receiverQuery // سابقه بیشتر شیفت بیشتر -> با‌سابقه‌ها گیرنده باشند
+                        .OrderByDescending(x => x.Years)
+                        .ThenByDescending(x => x.Fair - x.Count)
+                        .ThenByDescending(x => x.Deficit)
+                        .ToList(),
+                    2 => receiverQuery // سابقه بیشتر شیفت کمتر -> جوان‌ترها گیرنده باشند
+                        .OrderBy(x => x.Years)
+                        .ThenByDescending(x => x.Fair - x.Count)
+                        .ThenByDescending(x => x.Deficit)
+                        .ToList(),
+                    _ => receiverQuery // مساوی
+                        .OrderByDescending(x => x.Deficit > 2.0 ? 1 : 0)
+                        .ThenByDescending(x => x.Deficit)
+                        .ThenByDescending(x => x.Fair - x.Count)
+                        .ThenByDescending(x => x.Years)
+                        .ToList()
+                };
 
                 foreach (var receiverEntry in receiverCandidates)
                 {
@@ -131,6 +191,11 @@ public static class HolidayMorningEveningFairnessGuard
 
                         if (!CanTakeHolidayAssignment(
                                 solution, constraints, donorEntry.User, receiverEntry.User, assignment))
+                        {
+                            continue;
+                        }
+
+                        if (WouldLeaveDonorBelowRequired(donorEntry.User, donorEntry.Worked, assignment, lookup, constraints))
                         {
                             continue;
                         }
@@ -179,33 +244,72 @@ public static class HolidayMorningEveningFairnessGuard
         }
     }
 
-    private static Dictionary<int, double> BuildHolidayFairShares(
+    public static Dictionary<int, double> BuildHolidayFairShares(
         List<UserConstraint> eligible,
         int totalShifts,
         DateTime referenceDate,
-        double slope = 1.0)
+        int distributionType = 0,
+        double slope = 1.0,
+        ShiftLabel? label = null)
     {
-        var weights = eligible.ToDictionary(
-            u => u.UserId,
-            u =>
-            {
-                var years = Math.Clamp(ResolveSeniorityYears(u, referenceDate), 0, 40);
-                return Math.Pow(Math.Max(1, years + 1), Math.Max(0.1, slope));
-            });
+        bool IsZeroQuotaUser(UserConstraint u) =>
+            u.ExactHolidayShiftCount == 0 ||
+            (label == ShiftLabel.Morning && u.ExactHolidayMorningShiftCount == 0) ||
+            (label == ShiftLabel.Evening && u.ExactHolidayEveningShiftCount == 0);
 
-        var totalWeight = weights.Values.Sum();
-        if (totalWeight <= 0)
+        var activeEligible = eligible.Where(u => !IsZeroQuotaUser(u)).ToList();
+        var zeroUsers = eligible.Where(IsZeroQuotaUser).ToList();
+
+        if (activeEligible.Count == 0)
         {
-            var equal = totalShifts / (double)eligible.Count;
-            return eligible.ToDictionary(u => u.UserId, _ => equal);
+            return eligible.ToDictionary(u => u.UserId, _ => 0.0);
         }
 
-        return eligible.ToDictionary(
-            u => u.UserId,
-            u => totalShifts * weights[u.UserId] / totalWeight);
+        Dictionary<int, double> shares;
+        if (distributionType == 0 || totalShifts == 0)
+        {
+            var equal = totalShifts / (double)activeEligible.Count;
+            shares = activeEligible.ToDictionary(u => u.UserId, _ => equal);
+        }
+        else
+        {
+            var weights = activeEligible.ToDictionary(
+                u => u.UserId,
+                u =>
+                {
+                    var years = Math.Clamp(ResolveSeniorityYears(u, referenceDate), 0, 40);
+                    var s = Math.Max(0.1, slope);
+                    return distributionType switch
+                    {
+                        1 => Math.Pow(Math.Max(1, years + 1), s),    // سابقه بیشتر = شیفت بیشتر
+                        2 => Math.Pow(Math.Max(1, 40 - years), s),   // سابقه بیشتر = شیفت کمتر (کم‌سابقه بیشتر)
+                        _ => 1.0
+                    };
+                });
+
+            var totalWeight = weights.Values.Sum();
+            if (totalWeight <= 0)
+            {
+                var equal = totalShifts / (double)activeEligible.Count;
+                shares = activeEligible.ToDictionary(u => u.UserId, _ => equal);
+            }
+            else
+            {
+                shares = activeEligible.ToDictionary(
+                    u => u.UserId,
+                    u => totalShifts * weights[u.UserId] / totalWeight);
+            }
+        }
+
+        foreach (var zu in zeroUsers)
+        {
+            shares[zu.UserId] = 0.0;
+        }
+
+        return shares;
     }
 
-    private static int ResolveSeniorityYears(UserConstraint user, DateTime referenceDate)
+    public static int ResolveSeniorityYears(UserConstraint user, DateTime referenceDate)
     {
         if (user.ExperienceYears > 0)
         {
@@ -251,6 +355,32 @@ public static class HolidayMorningEveningFairnessGuard
         }
 
         return Math.Max(0, worked - (double)user.ProductivityRequiredHours.Value);
+    }
+
+    private static int? GetExactHolidayQuota(UserConstraint user, ShiftLabel label) =>
+        label == ShiftLabel.Morning ? user.ExactHolidayMorningShiftCount : user.ExactHolidayEveningShiftCount;
+
+    private static bool? GetHolidayFallbackParticipation(UserConstraint user, ShiftLabel label) =>
+        label == ShiftLabel.Morning ? user.MorningHolidayFallbackParticipation : user.EveningHolidayFallbackParticipation;
+
+    private static bool WouldLeaveDonorBelowRequired(
+        UserConstraint donor,
+        double donorWorked,
+        SaShiftAssignment assignment,
+        IReadOnlyDictionary<int, ProductivityWorkedHoursCalculator.ShiftWorkInfo> lookup,
+        ShiftConstraints constraints)
+    {
+        if (!donor.IncludedInProductivityPlan || !donor.ProductivityRequiredHours.HasValue)
+        {
+            return false;
+        }
+
+        var shiftHours = ProductivityWorkedHoursCalculator.EstimateAssignmentHours(
+            assignment,
+            lookup,
+            constraints.IsHoliday(assignment.Date),
+            donor.IncludedInProductivityPlan);
+        return donorWorked - shiftHours < (double)donor.ProductivityRequiredHours.Value - HourTolerance;
     }
 
     private static bool CanTakeHolidayAssignment(
@@ -303,11 +433,27 @@ public static class HolidayMorningEveningFairnessGuard
         ShiftLabel label,
         int shiftId)
     {
+        if (HolidayQuotaRules.IsHolidayShiftForbidden(user, constraints, date, label, shiftId))
+        {
+            return false;
+        }
+
+        if (user.ExactHolidayShiftCount.HasValue)
+        {
+            var total = HolidayQuotaRules.CountTotalHolidayShifts(solution, constraints, user.UserId);
+            var fallback = GetHolidayFallbackParticipation(user, label);
+            if (total >= user.ExactHolidayShiftCount.Value && fallback != true)
+            {
+                return false;
+            }
+        }
+
         if (!ShiftEligibilityResolver.MayTakeLabelOnDate(user, label, date, constraints.StartDate))
         {
             return false;
         }
 
+        // درخواست‌های مرخصی و عدم حضور تأییدشده بر همه چیز اولویت قطعی دارند
         if (user.UnavailableDates.Any(d => d.Date == date.Date))
         {
             return false;
@@ -354,8 +500,17 @@ public static class HolidayMorningEveningFairnessGuard
             solution, constraints, user, date);
     }
 
+    /// <summary>
+    /// بررسی محافظت قطعی شیفت به دلیل درخواست تأییدشده کاربر
+    /// </summary>
     private static bool IsRequestProtected(UserConstraint user, SaShiftAssignment assignment)
     {
+        // حضور تأییدشده در اسلات مشخص اولویت قطعی دارد
+        if (ApprovedRequestGuard.IsApprovedRequiredSlot(user, assignment.Date, assignment.ShiftLabel, assignment.ShiftId))
+        {
+            return true;
+        }
+
         if (user.RequiredShiftSlots.Any(s =>
                 s.Date.Date == assignment.Date.Date && s.ShiftLabel == assignment.ShiftLabel))
         {

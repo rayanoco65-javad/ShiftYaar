@@ -103,6 +103,7 @@
   "persianMonth": 4,
   "exactNightShiftCount": 2,
   "exactHolidayWeekendNightShiftCount": 1,
+  "exactHolidayShiftCount": 3,
   "nightFallbackParticipation": null,
   "holidayWeekendNightFallbackParticipation": false
 }
@@ -120,6 +121,7 @@
       "userId": 3,
       "exactNightShiftCount": 5,
       "exactHolidayWeekendNightShiftCount": 2,
+      "exactHolidayShiftCount": 4,
       "nightFallbackParticipation": null,
       "holidayWeekendNightFallbackParticipation": null
     },
@@ -127,6 +129,7 @@
       "userId": 10,
       "exactNightShiftCount": 2,
       "exactHolidayWeekendNightShiftCount": 1,
+      "exactHolidayShiftCount": null,
       "nightFallbackParticipation": false,
       "holidayWeekendNightFallbackParticipation": null
     },
@@ -134,6 +137,7 @@
       "userId": 13,
       "exactNightShiftCount": null,
       "exactHolidayWeekendNightShiftCount": null,
+      "exactHolidayShiftCount": 0,
       "nightFallbackParticipation": null,
       "holidayWeekendNightFallbackParticipation": null
     }
@@ -141,14 +145,20 @@
 }
 ```
 
-- برای کاربرانی که **سهمیه قطعی نمی‌خواهید**، هر چهار فیلد را `null` بفرستید (یا در UI خالی بگذارید). API خطا نمی‌دهد؛ رکوردی ذخیره نمی‌شود و آن کاربر در شیفت‌بندی **بدون کف/سقف اجباری** می‌ماند و در **توزیع مازاد شب** مشارکت می‌کند. فقط `nightFallbackParticipation: false` (یا `holidayWeekendNightFallbackParticipation: false`) بدون سهمیه قطعی = انصراف از مازاد همان نوع.
+- برای کاربرانی که **سهمیه قطعی نمی‌خواهید**، فیلدها را `null` بفرستید (یا در UI خالی بگذارید). API خطا نمی‌دهد؛ رکوردی ذخیره نمی‌شود و آن کاربر در شیفت‌بندی **بدون کف/سقف اجباری** می‌ماند و در **توزیع مازاد شب** مشارکت می‌کند. فقط `nightFallbackParticipation: false` (یا `holidayWeekendNightFallbackParticipation: false`) بدون سهمیه قطعی = انصراف از مازاد همان نوع.
 
 #### معنی فیلدها
 
 - `exactNightShiftCount`: حداقل تعداد شیفت شب در آن ماه شمسی. `null` = بدون حداقل اجباری. **حداکثر** = تعداد شب‌های همان ماه در `ShiftDates`.
 - `exactHolidayWeekendNightShiftCount`: حداقل شبِ تعطیل/آخر هفته. باید ≤ تعداد کل شب باشد. **حداکثر** = تعداد شب‌های تعطیل/آخرهفته همان ماه.
+- `exactHolidayShiftCount`: **(جدید)** سهمیه/سقف کل شیفت‌های تعطیل کاربر در ماه (صرف‌نظر از نوع شیفت صبح، عصر یا شب). اگر سوپروایزر نخواهد به تفکیک نوع شیفت سهمیه تعطیل پرسنل را تعیین کند، می‌تواند از این فیلد استفاده نماید. حداکثر = تعداد روزهای تعطیل ماه.
 - `nightFallbackParticipation`: `null` = مشارکت در مازاد شب (پیش‌فرض)؛ `false` = فقط سهمیه قطعی بدون مازاد؛ `true` = مشارکت صریح.
 - `holidayWeekendNightFallbackParticipation`: همان منطق برای **شب تعطیل/آخرهفته** (نه فقط روز تعطیل تقویم).
+
+> 🚫 **قانون حیاتی سهمیه صفر شیفت‌های تعطیل (Zero Holiday Quota Guarantee):**  
+> اگر سوپروایزر سهمیه انفرادی تعطیل کاربری را **۰** وارد کند (`exactHolidayShiftCount = 0` یا `exactHolidayWeekendNightShiftCount = 0`):  
+> ۱. سیستم به هیچ وجه به او شیفت تعطیل (یا شب تعطیل/آخرهفته) اختصاص **نخواهد داد**. مقدار ۰ با `null` کاملاً متفاوت است؛ `null` یعنی تعیین‌نشده/مشارکت در مازاد، درحالی‌که `0` یعنی ممنوعیت قطعی دریافت شیفت تعطیل.  
+> ۲. **تنها استثنا (اولویت ۱ مطلق درخواست‌های تأییدشده پرسنل):** اگر کاربر خود درخواست حضور تأییدشده در روز تعطیل داشته باشد، به دلیل اولویت ۱ مطلق درخواست‌های تأییدشده بر تمام قوانین سیستم، آن شیفت تعطیل حفظ می‌شود.
 
 | ترکیب | رفتار |
 |--------|--------|
@@ -156,6 +166,7 @@
 | سهمیه `null` + fallback `false` | بدون توزیع خودکار همان نوع |
 | سهمیه مشخص + fallback `null` | ابتدا سهمیه قطعی، سپس مشارکت در مازاد |
 | سهمیه مشخص + fallback `false` | فقط همان تعداد قطعی |
+| سهمیه انفرادی تعطیل = `0` | **ممنوعیت قطعی شیفت تعطیل** (مگر درخواست تأییدشده حضور داشته باشد) |
 | بدون رکورد سهمیه | مشارکت در مازاد (پیش‌فرض) |
 
 - تعریف شب تعطیل/آخر هفته: شب همان روز تعطیل، یا شب روز قبل از تعطیل (مثلاً پنجشنبه قبل از جمعه).
@@ -199,11 +210,19 @@
 |------|------|
 | `exactMorningShiftCount` | حداقل/هدف تعداد شیفت صبح (`null` = بدون سقف/کف اجباری) |
 | `morningFallbackParticipation` | `null` = مشارکت در مازاد (پیش‌فرض)؛ `false` = فقط سهمیه قطعی بدون مازاد؛ `true` = مشارکت صریح |
-| `exactHolidayMorningShiftCount` | حداقل شیفت صبح در **روزهای تعطیل** تقویم |
+| `exactHolidayMorningShiftCount` | حداقل شیفت صبح در **روزهای تعطیل** تقویم (`0` = ممنوعیت قطعی شیفت صبح تعطیل) |
 | `morningHolidayFallbackParticipation` | همان منطق `morningFallbackParticipation` برای روز تعطیل |
-| `exactEveningShiftCount` / `eveningFallbackParticipation` / `exactHolidayEveningShiftCount` / `eveningHolidayFallbackParticipation` | همان منطق برای عصر |
+| `exactEveningShiftCount` / `eveningFallbackParticipation` / `exactHolidayEveningShiftCount` / `eveningHolidayFallbackParticipation` | همان منطق برای عصر (`exactHolidayEveningShiftCount = 0` = ممنوعیت قطعی شیفت عصر تعطیل) |
+| `exactHolidayShiftCount` | **(جدید)** سهمیه/سقف کل شیفت‌های تعطیل کاربر در ماه صرف‌نظر از نوع شیفت (`0` = ممنوعیت قطعی هرگونه شیفت تعطیل) |
 | `isWeeklyAlternatingActive` | فعال‌سازی قانون تناوب هفتگی شیفت‌های روزانه (`true` / `false`) |
 | `firstWeekShiftLabel` | شیفت آغازین هفته اول ماه شمسی (منحصراً `Morning = 0` یا `Evening = 1`) |
+
+> 🚫 **قانون صفر شیفت تعطیل (Zero Holiday Quota Guarantee):**  
+> اگر سوپروایزر سهمیه انفرادی تعطیل را برای کاربری **۰** وارد کند:  
+> - `exactHolidayShiftCount = 0`: کاربر هیچ شیفت تعطیلی (صبح، عصر یا شب) در ماه دریافت نخواهد کرد.  
+> - `exactHolidayMorningShiftCount = 0`: کاربر هیچ شیفت صبحی در روزهای تعطیل دریافت نخواهد کرد.  
+> - `exactHolidayEveningShiftCount = 0`: کاربر هیچ شیفت عصری در روزهای تعطیل دریافت نخواهد کرد.  
+> **استثنای اولویت ۱ مطلق:** اگر کاربر خود درخواست حضور تأییدشده در روز تعطیل داشته باشد، اولویت درخواست تأییدشده بر صفر بودن سهمیه غلبه کرده و شیفت تخصیص می‌یابد.
 
 | ترکیب | رفتار |
 |--------|--------|
@@ -211,6 +230,7 @@
 | سهمیه `null` + fallback `false` | بدون توزیع خودکار |
 | سهمیه مشخص + fallback `null` | ابتدا سهمیه قطعی، سپس مشارکت در مازاد |
 | سهمیه مشخص + fallback `false` | فقط همان تعداد قطعی |
+| سهمیه انفرادی تعطیل = `0` | **ممنوعیت قطعی شیفت تعطیل** (مگر درخواست تأییدشده حضور داشته باشد) |
 | بدون رکورد سهمیه | مشارکت در مازاد (پیش‌فرض) |
 
 #### قانون تناوب هفتگی شیفت‌های روزانه (صبح و عصر)
@@ -751,7 +771,8 @@
 | `DeleteSetting` | DELETE | حذف |
 | `ApplyDefaultDepartmentSchedulingSettings` | POST | اعمال پیش‌فرض بهینه (جدید) |
 | `UpdateNightShiftDistributionSettings` | PUT `/night-shift-distribution/{id}` | فقط فیلدهای توزیع شب (سازگاری) |
-| `UpdateShiftSeniorityDistributionSettings` | PUT `/shift-seniority-distribution/{id}` | توزیع صبح/عصر/شب بر اساس سابقه |
+| `UpdateHolidayShiftDistributionSettings` | PUT `/holiday-shift-distribution/{id}` | تنظیمات اختصاصی مدیریت و توزیع شیفت‌های روزهای تعطیل (جدید) |
+| `UpdateShiftSeniorityDistributionSettings` | PUT `/shift-seniority-distribution/{id}` | توزیع صبح/عصر/شب، تعطیلات و اضافه‌کار بر اساس سابقه |
 
 ### توزیع شیفت بر اساس سابقه (صبح / عصر / شب)
 
@@ -764,19 +785,46 @@
 | `morning/evening/nightShiftDistributionWeight` | وزن اثر (۰ = بی‌اثر؛ پیشنهاد ۲–۳) |
 | `seniorityDistributionSlope` | شیب مشترک شدت اثر سابقه (پیش‌فرض ۱) |
 
-**نکات UI**
+### مدیریت و توزیع شیفت‌های روزهای تعطیل بین پرسنل (جدید)
 
-- سه بلوک جدا: صبح / عصر / شب + سوئیچ اختیاری «اعمال یکسان برای همه».
-- پیش‌فرض: هر سه غیرفعال؛ صبح/عصر نوع خنثی؛ شب نوع از پروفایل دپارتمان (`IsNightLover`).
-- **مهم:** برای «پرسنل کم‌سابقه صبح/عصر بیشتری بگیرند» باید `type = 1` باشد. مقدار `type = 2` خنثی است و اولویت کم‌سابقه نمی‌دهد.
-- **اولویت موظفی:** اول کسری موظفی از اضافه‌کار دیگران جبران می‌شود؛ توزیع بر اساس سابقه فقط روی **مازاد بالای موظفی** اعمال می‌شود و هیچ‌کس را زیر موظفی نمی‌آورد.
-- اگر `ExactMorningShiftCount = 0` با `MorningFallbackParticipation = false` ثبت شود، آن فرد **هیچ صبحی** نمی‌گیرد (۰ یعنی ممنوع، نه «بدون سهمیه»). برای دونوبته صبح/عصر معمولاً باید هر دو فیلد خالی (`null`) بمانند.
-- اگر کسی سهمیه/تعداد شب بالا دارد (مثل ۱۱ شب)، ظرفیت صبح/عصرش محدود است؛ مازاد روز به کم‌سابقه‌هایی می‌رود که روز خالی دارند.
-- وقتی صبح و عصر هر دو با یک `type` فعال باشند، بازتوزیع روی **مجموع صبح+عصر** انجام می‌شود.
-- کاربرانی که سهمیه قطعی همان نوع شیفت دارند از این توزیع نرم کنار گذاشته می‌شوند.
-- تاریخ استخدام (`dateOfEmployment`) باید درست باشد تا سنوات محاسبه شود.
+سوپروایزر می‌تواند مشخص کند که شیفت‌های روزهای تعطیل ماه (جمعه‌ها و تعطیلات رسمی) چگونه بین پرسنل واجد شرایط و گردشی بخش تقسیم شوند.
 
-نمونه بدنه `PUT .../shift-seniority-distribution/{id}`:
+#### فیلدهای تنظیم دپارتمان (`DepartmentSchedulingSettings`)
+
+| فیلد | نوع | پیش‌فرض | معنی و مقادیر |
+|------|:---:|:-------:|---------------|
+| `enableHolidayShiftDistribution` | `bool` | `true` | فعال‌سازی مدیریت هوشمند توزیع شیفت‌های روزهای تعطیل |
+| `holidayShiftDistributionType` | `int` | `0` | **`0` = به تعداد مساوی (Equal)** بین پرسنل هم‌تخصص<br>**`1` = براساس سابقه بصورت نزولی** (سابقه بیشتر = شیفت تعطیل بیشتر)<br>**`2` = براساس سابقه بصورت صعودی** (سابقه بیشتر = شیفت تعطیل کمتر / استراحت و تعطیلی بیشتر برای پرسنل باسابقه) |
+| `holidayShiftDistributionWeight` | `float` | `8.0` | وزن جریمه نرم انحراف از سهمیه عادلانه تعطیلات در الگوریتم زمان‌بندی |
+| `holidaySeniorityDistributionSlope` | `float` | `1.0` | شیب حساسیت به سنوات پرسنل در توزیع تعطیلات (بین 0.1 تا 10.0) |
+
+#### سهمیه انفرادی هر کاربر (Override اختصاصی سوپروایزر)
+
+سوپروایزر در جدول سهمیه‌های ماهانه می‌تواند برای هر فرد به صورت مجزا تعداد شیفت‌های تعطیل را مشخص کند:
+* `exactHolidayMorningShiftCount`: حداقل تعداد شیفت صبح تعطیل در ماه (در `UserMonthlyDayShiftQuota`).
+* `exactHolidayEveningShiftCount`: حداقل تعداد شیفت عصر تعطیل در ماه (در `UserMonthlyDayShiftQuota`).
+* `exactHolidayWeekendNightShiftCount`: حداقل تعداد شیفت شب تعطیل/آخر هفته در ماه (در `UserMonthlyNightQuota`).
+* `morningHolidayFallbackParticipation` / `eveningHolidayFallbackParticipation`: در صورت تنظیم `false`، کاربر پس از دریافت سهمیه قطعی خود، از مشارکت در مازاد شیفت‌های تعطیل انصراف می‌دهد.
+
+> [!IMPORTANT]
+> **قوانین و اولویت‌های قطعی در توزیع شیفت‌های تعطیل:**
+> 1. **اولویت مطلق درخواست‌های تأییدشده پرسنل (Approved Requests Absolute Priority):**
+>    - درخواست‌های **حضور تأییدشده** پرسنل در روزهای تعطیل (`RequiredShiftSlots` یا `RequiredPresenceDates`) تحت هیچ شرایطی جابه‌جا نشده و به کاربر دیگری اهدا نمی‌شوند.
+>    - درخواست‌های **مرخصی و عدم‌حضور تأییدشده** پرسنل در روزهای تعطیل (`UnavailableDates` یا `UnavailableShiftSlots`) تحت هیچ شرایطی نقض نمی‌شوند و شیفت تعطیل به فرد مرخص داده نمی‌شود.
+> 2. **تقدم سهمیه انفرادی سوپروایزر:** سهمیه قطعی مشخص‌شده برای هر کاربر قید الزامی است؛ گارد توزیع تعطیلات هرگز شیفت کاربری را به کمتر از سهمیه انفرادی او کاهش نمی‌دهد. شیفت‌های تعطیل باقی‌ماندهٔ ماه طبق مود انتخابی دپارتمان (مساوی / سابقه نزولی / سابقه صعودی) بین سایر پرسنل توزیع می‌شوند.
+> 3. **رعایت سقف موظفی و بهره‌وری:** شیفت‌های تعطیل با ضریب ساعات مؤثر محاسبه می‌شوند؛ توزیع تعطیلات به گونه‌ای انجام می‌شود که مانع از اضافه‌کار ناخواسته یا کمبود نیرو در روزهای عادی شود.
+
+نمونه بدنه اختصاصی `PUT /api/DepartmentSchedulingSettings/holiday-shift-distribution/{id}`:
+```json
+{
+  "enableHolidayShiftDistribution": true,
+  "holidayShiftDistributionType": 0,
+  "holidayShiftDistributionWeight": 8.0,
+  "holidaySeniorityDistributionSlope": 1.0
+}
+```
+
+نمونه بدنه کامل `PUT /api/DepartmentSchedulingSettings/shift-seniority-distribution/{id}`:
 
 ```json
 {
@@ -789,7 +837,11 @@
   "enableNightShiftDistributionBySeniority": true,
   "nightShiftDistributionType": 0,
   "nightShiftDistributionWeight": 2.0,
-  "seniorityDistributionSlope": 1.0
+  "seniorityDistributionSlope": 1.0,
+  "enableHolidayShiftDistribution": true,
+  "holidayShiftDistributionType": 2,
+  "holidayShiftDistributionWeight": 8.0,
+  "holidaySeniorityDistributionSlope": 1.0
 }
 ```
 
@@ -966,9 +1018,12 @@ $$\text{حداکثر مرخصی مجاز روزانه} = \max\Big(0, \text{کل 
 - قبل از `optimize-and-save` اگر برنامه قبلی هست و `allowMonthlyRescheduleWithAutoDelete` خاموش است، دکمه Optimize را قفل کنید و کاربر را به حذف هدایت کنید؛ اگر فلگ روشن است، نیازی به قفل به‌خاطر برنامه قبلی نیست.
 - پیام `message` خطای API را عیناً به سوپروایزر نشان دهید.
 
-### توزیع صبح/عصر در روزهای تعطیل
+### مدیریت و توزیع شیفت‌ها در روزهای تعطیل
 
-الگوریتم علاوه بر تعادل ماهانهٔ صبح/عصر، **تعداد شیفت صبح و عصر روی روزهای تعطیل** را هم بین پرسنل گردشی هم‌تخصص پخش می‌کند (`HolidayMorningEveningFairnessGuard` + وزن نرم `FairHolidayMorningEveningPeerWeight`). بعد از Optimize مجدد، انتظار این است که تعطیلات روی چند نفر خاص متمرکز نشوند.
+الگوریتم علاوه بر تعادل ماهانهٔ صبح/عصر، **شیفت‌های واقع در روزهای تعطیل** را مطابق با سیاست انتخابی سوپروایزر در تنظیمات دپارتمان (`HolidayShiftDistributionType`: مساوی، سابقه نزولی، سابقه صعودی) بین پرسنل گردشی هم‌تخصص پخش می‌کند (`HolidayMorningEveningFairnessGuard` + وزن نرم `FairHolidayMorningEveningPeerWeight`). در این توزیع:
+1. **درخواست‌های تأییدشده پرسنل (مرخصی و حضور) تقدم مطلق دارند** و هرگز نقض نمی‌شوند.
+2. سهمیه انفرادی تعیین‌شده برای هر فرد به عنوان کف تضمین‌شده رعایت می‌شود.
+3. پرسنلی که سهمیه دستی ندارند، شیفت‌های تعطیل باقی‌مانده را طبق مود بخش دریافت می‌کنند.
 
 ## ۱.۷ جابجایی / واگذاری شیفت (`ShiftExchange`)
 

@@ -2246,6 +2246,16 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     constraints.SoftWeights.NightShiftDistributionBySeniorityWeight =
                         Math.Max(0.0, deptSettingEarly.NightShiftDistributionWeight ?? 0.0);
 
+                    constraints.EnableHolidayShiftDistribution =
+                        deptSettingEarly.EnableHolidayShiftDistribution ?? true;
+                    constraints.HolidayShiftDistributionType = deptSettingEarly.HolidayShiftDistributionType ?? 0;
+                    constraints.HolidaySeniorityDistributionSlope = deptSettingEarly.HolidaySeniorityDistributionSlope ?? 1.0;
+                    if (deptSettingEarly.HolidayShiftDistributionWeight.HasValue)
+                    {
+                        constraints.SoftWeights.FairHolidayMorningEveningPeerWeight =
+                            Math.Max(0.0, deptSettingEarly.HolidayShiftDistributionWeight.Value);
+                    }
+
                     constraints.EnableOvertimeDistributionBySeniority =
                         deptSettingEarly.EnableOvertimeDistributionBySeniority ??
                         (deptSettingEarly.OvertimePreferenceType is 0 or 1);
@@ -2423,6 +2433,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         ExactHolidayEveningShiftCount = dayShiftQuota?.ExactHolidayEveningShiftCount,
                         EveningFallbackParticipation = dayShiftQuota?.EveningFallbackParticipation,
                         EveningHolidayFallbackParticipation = dayShiftQuota?.EveningHolidayFallbackParticipation,
+                        ExactHolidayShiftCount = dayShiftQuota?.ExactHolidayShiftCount ?? monthQuota?.ExactHolidayShiftCount,
                         IsWeeklyAlternatingActive = dayShiftQuota?.IsWeeklyAlternatingActive ?? false,
                         FirstWeekShiftLabel = dayShiftQuota?.FirstWeekShiftLabel,
                         MorningEveningShiftCount = comboShiftQuota?.MorningEveningShiftCount,
@@ -3261,6 +3272,22 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     {
                         constraints.SoftWeights.NightShiftDistributionBySeniorityWeight =
                             Math.Max(0.0, deptSetting.NightShiftDistributionWeight.Value);
+                    }
+
+                    constraints.EnableHolidayShiftDistribution =
+                        deptSetting.EnableHolidayShiftDistribution ?? constraints.EnableHolidayShiftDistribution;
+                    if (deptSetting.HolidayShiftDistributionType.HasValue)
+                    {
+                        constraints.HolidayShiftDistributionType = deptSetting.HolidayShiftDistributionType.Value;
+                    }
+                    if (deptSetting.HolidaySeniorityDistributionSlope.HasValue)
+                    {
+                        constraints.HolidaySeniorityDistributionSlope = deptSetting.HolidaySeniorityDistributionSlope.Value;
+                    }
+                    if (deptSetting.HolidayShiftDistributionWeight.HasValue)
+                    {
+                        constraints.SoftWeights.FairHolidayMorningEveningPeerWeight =
+                            Math.Max(0.0, deptSetting.HolidayShiftDistributionWeight.Value);
                     }
 
                     constraints.EnableOvertimeDistributionBySeniority =

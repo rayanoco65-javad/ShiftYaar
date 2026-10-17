@@ -162,9 +162,10 @@ namespace ShiftYar.Application.Features.UserModel.Services
                     values.ExactNightShiftCount,
                     values.NightFallbackParticipation,
                     values.ExactHolidayWeekendNightShiftCount,
-                    values.HolidayWeekendNightFallbackParticipation))
+                    values.HolidayWeekendNightFallbackParticipation,
+                    values.ExactHolidayShiftCount))
             {
-                if (values.ExactNightShiftCount.HasValue || values.ExactHolidayWeekendNightShiftCount.HasValue)
+                if (values.ExactNightShiftCount.HasValue || values.ExactHolidayWeekendNightShiftCount.HasValue || values.ExactHolidayShiftCount.HasValue)
                 {
                     var monthLimits = await TryGetMonthNightCapacityAsync(
                         user.DepartmentId.Value, dto.PersianYear, dto.PersianMonth);
@@ -179,7 +180,8 @@ namespace ShiftYar.Application.Features.UserModel.Services
                         monthLimits.NightDays,
                         monthLimits.HolidayWeekendNightDays,
                         dto.PersianYear,
-                        dto.PersianMonth);
+                        dto.PersianMonth,
+                        values.ExactHolidayShiftCount);
                     if (userLimitError != null)
                     {
                         return ApiResponse<UserMonthlyNightQuotaDtoGet>.Fail(userLimitError);
@@ -260,7 +262,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
                         $"کاربر {item.UserId}: {permissionError}");
                 }
 
-                if (values.ExactNightShiftCount.HasValue || values.ExactHolidayWeekendNightShiftCount.HasValue)
+                if (values.ExactNightShiftCount.HasValue || values.ExactHolidayWeekendNightShiftCount.HasValue || values.ExactHolidayShiftCount.HasValue)
                 {
                     var userLimitError = UserMonthlyNightQuotaLimits.Validate(
                         values.ExactNightShiftCount,
@@ -268,7 +270,8 @@ namespace ShiftYar.Application.Features.UserModel.Services
                         monthLimits.NightDays,
                         monthLimits.HolidayWeekendNightDays,
                         dto.PersianYear,
-                        dto.PersianMonth);
+                        dto.PersianMonth,
+                        values.ExactHolidayShiftCount);
                     if (userLimitError != null)
                     {
                         return ApiResponse<List<UserMonthlyNightQuotaDtoGet>>.Fail(
@@ -305,7 +308,8 @@ namespace ShiftYar.Application.Features.UserModel.Services
                         ExactNightShiftCount = values.ExactNightShiftCount,
                         ExactHolidayWeekendNightShiftCount = values.ExactHolidayWeekendNightShiftCount,
                         NightFallbackParticipation = values.NightFallbackParticipation,
-                        HolidayWeekendNightFallbackParticipation = values.HolidayWeekendNightFallbackParticipation
+                        HolidayWeekendNightFallbackParticipation = values.HolidayWeekendNightFallbackParticipation,
+                        ExactHolidayShiftCount = values.ExactHolidayShiftCount
                     },
                     deptUserById[item.UserId],
                     values);
@@ -374,7 +378,8 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 values.ExactNightShiftCount,
                 values.NightFallbackParticipation,
                 values.ExactHolidayWeekendNightShiftCount,
-                values.HolidayWeekendNightFallbackParticipation);
+                values.HolidayWeekendNightFallbackParticipation,
+                values.ExactHolidayShiftCount);
 
             if (entity == null)
             {
@@ -426,14 +431,15 @@ namespace ShiftYar.Application.Features.UserModel.Services
             await _repository.SaveAsync();
             entity.User = user;
             _logger.LogInformation(
-                "Upserted monthly night quota UserId={UserId} {Year}/{Month} Night={Night} Holiday={Holiday} NightFb={NightFb} HolFb={HolFb}",
+                "Upserted monthly night quota UserId={UserId} {Year}/{Month} Night={Night} Holiday={Holiday} NightFb={NightFb} HolFb={HolFb} HolTotal={HolTotal}",
                 dto.UserId,
                 dto.PersianYear,
                 dto.PersianMonth,
                 values.ExactNightShiftCount,
                 values.ExactHolidayWeekendNightShiftCount,
                 values.NightFallbackParticipation,
-                values.HolidayWeekendNightFallbackParticipation);
+                values.HolidayWeekendNightFallbackParticipation,
+                values.ExactHolidayShiftCount);
 
             return ApiResponse<UserMonthlyNightQuotaDtoGet>.Success(MapToDto(entity), "سهمیه شب ماهانه ذخیره شد.");
         }
@@ -444,6 +450,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
             entity.ExactHolidayWeekendNightShiftCount = values.ExactHolidayWeekendNightShiftCount;
             entity.NightFallbackParticipation = values.NightFallbackParticipation;
             entity.HolidayWeekendNightFallbackParticipation = values.HolidayWeekendNightFallbackParticipation;
+            entity.ExactHolidayShiftCount = values.ExactHolidayShiftCount;
         }
 
         /// <summary>
@@ -681,14 +688,16 @@ namespace ShiftYar.Application.Features.UserModel.Services
             ExactNightShiftCount = entity.ExactNightShiftCount,
             ExactHolidayWeekendNightShiftCount = entity.ExactHolidayWeekendNightShiftCount,
             NightFallbackParticipation = entity.NightFallbackParticipation,
-            HolidayWeekendNightFallbackParticipation = entity.HolidayWeekendNightFallbackParticipation
+            HolidayWeekendNightFallbackParticipation = entity.HolidayWeekendNightFallbackParticipation,
+            ExactHolidayShiftCount = entity.ExactHolidayShiftCount
         };
 
         private readonly record struct NightQuotaValues(
             int? ExactNightShiftCount,
             bool? NightFallbackParticipation,
             int? ExactHolidayWeekendNightShiftCount,
-            bool? HolidayWeekendNightFallbackParticipation);
+            bool? HolidayWeekendNightFallbackParticipation,
+            int? ExactHolidayShiftCount);
 
         private static bool TryNormalize(UserMonthlyNightQuotaDtoAdd dto, out NightQuotaValues values, out string error) =>
             TryNormalize(
@@ -696,6 +705,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 dto.NightFallbackParticipation,
                 dto.ExactHolidayWeekendNightShiftCount,
                 dto.HolidayWeekendNightFallbackParticipation,
+                dto.ExactHolidayShiftCount,
                 out values,
                 out error);
 
@@ -705,6 +715,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 item.NightFallbackParticipation,
                 item.ExactHolidayWeekendNightShiftCount,
                 item.HolidayWeekendNightFallbackParticipation,
+                item.ExactHolidayShiftCount,
                 out values,
                 out error);
 
@@ -713,6 +724,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
             bool? nightFallback,
             int? holiday,
             bool? holidayFallback,
+            int? holidayTotal,
             out NightQuotaValues values,
             out string error)
         {
@@ -732,6 +744,13 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 return false;
             }
 
+            if (holidayTotal.HasValue && holidayTotal.Value < 0)
+            {
+                values = default;
+                error = "تعداد کل شیفت‌های تعطیل نمی‌تواند منفی باشد.";
+                return false;
+            }
+
             if (night.HasValue && holiday.HasValue && holiday.Value > night.Value)
             {
                 values = default;
@@ -739,7 +758,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 return false;
             }
 
-            values = new NightQuotaValues(night, nightFallback, holiday, holidayFallback);
+            values = new NightQuotaValues(night, nightFallback, holiday, holidayFallback, holidayTotal);
             return true;
         }
 

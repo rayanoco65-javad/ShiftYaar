@@ -1,3 +1,4 @@
+using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
 using static ShiftYar.Domain.Enums.ShiftModel.ShiftEnums;
 
@@ -26,19 +27,42 @@ public static class NightQuotaEligibility
         var holidayExact = user.ExactHolidayWeekendNightShiftCount;
         var holidayFallback = user.HolidayWeekendNightFallbackParticipation;
         var isHolidayWeekendNight = constraints.IsHolidayWeekendNight(date);
+        var isHoliday = constraints.IsHoliday(date);
+
+        if (isHolidayWeekendNight || isHoliday)
+        {
+            if (HolidayQuotaRules.IsHolidayShiftForbidden(user, constraints, date, ShiftLabel.Night))
+            {
+                return false;
+            }
+
+            if (user.ExactHolidayShiftCount.HasValue)
+            {
+                var totalHoliday = HolidayQuotaRules.CountTotalHolidayShifts(solution, constraints, user.UserId);
+                if (totalHoliday >= user.ExactHolidayShiftCount.Value && !DayShiftQuotaEligibility.AllowsHolidaySurplus(fallback, holidayFallback))
+                {
+                    return false;
+                }
+            }
+
+            if (isHolidayWeekendNight && holidayExact.HasValue && holidayExact.Value == 0)
+            {
+                return false;
+            }
+
+            if (isHolidayWeekendNight && holidayExact.HasValue)
+            {
+                var holidayCount = CountHolidayWeekendNights(solution, constraints, user.UserId);
+                if (holidayCount < holidayExact.Value)
+                {
+                    return true;
+                }
+            }
+        }
 
         if (exact.HasValue && total < exact.Value)
         {
             return true;
-        }
-
-        if (isHolidayWeekendNight && holidayExact.HasValue)
-        {
-            var holidayCount = CountHolidayWeekendNights(solution, constraints, user.UserId);
-            if (holidayCount < holidayExact.Value)
-            {
-                return true;
-            }
         }
 
         var totalExactQuotas = constraints.UserConstraints

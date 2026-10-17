@@ -157,7 +157,8 @@ namespace ShiftYar.Application.Features.UserModel.Services
                     values.ExactMorningShiftCount, values.MorningFallbackParticipation,
                     values.ExactHolidayMorningShiftCount, values.MorningHolidayFallbackParticipation,
                     values.ExactEveningShiftCount, values.EveningFallbackParticipation,
-                    values.ExactHolidayEveningShiftCount, values.EveningHolidayFallbackParticipation))
+                    values.ExactHolidayEveningShiftCount, values.EveningHolidayFallbackParticipation,
+                    values.ExactHolidayShiftCount))
             {
                 var validationError = await ValidateBeforeSaveAsync(
                     user.DepartmentId.Value, dto.PersianYear, dto.PersianMonth, dto.UserId, values);
@@ -227,7 +228,8 @@ namespace ShiftYar.Application.Features.UserModel.Services
                     values.ExactMorningShiftCount, values.MorningFallbackParticipation,
                     values.ExactHolidayMorningShiftCount, values.MorningHolidayFallbackParticipation,
                     values.ExactEveningShiftCount, values.EveningFallbackParticipation,
-                    values.ExactHolidayEveningShiftCount, values.EveningHolidayFallbackParticipation))
+                    values.ExactHolidayEveningShiftCount, values.EveningHolidayFallbackParticipation,
+                    values.ExactHolidayShiftCount))
                 {
                     var userLimitError = ValidateUserLimits(values, monthLimits, dto.PersianYear, dto.PersianMonth);
                     if (userLimitError != null)
@@ -265,6 +267,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
                         EveningFallbackParticipation = values.EveningFallbackParticipation,
                         ExactHolidayEveningShiftCount = values.ExactHolidayEveningShiftCount,
                         EveningHolidayFallbackParticipation = values.EveningHolidayFallbackParticipation,
+                        ExactHolidayShiftCount = values.ExactHolidayShiftCount,
                         IsWeeklyAlternatingActive = item.IsWeeklyAlternatingActive,
                         FirstWeekShiftLabel = item.FirstWeekShiftLabel
                     },
@@ -422,13 +425,24 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 return morningError;
             }
 
-            return UserMonthlyDayShiftQuotaLimits.ValidateEvening(
+            var eveningError = UserMonthlyDayShiftQuotaLimits.ValidateEvening(
                 values.ExactEveningShiftCount,
                 values.ExactHolidayEveningShiftCount,
                 capacity.DaysInMonth,
                 capacity.HolidayDaysInMonth,
                 persianYear,
                 persianMonth);
+            if (eveningError != null)
+            {
+                return eveningError;
+            }
+
+            if (values.ExactHolidayShiftCount.HasValue && values.ExactHolidayShiftCount.Value > capacity.HolidayDaysInMonth)
+            {
+                return $"تعداد کل شیفت‌های تعطیل ({values.ExactHolidayShiftCount.Value}) نمی‌تواند بیشتر از تعداد روزهای تعطیل ماه {persianYear}/{persianMonth:00} ({capacity.HolidayDaysInMonth} روز) باشد.";
+            }
+
+            return null;
         }
 
         private static string? ValidatePermissions(User user, DayShiftQuotaValues values)
@@ -470,7 +484,8 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 values.ExactMorningShiftCount, values.MorningFallbackParticipation,
                 values.ExactHolidayMorningShiftCount, values.MorningHolidayFallbackParticipation,
                 values.ExactEveningShiftCount, values.EveningFallbackParticipation,
-                values.ExactHolidayEveningShiftCount, values.EveningHolidayFallbackParticipation)
+                values.ExactHolidayEveningShiftCount, values.EveningHolidayFallbackParticipation,
+                values.ExactHolidayShiftCount)
                 || dto.IsWeeklyAlternatingActive == true;
 
             if (entity == null)
@@ -600,6 +615,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
             entity.EveningFallbackParticipation = values.EveningFallbackParticipation;
             entity.ExactHolidayEveningShiftCount = values.ExactHolidayEveningShiftCount;
             entity.EveningHolidayFallbackParticipation = values.EveningHolidayFallbackParticipation;
+            entity.ExactHolidayShiftCount = values.ExactHolidayShiftCount;
             entity.IsWeeklyAlternatingActive = isWeeklyAlternatingActive ?? false;
             entity.FirstWeekShiftLabel = entity.IsWeeklyAlternatingActive ? firstWeekShiftLabel : null;
         }
@@ -620,6 +636,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
             EveningFallbackParticipation = entity.EveningFallbackParticipation,
             ExactHolidayEveningShiftCount = entity.ExactHolidayEveningShiftCount,
             EveningHolidayFallbackParticipation = entity.EveningHolidayFallbackParticipation,
+            ExactHolidayShiftCount = entity.ExactHolidayShiftCount,
             IsWeeklyAlternatingActive = entity.IsWeeklyAlternatingActive,
             FirstWeekShiftLabel = entity.FirstWeekShiftLabel
         };
@@ -692,6 +709,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 dto.ExactHolidayMorningShiftCount, dto.MorningHolidayFallbackParticipation,
                 dto.ExactEveningShiftCount, dto.EveningFallbackParticipation,
                 dto.ExactHolidayEveningShiftCount, dto.EveningHolidayFallbackParticipation,
+                dto.ExactHolidayShiftCount,
                 out values, out error);
 
         private static bool TryNormalize(UserMonthlyDayShiftQuotaItemDto dto, out DayShiftQuotaValues values, out string error) =>
@@ -700,6 +718,7 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 dto.ExactHolidayMorningShiftCount, dto.MorningHolidayFallbackParticipation,
                 dto.ExactEveningShiftCount, dto.EveningFallbackParticipation,
                 dto.ExactHolidayEveningShiftCount, dto.EveningHolidayFallbackParticipation,
+                dto.ExactHolidayShiftCount,
                 out values, out error);
 
         private static bool TryNormalizeCore(
@@ -711,12 +730,14 @@ namespace ShiftYar.Application.Features.UserModel.Services
             bool? eveningFallback,
             int? holidayEvening,
             bool? holidayEveningFallback,
+            int? holidayTotal,
             out DayShiftQuotaValues values,
             out string error)
         {
             values = new DayShiftQuotaValues(
                 morning, morningFallback, holidayMorning, holidayMorningFallback,
-                evening, eveningFallback, holidayEvening, holidayEveningFallback);
+                evening, eveningFallback, holidayEvening, holidayEveningFallback,
+                holidayTotal);
             error = string.Empty;
 
             if (morning.HasValue && morning.Value < 0)
@@ -740,6 +761,12 @@ namespace ShiftYar.Application.Features.UserModel.Services
             if (holidayEvening.HasValue && holidayEvening.Value < 0)
             {
                 error = "تعداد شیفت عصر تعطیل نمی‌تواند منفی باشد.";
+                return false;
+            }
+
+            if (holidayTotal.HasValue && holidayTotal.Value < 0)
+            {
+                error = "تعداد کل شیفت‌های تعطیل نمی‌تواند منفی باشد.";
                 return false;
             }
 
@@ -772,7 +799,8 @@ namespace ShiftYar.Application.Features.UserModel.Services
             int? ExactEveningShiftCount,
             bool? EveningFallbackParticipation,
             int? ExactHolidayEveningShiftCount,
-            bool? EveningHolidayFallbackParticipation)
+            bool? EveningHolidayFallbackParticipation,
+            int? ExactHolidayShiftCount)
         {
             public static DayShiftQuotaValues FromEntity(UserMonthlyDayShiftQuota entity) => new(
                 entity.ExactMorningShiftCount,
@@ -782,7 +810,8 @@ namespace ShiftYar.Application.Features.UserModel.Services
                 entity.ExactEveningShiftCount,
                 entity.EveningFallbackParticipation,
                 entity.ExactHolidayEveningShiftCount,
-                entity.EveningHolidayFallbackParticipation);
+                entity.EveningHolidayFallbackParticipation,
+                entity.ExactHolidayShiftCount);
         }
 
         private readonly record struct MonthCapacity(

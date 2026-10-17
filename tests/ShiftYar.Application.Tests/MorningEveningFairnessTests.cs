@@ -158,6 +158,295 @@ public class MorningEveningFairnessTests
     }
 
     [Fact]
+    public void HolidayFairnessGuard_SeniorityDescending_AllocatesMoreHolidayShiftsToSeniorStaff()
+    {
+        var start = new DateTime(2026, 7, 1);
+        var holidays = new HashSet<DateTime>
+        {
+            new(2026, 7, 3),
+            new(2026, 7, 10),
+            new(2026, 7, 17),
+            new(2026, 7, 24)
+        };
+
+        var senior = MakeUser(1);
+        senior.ExperienceYears = 20;
+
+        var junior = MakeUser(2);
+        junior.ExperienceYears = 1;
+
+        var users = new List<UserConstraint> { senior, junior };
+        var constraints = BuildConstraints(start, days: 28, users);
+        constraints.HolidayDates = holidays;
+        constraints.HolidayShiftDistributionType = 1; // SeniorityDescending: سابقه بیشتر = شیفت بیشتر
+        constraints.HolidaySeniorityDistributionSlope = 1.0;
+
+        // تمام شیفت‌های صبح تعطیل در ابتدا به فرد جوان داده شده
+        var solution = new ShiftSolution();
+        foreach (var day in holidays)
+        {
+            solution.AddAssignment(junior.UserId, 1, day, ShiftLabel.Morning, false);
+        }
+
+        HolidayMorningEveningFairnessGuard.Enforce(solution, constraints);
+
+        var seniorMornings = HolidayMorningEveningFairnessGuard.CountHolidayLabel(solution, constraints, senior.UserId, ShiftLabel.Morning);
+        var juniorMornings = HolidayMorningEveningFairnessGuard.CountHolidayLabel(solution, constraints, junior.UserId, ShiftLabel.Morning);
+
+        Assert.True(seniorMornings > juniorMornings,
+            $"Senior staff should have more holiday shifts in SeniorityDescending mode. Senior={seniorMornings}, Junior={juniorMornings}");
+    }
+
+    [Fact]
+    public void HolidayFairnessGuard_SeniorityAscending_AllocatesMoreHolidayShiftsToJuniorStaff()
+    {
+        var start = new DateTime(2026, 7, 1);
+        var holidays = new HashSet<DateTime>
+        {
+            new(2026, 7, 3),
+            new(2026, 7, 10),
+            new(2026, 7, 17),
+            new(2026, 7, 24)
+        };
+
+        var senior = MakeUser(1);
+        senior.ExperienceYears = 25;
+
+        var junior = MakeUser(2);
+        junior.ExperienceYears = 1;
+
+        var users = new List<UserConstraint> { senior, junior };
+        var constraints = BuildConstraints(start, days: 28, users);
+        constraints.HolidayDates = holidays;
+        constraints.HolidayShiftDistributionType = 2; // SeniorityAscending: سابقه بیشتر = شیفت کمتر (استراحت بیشتر در تعطیلات)
+        constraints.HolidaySeniorityDistributionSlope = 1.0;
+
+        // تمام شیفت‌های صبح تعطیل در ابتدا به فرد باسابقه داده شده
+        var solution = new ShiftSolution();
+        foreach (var day in holidays)
+        {
+            solution.AddAssignment(senior.UserId, 1, day, ShiftLabel.Morning, false);
+        }
+
+        HolidayMorningEveningFairnessGuard.Enforce(solution, constraints);
+
+        var seniorMornings = HolidayMorningEveningFairnessGuard.CountHolidayLabel(solution, constraints, senior.UserId, ShiftLabel.Morning);
+        var juniorMornings = HolidayMorningEveningFairnessGuard.CountHolidayLabel(solution, constraints, junior.UserId, ShiftLabel.Morning);
+
+        Assert.True(juniorMornings > seniorMornings,
+            $"Junior staff should have more holiday shifts in SeniorityAscending mode. Junior={juniorMornings}, Senior={seniorMornings}");
+    }
+
+    [Fact]
+    public void HolidayFairnessGuard_RespectsUserIndividualQuota()
+    {
+        var start = new DateTime(2026, 7, 1);
+        var holidays = new HashSet<DateTime>
+        {
+            new(2026, 7, 3),
+            new(2026, 7, 10),
+            new(2026, 7, 17),
+            new(2026, 7, 24)
+        };
+
+        var u1 = MakeUser(1);
+        u1.ExperienceYears = 1;
+        u1.ExactHolidayMorningShiftCount = 2; // سهمیه قطعی ۲ شیفت صبح تعطیل
+
+        var u2 = MakeUser(2);
+        u2.ExperienceYears = 20;
+
+        var users = new List<UserConstraint> { u1, u2 };
+        var constraints = BuildConstraints(start, days: 28, users);
+        constraints.HolidayDates = holidays;
+        constraints.HolidayShiftDistributionType = 1; // SeniorityDescending
+
+        // کاربر ۱ دقیقاً ۲ شیفت دارد، کاربر ۲ هم ۲ شیفت دارد
+        var solution = new ShiftSolution();
+        solution.AddAssignment(u1.UserId, 1, new DateTime(2026, 7, 3), ShiftLabel.Morning, false);
+        solution.AddAssignment(u1.UserId, 1, new DateTime(2026, 7, 10), ShiftLabel.Morning, false);
+        solution.AddAssignment(u2.UserId, 1, new DateTime(2026, 7, 17), ShiftLabel.Morning, false);
+        solution.AddAssignment(u2.UserId, 1, new DateTime(2026, 7, 24), ShiftLabel.Morning, false);
+
+        HolidayMorningEveningFairnessGuard.Enforce(solution, constraints);
+
+        var u1Mornings = HolidayMorningEveningFairnessGuard.CountHolidayLabel(solution, constraints, u1.UserId, ShiftLabel.Morning);
+        Assert.True(u1Mornings >= 2,
+            $"User 1 exact holiday quota (2) must not be breached by fairness guard. Actual={u1Mornings}");
+    }
+
+    [Fact]
+    public void HolidayFairnessGuard_ApprovedRequestsTakeAbsolutePriority()
+    {
+        var start = new DateTime(2026, 7, 1);
+        var holidayDate = new DateTime(2026, 7, 3);
+        var holidayDate2 = new DateTime(2026, 7, 10);
+        var holidays = new HashSet<DateTime> { holidayDate, holidayDate2 };
+
+        var u1 = MakeUser(1);
+        u1.ExperienceYears = 1;
+        // کاربر ۱ درخواست حضور تأییدشده در روز تعطیل دارد
+        u1.RequiredShiftSlots.Add(new ShiftSlotConstraint
+        {
+            Date = holidayDate,
+            ShiftLabel = ShiftLabel.Morning,
+            ShiftId = 1
+        });
+
+        var u2 = MakeUser(2);
+        u2.ExperienceYears = 20;
+        // کاربر ۲ مرخصی تأییدشده در روز تعطیل دارد
+        u2.UnavailableDates.Add(holidayDate);
+
+        var users = new List<UserConstraint> { u1, u2 };
+        var constraints = BuildConstraints(start, days: 28, users);
+        constraints.HolidayDates = holidays;
+        constraints.HolidayShiftDistributionType = 1; // SeniorityDescending: می‌خواهد تعطیل را به سابقه بیشتر بدهد
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(u1.UserId, 1, holidayDate, ShiftLabel.Morning, false);
+        solution.AddAssignment(u1.UserId, 1, holidayDate2, ShiftLabel.Morning, false);
+
+        HolidayMorningEveningFairnessGuard.Enforce(solution, constraints);
+
+        // ۱. شیفت روز holidayDate کاربر ۱ به هیچ وجه نباید جابه‌جا شده باشد (چون درخواست تأییدشده حضور دارد)
+        Assert.True(solution.HasAssignment(u1.UserId, 1, holidayDate),
+            "User 1 approved shift request on holiday must be preserved absolutely.");
+
+        // ۲. کاربر ۲ نباید در روز holidayDate شیفت گرفته باشد (چون درخواست مرخصی تأییدشده دارد)
+        Assert.False(solution.HasAssignment(u2.UserId, 1, holidayDate),
+            "User 2 must not be assigned a holiday shift on an approved leave date.");
+    }
+
+    [Fact]
+    public void HolidayFairnessGuard_ZeroHolidayQuota_NeverReceivesHolidayShift()
+    {
+        var start = new DateTime(2026, 7, 1);
+        var holidayDate = new DateTime(2026, 7, 3);
+        var holidayDate2 = new DateTime(2026, 7, 10);
+        var holidays = new HashSet<DateTime> { holidayDate, holidayDate2 };
+
+        var u1 = MakeUser(1);
+        u1.ExactHolidayShiftCount = 0; // سهمیه کلی تعطیل = ۰ (نباید هیچ شیفت تعطیلی بگیرد)
+
+        var u2 = MakeUser(2);
+        u2.ExactHolidayShiftCount = 2;
+
+        var users = new List<UserConstraint> { u1, u2 };
+        var constraints = BuildConstraints(start, days: 14, users);
+        constraints.HolidayDates = holidays;
+
+        var solution = new ShiftSolution();
+        // فرض کنید به اشتباه در حل اولیه به u1 شیفت تعطیل اختصاص داده شده بود
+        solution.AddAssignment(u1.UserId, 1, holidayDate, ShiftLabel.Morning, false);
+        solution.AddAssignment(u2.UserId, 1, holidayDate2, ShiftLabel.Morning, false);
+
+        // اجرای گاردها
+        HolidayMorningEveningFairnessGuard.Enforce(solution, constraints);
+        HolidayQuotaRules.EnforceZeroQuotaGuarantees(solution, constraints);
+
+        // کاربر ۱ نباید هیچ شیفت تعطیلی داشته باشد
+        var u1Holidays = solution.GetUserAllAssignments(u1.UserId)
+            .Count(a => holidays.Contains(a.Date.Date));
+        Assert.Equal(0, u1Holidays);
+
+        // و شیفت روز تعطیل به کاربر ۲ یا کسی که سهمیه دارد منتقل شده
+        Assert.True(solution.HasAssignment(u2.UserId, 1, holidayDate));
+    }
+
+    [Fact]
+    public void HolidayFairnessGuard_ZeroMorningQuota_NeverReceivesMorningHolidayShift()
+    {
+        var start = new DateTime(2026, 7, 1);
+        var holidayDate = new DateTime(2026, 7, 3);
+        var holidays = new HashSet<DateTime> { holidayDate };
+
+        var u1 = MakeUser(1);
+        u1.ExactHolidayMorningShiftCount = 0; // سهمیه صبح تعطیل = ۰
+
+        var u2 = MakeUser(2);
+
+        var users = new List<UserConstraint> { u1, u2 };
+        var constraints = BuildConstraints(start, days: 7, users);
+        constraints.HolidayDates = holidays;
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(u1.UserId, 1, holidayDate, ShiftLabel.Morning, false);
+
+        HolidayMorningEveningFairnessGuard.Enforce(solution, constraints);
+        HolidayQuotaRules.EnforceZeroQuotaGuarantees(solution, constraints);
+
+        Assert.False(solution.HasAssignment(u1.UserId, 1, holidayDate),
+            "User with ExactHolidayMorningShiftCount = 0 must never receive morning holiday shift.");
+    }
+
+    [Fact]
+    public void HolidayFairnessGuard_TotalHolidayQuota_LimitsSumOfAllHolidayShifts()
+    {
+        var start = new DateTime(2026, 7, 1);
+        var h1 = new DateTime(2026, 7, 3);
+        var h2 = new DateTime(2026, 7, 10);
+        var h3 = new DateTime(2026, 7, 17);
+        var holidays = new HashSet<DateTime> { h1, h2, h3 };
+
+        var u1 = MakeUser(1);
+        u1.ExactHolidayShiftCount = 1; // سقف کل شیفت‌های تعطیل = ۱
+
+        var u2 = MakeUser(2);
+        u2.ExactHolidayShiftCount = 2;
+
+        var users = new List<UserConstraint> { u1, u2 };
+        var constraints = BuildConstraints(start, days: 21, users);
+        constraints.HolidayDates = holidays;
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(u1.UserId, 1, h1, ShiftLabel.Morning, false);
+        solution.AddAssignment(u1.UserId, 2, h2, ShiftLabel.Evening, false);
+        solution.AddAssignment(u2.UserId, 1, h3, ShiftLabel.Morning, false);
+
+        HolidayMorningEveningFairnessGuard.Enforce(solution, constraints);
+
+        var totalU1Holidays = solution.GetUserAllAssignments(u1.UserId)
+            .Count(a => holidays.Contains(a.Date.Date));
+        Assert.True(totalU1Holidays <= 1,
+            $"User 1 has total holiday quota 1, but received {totalU1Holidays} holiday shifts.");
+    }
+
+    [Fact]
+    public void HolidayFairnessGuard_ApprovedRequest_OverridesZeroQuotaPriority()
+    {
+        var start = new DateTime(2026, 7, 1);
+        var holidayDate = new DateTime(2026, 7, 3);
+        var holidays = new HashSet<DateTime> { holidayDate };
+
+        var u1 = MakeUser(1);
+        u1.ExactHolidayShiftCount = 0; // سهمیه تعطیل صفر است
+        // اما درخواست تأییدشده حضور در روز تعطیل دارد (اولویت ۱ مطلق کاربر)
+        u1.RequiredShiftSlots.Add(new ShiftSlotConstraint
+        {
+            Date = holidayDate,
+            ShiftLabel = ShiftLabel.Morning,
+            ShiftId = 1
+        });
+
+        var u2 = MakeUser(2);
+
+        var users = new List<UserConstraint> { u1, u2 };
+        var constraints = BuildConstraints(start, days: 7, users);
+        constraints.HolidayDates = holidays;
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(u1.UserId, 1, holidayDate, ShiftLabel.Morning, false);
+
+        HolidayMorningEveningFairnessGuard.Enforce(solution, constraints);
+        HolidayQuotaRules.EnforceZeroQuotaGuarantees(solution, constraints);
+
+        // درخواست تأییدشده کاربر باید حفظ شود و حذف نگردد!
+        Assert.True(solution.HasAssignment(u1.UserId, 1, holidayDate),
+            "Approved shift slot request on holiday MUST be preserved even if ExactHolidayShiftCount == 0.");
+    }
+
+    [Fact]
     public void MorningEveningBalanceGuard_SwapsSameDayBetweenImbalancedUsers()
     {
         var start = new DateTime(2026, 7, 1);

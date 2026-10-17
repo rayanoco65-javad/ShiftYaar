@@ -526,6 +526,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             score += CalculateMorningEveningBalancePenalty(solution) * _constraints.SoftWeights.MorningEveningBalanceWeight;
             score += CalculateFairMorningEveningPeerPenalty(solution) * _constraints.SoftWeights.FairMorningEveningPeerWeight;
             score += CalculateFairHolidayMorningEveningPeerPenalty(solution) * _constraints.SoftWeights.FairHolidayMorningEveningPeerWeight;
+            score += CalculateHolidayQuotaViolationPenalty(solution);
             score += CalculateWorkdaySpreadPenalty(solution) * _constraints.SoftWeights.WorkdaySpreadWeight;
             score += MaxConsecutiveWorkdayRules.CalculateOffSpreadPenalty(solution, _constraints)
                      * _constraints.SoftWeights.OffSpreadWeight;
@@ -1017,11 +1018,19 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         }
 
         /// <summary>
-        /// تعادل صبح/عصر فقط روی روزهای تعطیل بین کاربران گردشی هم‌تخصص.
+        /// تعادل و توزیع صبح/عصر فقط روی روزهای تعطیل بین کاربران گردشی هم‌تخصص بر اساس تنظیمات دپارتمان.
         /// </summary>
         private double CalculateFairHolidayMorningEveningPeerPenalty(ShiftSolution solution)
         {
+            if (!_constraints.EnableHolidayShiftDistribution)
+            {
+                return 0;
+            }
+
             double penalty = 0;
+            var distributionType = _constraints.HolidayShiftDistributionType;
+            var slope = _constraints.HolidaySeniorityDistributionSlope;
+
             foreach (var specialtyGroup in _constraints.UserConstraints
                          .Where(u => u.IsActive && u.ShiftType != ShiftTypes.FixedShift)
                          .GroupBy(u => u.SpecialtyId))
@@ -1040,22 +1049,69 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                         .Select(u => HolidayMorningEveningFairnessGuard.CountHolidayLabel(
                             solution, _constraints, u.UserId, label))
                         .ToList();
-                    if (counts.All(c => c == 0))
+                    var totalShifts = counts.Sum();
+                    if (totalShifts == 0)
                     {
                         continue;
                     }
 
-                    var avg = counts.Average();
-                    // وزن بالاتر از peer عادی تا تمرکز تعطیلات جریمه شود
-                    penalty += counts.Sum(c => Math.Abs(c - avg)) * 6.0;
+                    var fairShares = HolidayMorningEveningFairnessGuard.BuildHolidayFairShares(
+                        eligible,
+                        totalShifts,
+                        _constraints.StartDate,
+                        distributionType,
+                        slope,
+                        label);
+
+                    for (int i = 0; i < eligible.Count; i++)
+                    {
+                        var user = eligible[i];
+                        var count = counts[i];
+                        var target = fairShares.TryGetValue(user.UserId, out var f) ? f : (totalShifts / (double)eligible.Count);
+                        penalty += Math.Abs(count - target) * 6.0;
+                    }
+
                     var spread = counts.Max() - counts.Min();
-                    if (spread >= 2)
+                    if (distributionType == 0 && spread >= 2)
                     {
                         penalty += spread * spread * 4.0;
                     }
                 }
             }
 
+            return penalty;
+        }
+
+        private double CalculateHolidayQuotaViolationPenalty(ShiftSolution solution)
+        {
+            double penalty = 0;
+            foreach (var user in _constraints.UserConstraints)
+            {
+                if (user.ExactHolidayShiftCount == 0
+                    || user.ExactHolidayMorningShiftCount == 0
+                    || user.ExactHolidayEveningShiftCount == 0
+                    || user.ExactHolidayWeekendNightShiftCount == 0)
+                {
+                    var assignments = solution.GetUserAllAssignments(user.UserId)
+                        .Where(a => !a.IsOnCall);
+                    foreach (var a in assignments)
+                    {
+                        if (HolidayQuotaRules.IsHolidayShiftForbidden(user, _constraints, a.Date, a.ShiftLabel, a.ShiftId))
+                        {
+                            penalty += 5000.0;
+                        }
+                    }
+                }
+
+                if (user.ExactHolidayShiftCount.HasValue && user.ExactHolidayShiftCount.Value > 0)
+                {
+                    var count = HolidayQuotaRules.CountTotalHolidayShifts(solution, _constraints, user.UserId);
+                    if (count > user.ExactHolidayShiftCount.Value)
+                    {
+                        penalty += (count - user.ExactHolidayShiftCount.Value) * 150.0;
+                    }
+                }
+            }
             return penalty;
         }
 
@@ -1779,6 +1835,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, _constraints);
                 ShiftCoverageGuard.StripExcessCoverage(solution, _constraints);
             }
+            HolidayMorningEveningFairnessGuard.Enforce(solution, _constraints);
+            HolidayQuotaRules.EnforceZeroQuotaGuarantees(solution, _constraints);
             solution.Score = CalculateSolutionScore(solution);
             RefreshSolutionViolations(solution);
         }

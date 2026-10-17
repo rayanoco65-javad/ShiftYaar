@@ -11,7 +11,8 @@ public static class UserMonthlyNightQuotaLimits
         int nightDaysInMonth,
         int holidayWeekendNightDaysInMonth,
         int persianYear,
-        int persianMonth)
+        int persianMonth,
+        int? exactHolidayShiftCount = null)
     {
         if (exactNightShiftCount.HasValue && exactNightShiftCount.Value > nightDaysInMonth)
         {
@@ -25,6 +26,15 @@ public static class UserMonthlyNightQuotaLimits
         {
             return
                 $"تعداد شب تعطیل/آخرهفته ({exactHolidayWeekendNightShiftCount.Value}) نمی‌تواند بیشتر از " +
+                $"تعداد شب‌های تعطیل/آخرهفته ماه {persianYear}/{persianMonth:00} " +
+                $"({holidayWeekendNightDaysInMonth} شب) باشد.";
+        }
+
+        if (exactHolidayShiftCount.HasValue &&
+            exactHolidayShiftCount.Value > holidayWeekendNightDaysInMonth)
+        {
+            return
+                $"تعداد کل شیفت‌های تعطیل ({exactHolidayShiftCount.Value}) نمی‌تواند بیشتر از " +
                 $"تعداد شب‌های تعطیل/آخرهفته ماه {persianYear}/{persianMonth:00} " +
                 $"({holidayWeekendNightDaysInMonth} شب) باشد.";
         }

@@ -28,5 +28,9 @@ namespace ShiftYar.Application.DTOs.UserModel
 
         /// <summary>null = مشارکت در مازاد شب تعطیل/آخرهفته (پیش‌فرض)؛ false = بدون مازاد</summary>
         public bool? HolidayWeekendNightFallbackParticipation { get; set; }
+
+        /// <summary>حداقل/تعداد کل شیفت‌های تعطیل در ماه (صرف‌نظر از نوع شیفت). ۰ = عدم تخصیص هیچ شیفت تعطیل؛ null = بدون سهمیه کلی</summary>
+        [Range(0, 31)]
+        public int? ExactHolidayShiftCount { get; set; }
     }
 }

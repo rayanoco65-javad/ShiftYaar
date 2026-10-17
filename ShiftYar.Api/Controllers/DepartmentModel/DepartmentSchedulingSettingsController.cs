@@ -134,6 +134,43 @@ namespace ShiftYar.Api.Controllers.DepartmentModel
             if (dto.OvertimeSeniorityDistributionSlope.HasValue)
                 dtoAdd.OvertimeSeniorityDistributionSlope = dto.OvertimeSeniorityDistributionSlope;
 
+            if (dto.EnableHolidayShiftDistribution.HasValue)
+                dtoAdd.EnableHolidayShiftDistribution = dto.EnableHolidayShiftDistribution;
+            if (dto.HolidayShiftDistributionType.HasValue)
+                dtoAdd.HolidayShiftDistributionType = dto.HolidayShiftDistributionType;
+            if (dto.HolidayShiftDistributionWeight.HasValue)
+                dtoAdd.HolidayShiftDistributionWeight = dto.HolidayShiftDistributionWeight;
+            if (dto.HolidaySeniorityDistributionSlope.HasValue)
+                dtoAdd.HolidaySeniorityDistributionSlope = dto.HolidaySeniorityDistributionSlope;
+
+            var result = await _service.UpdateSettingAsync(id, dtoAdd);
+            if (!result.IsSuccess) return BadRequest(result);
+            return Ok(result);
+        }
+
+        /// <summary>
+        /// به‌روزرسانی اختصاصی تنظیمات مدیریت و توزیع شیفت‌های روزهای تعطیل بخش
+        /// </summary>
+        [HttpPut("holiday-shift-distribution/{id}")]
+        public async Task<ActionResult<ApiResponse<DepartmentSchedulingSettingsDtoGet>>> UpdateHolidayShiftDistributionSettings(
+            int id,
+            [FromBody] HolidayShiftDistributionSettingsDto dto)
+        {
+            var currentSettings = await _service.GetSettingAsync(id);
+            if (!currentSettings.IsSuccess) return NotFound(currentSettings);
+
+            var updatedSettings = currentSettings.Data;
+            var dtoAdd = ToDtoAdd(updatedSettings);
+
+            if (dto.EnableHolidayShiftDistribution.HasValue)
+                dtoAdd.EnableHolidayShiftDistribution = dto.EnableHolidayShiftDistribution;
+            if (dto.HolidayShiftDistributionType.HasValue)
+                dtoAdd.HolidayShiftDistributionType = dto.HolidayShiftDistributionType;
+            if (dto.HolidayShiftDistributionWeight.HasValue)
+                dtoAdd.HolidayShiftDistributionWeight = dto.HolidayShiftDistributionWeight;
+            if (dto.HolidaySeniorityDistributionSlope.HasValue)
+                dtoAdd.HolidaySeniorityDistributionSlope = dto.HolidaySeniorityDistributionSlope;
+
             var result = await _service.UpdateSettingAsync(id, dtoAdd);
             if (!result.IsSuccess) return BadRequest(result);
             return Ok(result);
@@ -185,6 +222,10 @@ namespace ShiftYar.Api.Controllers.DepartmentModel
             NightShiftDistributionType = s.NightShiftDistributionType,
             NightShiftDistributionWeight = s.NightShiftDistributionWeight,
             SeniorityDistributionSlope = s.SeniorityDistributionSlope,
+            EnableHolidayShiftDistribution = s.EnableHolidayShiftDistribution,
+            HolidayShiftDistributionType = s.HolidayShiftDistributionType,
+            HolidayShiftDistributionWeight = s.HolidayShiftDistributionWeight,
+            HolidaySeniorityDistributionSlope = s.HolidaySeniorityDistributionSlope,
             EnableOvertimeDistributionBySeniority = s.EnableOvertimeDistributionBySeniority,
             OvertimePreferenceType = s.OvertimePreferenceType,
             OvertimeDistributionWeight = s.OvertimeDistributionWeight,
@@ -208,8 +249,20 @@ namespace ShiftYar.Api.Controllers.DepartmentModel
     }
 
     /// <summary>
-    /// DTO تنظیمات توزیع صبح/عصر/شب و اضافه کار بر اساس سابقه.
+    /// DTO اختصاصی تنظیمات مدیریت و توزیع شیفت‌های روزهای تعطیل.
+    /// </summary>
+    public class HolidayShiftDistributionSettingsDto
+    {
+        public bool? EnableHolidayShiftDistribution { get; set; }
+        public int? HolidayShiftDistributionType { get; set; }
+        public double? HolidayShiftDistributionWeight { get; set; }
+        public double? HolidaySeniorityDistributionSlope { get; set; }
+    }
+
+    /// <summary>
+    /// DTO تنظیمات توزیع صبح/عصر/شب، تعطیلات و اضافه کار بر اساس سابقه.
     /// نوع: 0=اولویت سابقه بیشتر، 1=اولویت سابقه کمتر، 2=خنثی.
+    /// برای تعطیلات: 0=تعداد مساوی، 1=سابقه بیشتر شیفت تعطیل بیشتر (نزولی)، 2=سابقه بیشتر شیفت تعطیل کمتر (صعودی).
     /// </summary>
     public class ShiftSeniorityDistributionSettingsDto
     {
@@ -226,6 +279,11 @@ namespace ShiftYar.Api.Controllers.DepartmentModel
         public double? NightShiftDistributionWeight { get; set; }
 
         public double? SeniorityDistributionSlope { get; set; }
+
+        public bool? EnableHolidayShiftDistribution { get; set; }
+        public int? HolidayShiftDistributionType { get; set; }
+        public double? HolidayShiftDistributionWeight { get; set; }
+        public double? HolidaySeniorityDistributionSlope { get; set; }
 
         public bool? EnableOvertimeDistributionBySeniority { get; set; }
         public int? OvertimePreferenceType { get; set; }

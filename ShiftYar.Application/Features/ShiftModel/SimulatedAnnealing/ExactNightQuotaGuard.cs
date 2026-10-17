@@ -2774,6 +2774,20 @@ public static class ExactNightQuotaGuard
             return false;
         }
 
+        if (HolidayQuotaRules.IsHolidayShiftForbidden(user, constraints, date, ShiftLabel.Night, nightShift.ShiftId))
+        {
+            return false;
+        }
+
+        if (user.ExactHolidayShiftCount.HasValue && (constraints.IsHolidayWeekendNight(date) || constraints.IsHoliday(date)))
+        {
+            var total = HolidayQuotaRules.CountTotalHolidayShifts(solution, constraints, user.UserId);
+            if (total >= user.ExactHolidayShiftCount.Value && user.HolidayWeekendNightFallbackParticipation != true)
+            {
+                return false;
+            }
+        }
+
         return ShiftEligibilityResolver.MayTakeLabelOnDate(user, ShiftLabel.Night, date)
                && !user.UnavailableDates.Any(d => d.Date == date.Date)
                && !user.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == ShiftLabel.Night)

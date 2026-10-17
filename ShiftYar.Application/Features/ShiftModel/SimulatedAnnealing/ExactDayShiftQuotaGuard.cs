@@ -290,6 +290,21 @@ public static class ExactDayShiftQuotaGuard
         ShiftLabel label,
         DateTime date)
     {
+        if (HolidayQuotaRules.IsHolidayShiftForbidden(user, constraints, date, label, shiftReq.ShiftId))
+        {
+            return false;
+        }
+
+        if (user.ExactHolidayShiftCount.HasValue && constraints.IsHoliday(date))
+        {
+            var total = HolidayQuotaRules.CountTotalHolidayShifts(solution, constraints, user.UserId);
+            var fallback = label == ShiftLabel.Morning ? user.MorningHolidayFallbackParticipation : user.EveningHolidayFallbackParticipation;
+            if (total >= user.ExactHolidayShiftCount.Value && fallback != true)
+            {
+                return false;
+            }
+        }
+
         if (!ShiftEligibilityResolver.MayTakeLabelOnDate(user, label, date))
         {
             return false;

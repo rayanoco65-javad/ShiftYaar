@@ -85,6 +85,12 @@ namespace ShiftYar.Domain.Entities.DepartmentModel
         public double? NightShiftDistributionWeight { get; set; }
         public double? SeniorityDistributionSlope { get; set; } // شیب مشترک برای هر سه نوع (پیش‌فرض: 1.0)
 
+        // تنظیمات مدیریت و توزیع شیفت‌های روزهای تعطیل بین پرسنل
+        public bool? EnableHolidayShiftDistribution { get; set; } // فعال‌سازی توزیع هوشمند شیفت‌های تعطیل
+        public int? HolidayShiftDistributionType { get; set; } // 0=توزیع مساوی، 1=سابقه بیشتر شیفت تعطیل بیشتر (نزولی)، 2=سابقه بیشتر شیفت تعطیل کمتر (صعودی)
+        public double? HolidayShiftDistributionWeight { get; set; } // وزن توزیع شیفت‌های تعطیل (پیش‌فرض: 8.0)
+        public double? HolidaySeniorityDistributionSlope { get; set; } // شیب توزیع سابقه در روزهای تعطیل (پیش‌فرض: 1.0)
+
         // تنظیمات تمایل به اضافه کار و توزیع بر اساس سابقه
         public bool? EnableOvertimeDistributionBySeniority { get; set; } // فعال‌سازی توزیع اضافه کار بر اساس سابقه
         public int? OvertimePreferenceType { get; set; } // نوع تنظیمات اضافه کار: 0=علاقه‌مند، 1=گریزان، 2=خنثی

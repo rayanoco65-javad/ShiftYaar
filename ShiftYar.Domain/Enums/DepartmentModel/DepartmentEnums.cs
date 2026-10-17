@@ -25,5 +25,20 @@ namespace ShiftYar.Domain.Enums.DepartmentModel
             /// <summary>ترکیبی (هم سطح‌بندی مسئول شیفت و هم مسئولیت‌های چندگانه)</summary>
             Hybrid = 3
         }
+
+        /// <summary>
+        /// نحوه مدیریت و توزیع شیفت‌های روزهای تعطیل بین پرسنل بخش توسط سوپروایزر
+        /// </summary>
+        public enum HolidayShiftDistributionMode
+        {
+            /// <summary>توزیع به تعداد مساوی بین پرسنل هم‌تخصص</summary>
+            Equal = 0,
+
+            /// <summary>براساس سابقه بصورت نزولی (سابقه بیشتر = شیفت تعطیل بیشتر)</summary>
+            SeniorityDescending = 1,
+
+            /// <summary>براساس سابقه بصورت صعودی (سابقه بیشتر = شیفت تعطیل کمتر / استراحت بیشتر در تعطیلات)</summary>
+            SeniorityAscending = 2
+        }
     }
 }

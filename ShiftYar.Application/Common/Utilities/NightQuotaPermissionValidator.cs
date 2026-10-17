@@ -36,11 +36,13 @@ public static class NightQuotaPermissionValidator
         int? exactNightShiftCount,
         bool? nightFallbackParticipation,
         int? exactHolidayWeekendNightShiftCount,
-        bool? holidayWeekendNightFallbackParticipation) =>
+        bool? holidayWeekendNightFallbackParticipation,
+        int? exactHolidayShiftCount = null) =>
         exactNightShiftCount.HasValue
         || exactHolidayWeekendNightShiftCount.HasValue
         || nightFallbackParticipation != null
-        || holidayWeekendNightFallbackParticipation != null;
+        || holidayWeekendNightFallbackParticipation != null
+        || exactHolidayShiftCount.HasValue;
 
     private static bool MayEverTakeNight(UserShiftPermission permissions) =>
         ShiftEligibilityResolver.GetStandaloneLabels(permissions).Contains(ShiftLabel.Night)

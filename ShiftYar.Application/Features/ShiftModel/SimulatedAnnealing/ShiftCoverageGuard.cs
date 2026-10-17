@@ -1471,6 +1471,11 @@ public static class ShiftCoverageGuard
         DateTime date,
         bool allowQuotaRelaxation = false)
     {
+        if (HolidayQuotaRules.IsHolidayShiftForbidden(user, constraints, date, label))
+        {
+            return false;
+        }
+
         if (allowQuotaRelaxation)
         {
             return true;

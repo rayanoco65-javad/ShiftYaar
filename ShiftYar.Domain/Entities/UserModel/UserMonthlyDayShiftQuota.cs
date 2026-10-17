@@ -31,6 +31,9 @@ namespace ShiftYar.Domain.Entities.UserModel
         public int? ExactHolidayEveningShiftCount { get; set; }
         public bool? EveningHolidayFallbackParticipation { get; set; }
 
+        /// <summary>حداقل/تعداد کل شیفت‌های تعطیل در ماه (صرف‌نظر از نوع شیفت صبح/عصر/شب). ۰ = عدم تخصیص هیچ شیفت تعطیل؛ null = بدون سهمیه کلی.</summary>
+        public int? ExactHolidayShiftCount { get; set; }
+
         /// <summary>وضعیت فعال بودن تخصیص شیفت‌های متناوب هفتگی (صبح و عصر) در ماه جاری</summary>
         public bool IsWeeklyAlternatingActive { get; set; } = false;
 

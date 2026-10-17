@@ -76,7 +76,8 @@ public static class DayShiftQuotaPermissionValidator
         int? exactEveningShiftCount,
         bool? eveningFallbackParticipation,
         int? exactHolidayEveningShiftCount,
-        bool? eveningHolidayFallbackParticipation) =>
+        bool? eveningHolidayFallbackParticipation,
+        int? exactHolidayShiftCount = null) =>
         exactMorningShiftCount.HasValue
         || exactHolidayMorningShiftCount.HasValue
         || morningFallbackParticipation != null
@@ -84,5 +85,6 @@ public static class DayShiftQuotaPermissionValidator
         || exactEveningShiftCount.HasValue
         || exactHolidayEveningShiftCount.HasValue
         || eveningFallbackParticipation != null
-        || eveningHolidayFallbackParticipation != null;
+        || eveningHolidayFallbackParticipation != null
+        || exactHolidayShiftCount.HasValue;
 }

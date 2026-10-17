@@ -1,3 +1,4 @@
+using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
 using System.Linq;
 using static ShiftYar.Domain.Enums.ShiftModel.ShiftEnums;
@@ -27,25 +28,47 @@ public static class DayShiftQuotaEligibility
             return false;
         }
 
+        var isHoliday = constraints.IsHoliday(date);
         var total = CountLabel(solution, user.UserId, label);
         var exact = GetExactTotal(user, label);
         var fallback = GetFallback(user, label);
         var holidayExact = GetHolidayExact(user, label);
         var holidayFallback = GetHolidayFallback(user, label);
-        var isHoliday = constraints.IsHoliday(date);
+
+        if (isHoliday)
+        {
+            if (HolidayQuotaRules.IsHolidayShiftForbidden(user, constraints, date, label))
+            {
+                return false;
+            }
+
+            if (user.ExactHolidayShiftCount.HasValue)
+            {
+                var totalHoliday = HolidayQuotaRules.CountTotalHolidayShifts(solution, constraints, user.UserId);
+                if (totalHoliday >= user.ExactHolidayShiftCount.Value && !AllowsHolidaySurplus(fallback, holidayFallback))
+                {
+                    return false;
+                }
+            }
+
+            if (holidayExact.HasValue && holidayExact.Value == 0)
+            {
+                return false;
+            }
+
+            if (holidayExact.HasValue)
+            {
+                var holidayCount = CountHolidayLabel(solution, constraints, user.UserId, label);
+                if (holidayCount < holidayExact.Value)
+                {
+                    return true;
+                }
+            }
+        }
 
         if (exact.HasValue && total < exact.Value)
         {
             return true;
-        }
-
-        if (isHoliday && holidayExact.HasValue)
-        {
-            var holidayCount = CountHolidayLabel(solution, constraints, user.UserId, label);
-            if (holidayCount < holidayExact.Value)
-            {
-                return true;
-            }
         }
 
         return AllowsSurplusForLabel(isHoliday, fallback, holidayFallback);
