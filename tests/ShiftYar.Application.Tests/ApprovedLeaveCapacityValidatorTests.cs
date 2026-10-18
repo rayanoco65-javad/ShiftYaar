@@ -51,6 +51,28 @@ public class ApprovedLeaveCapacityValidatorTests
     }
 
     [Fact]
+    public void CalculateDailyShiftDemandForSpecialty_SumsMultipleResponsibilitiesForSameSpecialty()
+    {
+        var shifts = new List<Shift>
+        {
+            new()
+            {
+                Label = ShiftLabel.Morning,
+                RequiredSpecialties =
+                [
+                    new ShiftRequiredSpecialty { SpecialtyId = 2, DepartmentResponsibilityId = 1, RequiredTottalCount = 2 },
+                    new ShiftRequiredSpecialty { SpecialtyId = 2, DepartmentResponsibilityId = 2, RequiredTottalCount = 3 }
+                ]
+            }
+        };
+
+        var demand = ApprovedLeaveCapacityValidator.CalculateDailyShiftDemandForSpecialty(
+            shifts, specialtyId: 2, isHoliday: false);
+
+        Assert.Equal(5, demand);
+    }
+
+    [Fact]
     public void CalculateNightShiftDemandForSpecialty_PicksOnlyNightShifts()
     {
         var shifts = new List<Shift>

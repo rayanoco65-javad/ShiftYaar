@@ -1,4 +1,4 @@
-﻿using ShiftYar.Application.DTOs.ShiftModel.SpecialtyModel;
+using ShiftYar.Application.DTOs.ShiftModel.SpecialtyModel;
 
 namespace ShiftYar.Application.DTOs.ShiftModel.ShiftRequiredSpecialtyModel
 {
@@ -8,8 +8,11 @@ namespace ShiftYar.Application.DTOs.ShiftModel.ShiftRequiredSpecialtyModel
         public int ShiftId { get; set; }
         public ShiftDtoGet Shift { get; set; }
 
-        public int SpecialtyId { get; set; }
-        public SpecialtyDtoGet Specialty { get; set; }
+        public int? SpecialtyId { get; set; }
+        public SpecialtyDtoGet? Specialty { get; set; }
+
+        public int? DepartmentResponsibilityId { get; set; }
+        public string? DepartmentResponsibilityTitle { get; set; }
 
         public int? RequiredMaleCount { get; set; }
         public int? RequiredFemaleCount { get; set; }

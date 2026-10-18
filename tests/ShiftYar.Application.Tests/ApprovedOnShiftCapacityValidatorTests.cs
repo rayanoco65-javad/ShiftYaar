@@ -52,6 +52,28 @@ public class ApprovedOnShiftCapacityValidatorTests
             shifts, ShiftLabel.Night, specialtyId: 10, isHoliday: false));
     }
 
+    [Fact]
+    public void ResolveCapacityForSpecialty_SumsMultipleResponsibilityRequirementsForSameSpecialty()
+    {
+        var shifts = new List<Shift>
+        {
+            new()
+            {
+                Label = ShiftLabel.Morning,
+                RequiredSpecialties =
+                [
+                    new ShiftRequiredSpecialty { SpecialtyId = 10, DepartmentResponsibilityId = 101, RequiredTottalCount = 2 },
+                    new ShiftRequiredSpecialty { SpecialtyId = 10, DepartmentResponsibilityId = 102, RequiredTottalCount = 3 }
+                ]
+            }
+        };
+
+        var capacity = ApprovedOnShiftCapacityValidator.ResolveCapacityForSpecialty(
+            shifts, ShiftLabel.Morning, specialtyId: 10, isHoliday: false);
+
+        Assert.Equal(5, capacity);
+    }
+
     [Theory]
     [InlineData(0, 2, false)]
     [InlineData(1, 2, false)]

@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using ShiftYar.Application.Common.Models.ResponseModel;
@@ -37,7 +37,7 @@ namespace ShiftYar.Application.Features.ShiftRequiredSpecialtyModel.Services
             try
             {
                 _logger.LogInformation("Fetching shift required specialties with filter: {@Filter}", filter);
-                var result = await _repository.GetByFilterAsync(filter, "Specialty", "Shift", "Shift.Department");
+                var result = await _repository.GetByFilterAsync(filter, "Specialty", "DepartmentResponsibility", "Shift", "Shift.Department");
                 var data = _mapper.Map<List<ShiftRequiredSpecialtyDtoGet>>(result.Items);
 
                 var pagedResponse = new PagedResponse<ShiftRequiredSpecialtyDtoGet>
@@ -63,7 +63,7 @@ namespace ShiftYar.Application.Features.ShiftRequiredSpecialtyModel.Services
             try
             {
                 _logger.LogInformation("Fetching shift required specialty with ID: {Id}", id);
-                var shiftRequiredSpecialty = await _repository.GetByIdAsync(id, "Specialty", "Shift");
+                var shiftRequiredSpecialty = await _repository.GetByIdAsync(id, "Specialty", "DepartmentResponsibility", "Shift");
                 if (shiftRequiredSpecialty == null)
                 {
                     _logger.LogWarning("Shift required specialty with ID {Id} not found", id);
@@ -94,7 +94,8 @@ namespace ShiftYar.Application.Features.ShiftRequiredSpecialtyModel.Services
                 await _repository.AddAsync(shiftRequiredSpecialty);
                 await _repository.SaveAsync();
 
-                var result = _mapper.Map<ShiftRequiredSpecialtyDtoGet>(shiftRequiredSpecialty);
+                var created = await _repository.GetByIdAsync(shiftRequiredSpecialty.Id!.Value, "Specialty", "DepartmentResponsibility", "Shift");
+                var result = _mapper.Map<ShiftRequiredSpecialtyDtoGet>(created ?? shiftRequiredSpecialty);
                 _logger.LogInformation("Successfully created shift required specialty with ID: {Id}", shiftRequiredSpecialty.Id);
                 return ApiResponse<ShiftRequiredSpecialtyDtoGet>.Success(result, "نیازمندی شیفت با موفقیت ایجاد شد.");
             }
@@ -123,7 +124,8 @@ namespace ShiftYar.Application.Features.ShiftRequiredSpecialtyModel.Services
             _repository.Update(shiftRequiredSpecialty);
             await _repository.SaveAsync();
 
-            var result = _mapper.Map<ShiftRequiredSpecialtyDtoGet>(shiftRequiredSpecialty);
+            var updated = await _repository.GetByIdAsync(shiftRequiredSpecialty.Id!.Value, "Specialty", "DepartmentResponsibility", "Shift");
+            var result = _mapper.Map<ShiftRequiredSpecialtyDtoGet>(updated ?? shiftRequiredSpecialty);
             _logger.LogInformation("Successfully updated shift required specialty with ID: {Id}", id);
             return ApiResponse<ShiftRequiredSpecialtyDtoGet>.Success(result, "نیازمندی تخصص شیفت با موفقیت بروزرسانی شد.");
         }

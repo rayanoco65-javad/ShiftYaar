@@ -1297,19 +1297,25 @@ public static class ProductivityHourFillGuard
             return false;
         }
 
-        var specialtyReq = shiftReq.SpecialtyRequirements.FirstOrDefault(r => r.SpecialtyId == specialtyId)
-                           ?? shiftReq.SpecialtyRequirements.FirstOrDefault();
-        if (specialtyReq == null)
+        var targetSpecialtyReqs = shiftReq.SpecialtyRequirements
+            .Where(r => specialtyId <= 0 ? r.SpecialtyId <= 0 : r.SpecialtyId == specialtyId)
+            .ToList();
+        if (targetSpecialtyReqs.Count == 0)
+        {
+            targetSpecialtyReqs = shiftReq.SpecialtyRequirements;
+        }
+
+        if (targetSpecialtyReqs.Count == 0)
         {
             return true;
         }
 
-        var day = specialtyReq.ForDay(isHoliday);
+        var requiredTotalForSpecialty = targetSpecialtyReqs.Sum(r => r.ForDay(isHoliday).RequiredTotalCount);
         var current = solution.GetShiftAssignments(shiftReq.ShiftId, date)
             .Count(a => !a.IsOnCall && a.UserId > 0 &&
                         (constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)?.SpecialtyId == specialtyId ||
                          (shiftReq.SpecialtyRequirements.Count == 1 && (constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)?.SpecialtyId ?? 0) <= 0)));
-        return current < Math.Max(day.RequiredTotalCount, 1);
+        return current < Math.Max(requiredTotalForSpecialty, 1);
     }
 
     private static double EstimateShiftHours(

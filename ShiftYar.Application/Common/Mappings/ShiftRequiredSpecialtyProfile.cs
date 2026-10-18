@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using ShiftYar.Application.DTOs.ShiftModel;
 using ShiftYar.Application.DTOs.ShiftModel.ShiftRequiredSpecialtyModel;
 using ShiftYar.Application.DTOs.ShiftModel.SpecialtyModel;
@@ -17,7 +17,8 @@ namespace ShiftYar.Application.Common.Mappings
         {
             //CreateMap<ShiftRequiredSpecialty, ShiftRequiredSpecialtyDtoGet>();
             CreateMap<ShiftRequiredSpecialty, ShiftRequiredSpecialtyDtoGet>()
-                .ForMember(dest => dest.Shift, opt => opt.MapFrom(src => src.Shift));
+                .ForMember(dest => dest.Shift, opt => opt.MapFrom(src => src.Shift))
+                .ForMember(dest => dest.DepartmentResponsibilityTitle, opt => opt.MapFrom(src => src.DepartmentResponsibility != null ? src.DepartmentResponsibility.Title : null));
             CreateMap<ShiftRequiredSpecialtyDtoAdd, ShiftRequiredSpecialty>();
             CreateMap<Shift, ShiftDtoGet>();
             CreateMap<Specialty, SpecialtyDtoGet>();

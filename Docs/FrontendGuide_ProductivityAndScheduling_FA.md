@@ -1280,47 +1280,49 @@ $$\text{حداکثر مرخصی مجاز روزانه} = \max\Big(0, \text{کل 
 
 ---
 
-## 2. تغییرات مربوط به نیازمندی تخصص شیفت
+## 2. تغییرات مربوط به نیازمندی تخصص و نقش شیفت (`ShiftRequiredSpecialty`)
 
-برای اینکه تعداد نیروی مورد نیاز در روزهای تعطیل با روزهای عادی متفاوت باشد، فیلدهای جدیدی به `ShiftRequiredSpecialty` اضافه شده‌اند.
+برای اینکه ظرفیت هر شیفت کاملاً منسجم و یکپارچه مدیریت شود، جدول `ShiftRequiredSpecialties` منبع اصلی و مرجع خواندن ظرفیت شیفت برای تمامی الگوریتم‌ها (SA و OrTools)، محاسبات سهمیه و اعتبارسنجی مرخصی‌ها است.
 
-### فیلدهای جدید
-
-- `HolidayRequiredMaleCount`
-- `HolidayRequiredFemaleCount`
-- `HolidayRequiredTottalCount`
-- `HolidayOnCallMaleCount`
-- `HolidayOnCallFemaleCount`
-- `HolidayOnCallTottalCount`
+### فیلدهای جدید در `ShiftRequiredSpecialtyDtoGet` و `ShiftRequiredSpecialtyDtoAdd`:
+- `departmentResponsibilityId` (اختیاری / `null` برای تخصص‌های عمومی): شناسه نقش دپارتمان (مثلاً اسکراب اول، سیرکولر و...)
+- `departmentResponsibilityTitle` (فقط در Get): عنوان نقش جهت نمایش در UI
+- `specialtyId` (اکنون اختیاری / `nullable`): در حالت‌های مسئولیت‌محور می‌تواند `null` باشد و بک‌اند به صورت خودکار تخصص متناظر با نقش یا پرسنل بخش را نسبت می‌دهد.
+- فیلدهای روزهای تعطیل:
+  - `holidayRequiredMaleCount`
+  - `holidayRequiredFemaleCount`
+  - `holidayRequiredTottalCount`
+  - `holidayOnCallMaleCount`
+  - `holidayOnCallFemaleCount`
+  - `holidayOnCallTottalCount`
 
 ### رفتار بک‌اند
-
 - فیلدهای بدون پیشوند `Holiday` مربوط به روزهای غیرتعطیل هستند.
 - اگر فیلدهای `Holiday*` خالی باشند، بک‌اند به صورت خودکار همان مقادیر روز غیرتعطیل را برای روز تعطیل استفاده می‌کند.
-
-### اقدام لازم در فرانت
-
-- در فرم ثبت/ویرایش `ShiftRequiredSpecialty`، یک بخش جدا برای «روزهای تعطیل» اضافه شود.
-- بهتر است UI به شکل دو بخش باشد:
-  - مقادیر روزهای غیرتعطیل
-  - مقادیر روزهای تعطیل
-- کنار فیلدهای تعطیل توضیح داده شود که «در صورت خالی بودن، مقدار روز عادی استفاده می‌شود».
+- **تجمیع ظرفیت:** اگر در یک شیفت چند نقش مختلف تعریف شده باشند (حتی با یک تخصص یکسان یا بدون تخصص)، بک‌اند مجموع ظرفیت نقش‌ها را به عنوان ظرفیت کل شیفت تجمیع می‌کند.
 
 ---
 
-## 2.1 تنظیم نیازمندی شیفت بر اساس مسئولیت (ShiftRequiredResponsibility) — جدید
+## 2.1 تنظیم نیازمندی شیفت بر اساس مسئولیت (ShiftRequiredResponsibility) — ویژه اتاق عمل و بخش‌های مسئولیت‌محور
 
-در بخش‌های مسئولیت‌محور (اتاق عمل و ...)، به ازای هر شیفت مشخص می‌شود که از هر نقش (اسکراب ۱، اسکراب ۲، سیرکولر و ...) به چه تعداد نیرو نیاز است. این تنظیمات از تفکیک زن و مرد و همچنین سهمیه شناور کل کاملاً پشتیبانی می‌کنند.
+در بخش‌های مسئولیت‌محور (اتاق عمل و ...)، به ازای هر شیفت مشخص می‌شود که از هر نقش (اسکراب ۱، اسکراب ۲، سیرکولر و ...) به چه تعداد نیرو نیاز است. 
 
-### کنترلر: `ShiftRequiredResponsibilityController`
+> ⭐ **تغییر بسیار مهم و بهبود معماری:**
+> در گذشته برای ثبت نقش‌ها نیاز بود ابتدا یک سقف ظرفیت تخصص عمومی تعریف شود؛ **این محدودیت اکنون به‌طور کامل برداشته شده است.**
+> اکنون داده‌های وارد شده در کنترلر `ShiftRequiredResponsibility` **مستقیماً در جدول مرجع `ShiftRequiredSpecialties` نیز ذخیره و همگام می‌شوند** و موتور چیدمان و محاسبات ظرفیت مرخصی‌ها ظرفیت هر شیفت را بر اساس همین نقش‌ها تشخیص می‌دهند. فرانت‌کار **نیازی ندارد** یک رکورد تخصص جداگانه برای سقف ظرفیت بسازد!
+
+### دو روش استفاده در فرانت‌اند:
+
+#### روش اول (استاندارد و اختصاصی نقش‌ها): استفاده از `ShiftRequiredResponsibilityController`
+کلیه عملیات CRUD نقش‌های شیفت از طریق این کنترلر انجام می‌شود و بک‌اند به صورت خودکار هر دو جدول را کاملاً همگام نگه می‌دارد:
 
 | متد | آدرس Endpoint | توضیح |
 |---|---|---|
 | `GET` | `/api/ShiftRequiredResponsibility/by-shift/{shiftId}` | دریافت تمام نیازمندی‌های مسئولیت یک شیفت بر اساس شناسه شیفت |
 | `GET` | `/api/ShiftRequiredResponsibility/{id}` | دریافت اطلاعات یک رکورد نیازمندی با شناسه |
-| `POST` | `/api/ShiftRequiredResponsibility` | ایجاد نیازمندی نقش برای شیفت |
-| `PUT` | `/api/ShiftRequiredResponsibility/{id}` | ویرایش نیازمندی نقش شیفت (شناسه در URL) |
-| `DELETE` | `/api/ShiftRequiredResponsibility/{id}` | حذف نیازمندی نقش از شیفت با شناسه |
+| `POST` | `/api/ShiftRequiredResponsibility` | ایجاد نیازمندی نقش برای شیفت (خودکار در جدول ظرفیت شیفت ذخیره می‌شود) |
+| `PUT` | `/api/ShiftRequiredResponsibility/{id}` | ویرایش نیازمندی نقش شیفت (همگام‌سازی خودکار ظرفیت) |
+| `DELETE` | `/api/ShiftRequiredResponsibility/{id}` | حذف نیازمندی نقش از شیفت (حذف خودکار از جدول ظرفیت) |
 
 > 📌 **نکته مسیردهی استاندارد (Standard REST Routing):** اکشن‌های این کنترلر بر اساس استاندارد RESTful بازطراحی و ساده‌سازی شده‌اند و کلیه فراخوانی‌ها با پیشوند `/api/ShiftRequiredResponsibility/...` و با شناسه‌های مسیر (`Route Parameters`) پردازش می‌شوند.
 
@@ -1332,10 +1334,28 @@ $$\text{حداکثر مرخصی مجاز روزانه} = \max\Big(0, \text{کل 
   "departmentResponsibilityId": 101,
   "requiredMaleCount": 1,
   "requiredFemaleCount": 1,
-  "requiredTotalCount": 3,
+  "requiredTotalCount": 2,
   "holidayRequiredMaleCount": 0,
   "holidayRequiredFemaleCount": 1,
-  "holidayRequiredTotalCount": 2
+  "holidayRequiredTotalCount": 1
+}
+```
+
+#### روش دوم (فرم یکپارچه شیفت): خواندن مستقیم از طریق شیفت (`GET /api/Shift/{id}`)
+در پاسخ `GET /api/Shift/{id}` یا `GET /api/ShiftRequiredSpecialty`، آرایه `requiredSpecialties` حاوی تمام رکوردهای ظرفیت شیفت (اعم از نقش‌ها و تخصص‌ها) است:
+```json
+{
+  "id": 45,
+  "shiftId": 20,
+  "specialtyId": null,
+  "departmentResponsibilityId": 101,
+  "departmentResponsibilityTitle": "اسکراب اول",
+  "requiredMaleCount": 1,
+  "requiredFemaleCount": 1,
+  "requiredTottalCount": 2,
+  "holidayRequiredMaleCount": 0,
+  "holidayRequiredFemaleCount": 1,
+  "holidayRequiredTottalCount": 1
 }
 ```
 
@@ -1351,12 +1371,12 @@ $$\text{حداکثر مرخصی مجاز روزانه} = \max\Big(0, \text{کل 
    - مثلاً حداقل ۱ مرد حضور داشته باشد اما کل نیاز ۳ نفر باشد (۲ نفر دیگر می‌توانند زن یا مرد باشند):
      `requiredMaleCount = 1`, `requiredFemaleCount = 0`, `requiredTotalCount = 3`
 4. **تغییر نیازمندی در روزهای تعطیل (`Holiday*`):**
-   - فیلدهای `holidayRequiredMaleCount`، `holidayRequiredFemaleCount` و `holidayRequiredTotalCount` برای شرایط شیفت در روزهای تعطیل یا جمعه‌ها تعریف شده‌اند.
+   - فیلدهای `holidayRequiredMaleCount`، `holidayRequiredFemaleCount` و `holidayRequiredTotalCount` برای شرایط شیفت در روزهای تعطیل یا جمعه‌ها تعریف شده‌اند (اختیاری).
 
-> ⚠️ **اعتبارسنجی مهم سمت کلاینت (Validation Rules):**
-> 1. `requiredTotalCount >= (requiredMaleCount + requiredFemaleCount)`: سهمیه کل نمی‌تواند کمتر از جمع سهمیه مشخص‌شده مرد و زن باشد.
-> 2. `holidayRequiredTotalCount >= (holidayRequiredMaleCount + holidayRequiredFemaleCount)` (در صورت پر بودن فیلدهای تعطیل).
-> 3. جمع کل `requiredTotalCount` تمام نقش‌های ثبت‌شده برای یک شیفت، نباید از ظرفیت کل تعریف‌شده برای آن شیفت (`shift.totalCapacity`) فراتر رود. بک‌اند این مورد را بررسی کرده و در صورت نقض خطای ۴۰۰ بازمی‌گرداند.
+### اعتبارسنجی‌های سمت فرانت (Client-Side Validations):
+1. `requiredTotalCount >= (requiredMaleCount + requiredFemaleCount)`: سهمیه کل نمی‌تواند کمتر از جمع سهمیه مشخص‌شده مرد و زن باشد.
+2. `holidayRequiredTotalCount >= (holidayRequiredMaleCount + holidayRequiredFemaleCount)` (در صورت پر بودن فیلدهای تعطیل).
+3. **نمایش ظرفیت کل شیفت در UI:** در بخش‌های مسئولیت‌محور، ظرفیت کل یک شیفت برابر با **مجموع `requiredTotalCount` تمام نقش‌های آن شیفت** است و نیازی به تعریف یا بررسی سقف مجزای تخصص نیست.
 
 ---
 

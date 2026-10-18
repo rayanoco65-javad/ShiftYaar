@@ -30,14 +30,15 @@ public static class ApprovedOnShiftCapacityValidator
         int? capacity = null;
         foreach (var shift in shifts.Where(s => s.Label == shiftLabel))
         {
-            var requirement = shift.RequiredSpecialties?
-                .FirstOrDefault(rs => rs.SpecialtyId == specialtyId);
-            if (requirement == null)
+            var requirements = shift.RequiredSpecialties?
+                .Where(rs => specialtyId == 0 ? (rs.SpecialtyId == null || rs.SpecialtyId == 0) : rs.SpecialtyId == specialtyId)
+                .ToList();
+            if (requirements == null || requirements.Count == 0)
             {
                 continue;
             }
 
-            var dayCapacity = GetEffectiveRequiredTotalCount(requirement, isHoliday);
+            var dayCapacity = requirements.Sum(r => GetEffectiveRequiredTotalCount(r, isHoliday));
             capacity = capacity.HasValue ? Math.Max(capacity.Value, dayCapacity) : dayCapacity;
         }
 

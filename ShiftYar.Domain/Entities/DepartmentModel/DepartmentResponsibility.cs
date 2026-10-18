@@ -53,6 +53,7 @@ namespace ShiftYar.Domain.Entities.DepartmentModel
 
         public ICollection<UserDepartmentResponsibility>? UserResponsibilities { get; set; }
         public ICollection<ShiftRequiredResponsibility>? ShiftRequiredResponsibilities { get; set; }
+        public ICollection<ShiftRequiredSpecialty>? ShiftRequiredSpecialties { get; set; }
 
         public DepartmentResponsibility()
         {
@@ -68,6 +69,7 @@ namespace ShiftYar.Domain.Entities.DepartmentModel
             this.IsActive = true;
             this.UserResponsibilities = new List<UserDepartmentResponsibility>();
             this.ShiftRequiredResponsibilities = new List<ShiftRequiredResponsibility>();
+            this.ShiftRequiredSpecialties = new List<ShiftRequiredSpecialty>();
         }
     }
 }

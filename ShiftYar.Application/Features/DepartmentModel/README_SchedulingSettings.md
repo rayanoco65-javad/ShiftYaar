@@ -243,7 +243,8 @@
 ### تنظیم نیازمندی شیفت بر اساس نقش (ShiftRequiredResponsibility)
 
 - ثبت نیازمندی نقش برای شیفت (پشتیبانی از تفکیک زن/مرد، کل و روزهای تعطیل):  
-  `POST /api/ShiftRequiredResponsibility`
+  `POST /api/ShiftRequiredResponsibility`  
+  *(نکته: رکوردهای ثبت‌شده به صورت خودکار و مستقیم در جدول مرجع `ShiftRequiredSpecialties` ذخیره می‌شوند و مجموع ظرفیت این نقش‌ها ظرفیت رسمی شیفت را تشکیل می‌دهد).*
 - دریافت نیازمندی‌های نقش یک شیفت:  
   `GET /api/ShiftRequiredResponsibility/by-shift/{shiftId}`
 

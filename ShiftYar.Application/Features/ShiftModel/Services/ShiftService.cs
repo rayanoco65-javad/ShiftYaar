@@ -41,6 +41,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     "Department.Supervisor",
                     "RequiredSpecialties",
                     "RequiredSpecialties.Specialty",
+                    "RequiredSpecialties.DepartmentResponsibility",
                     "RequiredResponsibilities",
                     "RequiredResponsibilities.DepartmentResponsibility");
 
@@ -75,6 +76,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     "Department.Supervisor",
                     "RequiredSpecialties",
                     "RequiredSpecialties.Specialty",
+                    "RequiredSpecialties.DepartmentResponsibility",
                     "RequiredResponsibilities",
                     "RequiredResponsibilities.DepartmentResponsibility");
                 if (shift == null)

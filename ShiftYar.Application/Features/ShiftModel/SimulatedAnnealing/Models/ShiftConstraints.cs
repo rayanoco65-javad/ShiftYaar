@@ -343,6 +343,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models
     public class SpecialtyRequirement
     {
         public int SpecialtyId { get; set; }
+        public int? DepartmentResponsibilityId { get; set; }
         public string SpecialtyName { get; set; } = string.Empty;
 
         public int RequiredMaleCount { get; set; }

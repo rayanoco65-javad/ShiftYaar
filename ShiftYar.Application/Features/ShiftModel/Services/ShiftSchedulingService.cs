@@ -2618,7 +2618,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         PageNumber = 1,
                         PageSize = 500
                     },
-                    includes: new[] { "Department", "RequiredSpecialties", "RequiredSpecialties.Specialty", "RequiredResponsibilities", "RequiredResponsibilities.DepartmentResponsibility" }
+                    includes: new[] { "Department", "RequiredSpecialties", "RequiredSpecialties.Specialty", "RequiredSpecialties.DepartmentResponsibility", "RequiredResponsibilities", "RequiredResponsibilities.DepartmentResponsibility" }
                 );
 
                 var departmentShifts = shifts.Items.ToList();
@@ -2663,58 +2663,157 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     shiftRequirement.DurationHours = durationHours;
                     shiftRequirement.DurationMinutes = (int)Math.Round(durationHours * 60);
 
-                    // بارگذاری نیازمندی‌های تخصص
+                    // بارگذاری نیازمندی‌های تخصص (شامل نیازمندی‌های نقش‌محور ذخیره‌شده در ShiftRequiredSpecialties)
                     if (shift.RequiredSpecialties != null)
                     {
-                        foreach (var reqSpecialty in shift.RequiredSpecialties)
+                        var groupedSpecialties = shift.RequiredSpecialties.GroupBy(rs => rs.SpecialtyId ?? 0);
+                        foreach (var group in groupedSpecialties)
                         {
+                            var specId = group.Key;
+                            var generalReq = group.FirstOrDefault(r => !r.DepartmentResponsibilityId.HasValue);
+                            var respReqs = group.Where(r => r.DepartmentResponsibilityId.HasValue).ToList();
+
+                            int reqMale, reqFemale, reqTotal;
+                            int? holMale, holFemale, holTotal;
+                            int onCallMale, onCallFemale, onCallTotal;
+                            int? holOnCallMale, holOnCallFemale, holOnCallTotal;
+
+                            if (respReqs.Any())
+                            {
+                                var sumRespMale = respReqs.Sum(r => r.RequiredMaleCount ?? 0);
+                                var sumRespFemale = respReqs.Sum(r => r.RequiredFemaleCount ?? 0);
+                                var sumRespTotal = respReqs.Sum(r => r.RequiredTottalCount ?? ((r.RequiredMaleCount ?? 0) + (r.RequiredFemaleCount ?? 0)));
+
+                                reqMale = Math.Max(generalReq?.RequiredMaleCount ?? 0, sumRespMale);
+                                reqFemale = Math.Max(generalReq?.RequiredFemaleCount ?? 0, sumRespFemale);
+                                reqTotal = Math.Max(generalReq?.RequiredTottalCount ?? 0, sumRespTotal);
+
+                                holMale = generalReq?.HolidayRequiredMaleCount ?? (respReqs.Any(r => r.HolidayRequiredMaleCount.HasValue) ? respReqs.Sum(r => r.HolidayRequiredMaleCount ?? 0) : null);
+                                holFemale = generalReq?.HolidayRequiredFemaleCount ?? (respReqs.Any(r => r.HolidayRequiredFemaleCount.HasValue) ? respReqs.Sum(r => r.HolidayRequiredFemaleCount ?? 0) : null);
+                                holTotal = generalReq?.HolidayRequiredTottalCount ?? (respReqs.Any(r => r.HolidayRequiredTottalCount.HasValue) ? respReqs.Sum(r => r.HolidayRequiredTottalCount ?? 0) : null);
+
+                                onCallMale = generalReq?.OnCallMaleCount ?? respReqs.Sum(r => r.OnCallMaleCount ?? 0);
+                                onCallFemale = generalReq?.OnCallFemaleCount ?? respReqs.Sum(r => r.OnCallFemaleCount ?? 0);
+                                onCallTotal = generalReq?.OnCallTottalCount ?? respReqs.Sum(r => r.OnCallTottalCount ?? 0);
+
+                                holOnCallMale = generalReq?.HolidayOnCallMaleCount ?? (respReqs.Any(r => r.HolidayOnCallMaleCount.HasValue) ? respReqs.Sum(r => r.HolidayOnCallMaleCount ?? 0) : null);
+                                holOnCallFemale = generalReq?.HolidayOnCallFemaleCount ?? (respReqs.Any(r => r.HolidayOnCallFemaleCount.HasValue) ? respReqs.Sum(r => r.HolidayOnCallFemaleCount ?? 0) : null);
+                                holOnCallTotal = generalReq?.HolidayOnCallTottalCount ?? (respReqs.Any(r => r.HolidayOnCallTottalCount.HasValue) ? respReqs.Sum(r => r.HolidayOnCallTottalCount ?? 0) : null);
+                            }
+                            else
+                            {
+                                reqMale = generalReq?.RequiredMaleCount ?? 0;
+                                reqFemale = generalReq?.RequiredFemaleCount ?? 0;
+                                reqTotal = generalReq?.RequiredTottalCount ?? 0;
+                                holMale = generalReq?.HolidayRequiredMaleCount;
+                                holFemale = generalReq?.HolidayRequiredFemaleCount;
+                                holTotal = generalReq?.HolidayRequiredTottalCount;
+                                onCallMale = generalReq?.OnCallMaleCount ?? 0;
+                                onCallFemale = generalReq?.OnCallFemaleCount ?? 0;
+                                onCallTotal = generalReq?.OnCallTottalCount ?? 0;
+                                holOnCallMale = generalReq?.HolidayOnCallMaleCount;
+                                holOnCallFemale = generalReq?.HolidayOnCallFemaleCount;
+                                holOnCallTotal = generalReq?.HolidayOnCallTottalCount;
+                            }
+
+                            var representative = generalReq ?? respReqs.First();
                             var specialtyReq = new SpecialtyRequirement
                             {
-                                SpecialtyId = reqSpecialty.SpecialtyId ?? 0,
-                                SpecialtyName = reqSpecialty.Specialty?.SpecialtyName ?? "",
-                                RequiredMaleCount = reqSpecialty.RequiredMaleCount ?? 0,
-                                RequiredFemaleCount = reqSpecialty.RequiredFemaleCount ?? 0,
-                                RequiredTotalCount = reqSpecialty.RequiredTottalCount ?? 0,
-                                OnCallMaleCount = reqSpecialty.OnCallMaleCount ?? 0,
-                                OnCallFemaleCount = reqSpecialty.OnCallFemaleCount ?? 0,
-                                OnCallTotalCount = reqSpecialty.OnCallTottalCount ?? 0,
-                                HolidayRequiredMaleCount = reqSpecialty.HolidayRequiredMaleCount,
-                                HolidayRequiredFemaleCount = reqSpecialty.HolidayRequiredFemaleCount,
-                                HolidayRequiredTotalCount = reqSpecialty.HolidayRequiredTottalCount,
-                                HolidayOnCallMaleCount = reqSpecialty.HolidayOnCallMaleCount,
-                                HolidayOnCallFemaleCount = reqSpecialty.HolidayOnCallFemaleCount,
-                                HolidayOnCallTotalCount = reqSpecialty.HolidayOnCallTottalCount
+                                SpecialtyId = specId,
+                                SpecialtyName = representative.Specialty?.SpecialtyName ?? representative.DepartmentResponsibility?.Title ?? "",
+                                RequiredMaleCount = reqMale,
+                                RequiredFemaleCount = reqFemale,
+                                RequiredTotalCount = reqTotal,
+                                OnCallMaleCount = onCallMale,
+                                OnCallFemaleCount = onCallFemale,
+                                OnCallTotalCount = onCallTotal,
+                                HolidayRequiredMaleCount = holMale,
+                                HolidayRequiredFemaleCount = holFemale,
+                                HolidayRequiredTotalCount = holTotal,
+                                HolidayOnCallMaleCount = holOnCallMale,
+                                HolidayOnCallFemaleCount = holOnCallFemale,
+                                HolidayOnCallTotalCount = holOnCallTotal
                             };
 
                             shiftRequirement.SpecialtyRequirements.Add(specialtyReq);
                         }
+
+                        // اگر نیازمندی برای یک نقش مشخص تعریف شده باشد، به نیازمندی‌های مسئولیت نیز افزوده می‌شود
+                        foreach (var reqSpecialty in shift.RequiredSpecialties.Where(r => r.DepartmentResponsibilityId.HasValue))
+                        {
+                            if (!shiftRequirement.ResponsibilityRequirements.Any(r => r.DepartmentResponsibilityId == reqSpecialty.DepartmentResponsibilityId.Value))
+                            {
+                                var respReq = new ResponsibilityRequirement
+                                {
+                                    DepartmentResponsibilityId = reqSpecialty.DepartmentResponsibilityId.Value,
+                                    ResponsibilityTitle = reqSpecialty.DepartmentResponsibility?.Title ?? "",
+                                    Priority = reqSpecialty.DepartmentResponsibility?.Priority ?? 0,
+                                    IsDefault = reqSpecialty.DepartmentResponsibility?.IsDefault ?? false,
+                                    RequiredMaleCount = reqSpecialty.RequiredMaleCount ?? 0,
+                                    RequiredFemaleCount = reqSpecialty.RequiredFemaleCount ?? 0,
+                                    RequiredTotalCount = reqSpecialty.RequiredTottalCount ?? 0,
+                                    HolidayRequiredMaleCount = reqSpecialty.HolidayRequiredMaleCount,
+                                    HolidayRequiredFemaleCount = reqSpecialty.HolidayRequiredFemaleCount,
+                                    HolidayRequiredTotalCount = reqSpecialty.HolidayRequiredTottalCount
+                                };
+
+                                if (!string.IsNullOrWhiteSpace(reqSpecialty.DepartmentResponsibility?.Title))
+                                {
+                                    constraints.ResponsibilityTitles[reqSpecialty.DepartmentResponsibilityId.Value] = reqSpecialty.DepartmentResponsibility.Title;
+                                }
+
+                                shiftRequirement.ResponsibilityRequirements.Add(respReq);
+                            }
+                        }
                     }
 
-                    // بارگذاری نیازمندی‌های مسئولیت (برای بخش‌های مسئولیت‌محور و اتاق عمل)
+                    // بارگذاری نیازمندی‌های مسئولیت از جدول ShiftRequiredResponsibilities (سازگاری با داده‌های قبلی)
                     if (shift.RequiredResponsibilities != null)
                     {
                         foreach (var reqResp in shift.RequiredResponsibilities)
                         {
-                            var respReq = new ResponsibilityRequirement
+                            if (reqResp.DepartmentResponsibilityId.HasValue &&
+                                !shiftRequirement.ResponsibilityRequirements.Any(r => r.DepartmentResponsibilityId == reqResp.DepartmentResponsibilityId.Value))
                             {
-                                DepartmentResponsibilityId = reqResp.DepartmentResponsibilityId ?? 0,
-                                ResponsibilityTitle = reqResp.DepartmentResponsibility?.Title ?? "",
-                                Priority = reqResp.DepartmentResponsibility?.Priority ?? 0,
-                                IsDefault = reqResp.DepartmentResponsibility?.IsDefault ?? false,
-                                RequiredMaleCount = reqResp.RequiredMaleCount ?? 0,
-                                RequiredFemaleCount = reqResp.RequiredFemaleCount ?? 0,
-                                RequiredTotalCount = reqResp.RequiredTotalCount ?? 0,
-                                HolidayRequiredMaleCount = reqResp.HolidayRequiredMaleCount,
-                                HolidayRequiredFemaleCount = reqResp.HolidayRequiredFemaleCount,
-                                HolidayRequiredTotalCount = reqResp.HolidayRequiredTotalCount
-                            };
+                                var respReq = new ResponsibilityRequirement
+                                {
+                                    DepartmentResponsibilityId = reqResp.DepartmentResponsibilityId.Value,
+                                    ResponsibilityTitle = reqResp.DepartmentResponsibility?.Title ?? "",
+                                    Priority = reqResp.DepartmentResponsibility?.Priority ?? 0,
+                                    IsDefault = reqResp.DepartmentResponsibility?.IsDefault ?? false,
+                                    RequiredMaleCount = reqResp.RequiredMaleCount ?? 0,
+                                    RequiredFemaleCount = reqResp.RequiredFemaleCount ?? 0,
+                                    RequiredTotalCount = reqResp.RequiredTotalCount ?? 0,
+                                    HolidayRequiredMaleCount = reqResp.HolidayRequiredMaleCount,
+                                    HolidayRequiredFemaleCount = reqResp.HolidayRequiredFemaleCount,
+                                    HolidayRequiredTotalCount = reqResp.HolidayRequiredTotalCount
+                                };
 
-                            if (reqResp.DepartmentResponsibilityId.HasValue && !string.IsNullOrWhiteSpace(reqResp.DepartmentResponsibility?.Title))
-                            {
-                                constraints.ResponsibilityTitles[reqResp.DepartmentResponsibilityId.Value] = reqResp.DepartmentResponsibility.Title;
+                                if (!string.IsNullOrWhiteSpace(reqResp.DepartmentResponsibility?.Title))
+                                {
+                                    constraints.ResponsibilityTitles[reqResp.DepartmentResponsibilityId.Value] = reqResp.DepartmentResponsibility.Title;
+                                }
+
+                                shiftRequirement.ResponsibilityRequirements.Add(respReq);
                             }
 
-                            shiftRequirement.ResponsibilityRequirements.Add(respReq);
+                            // در صورتی که شیفت فاقد رکورد تخصص بود، ظرفیت تخصص را از روی همین نقش تأمین کن تا الگوریتم متوقف نشود
+                            if (shift.RequiredSpecialties == null || !shift.RequiredSpecialties.Any())
+                            {
+                                var specialtyReq = new SpecialtyRequirement
+                                {
+                                    SpecialtyId = reqResp.DepartmentResponsibility?.SpecialtyId ?? 0,
+                                    SpecialtyName = reqResp.DepartmentResponsibility?.Title ?? "",
+                                    RequiredMaleCount = reqResp.RequiredMaleCount ?? 0,
+                                    RequiredFemaleCount = reqResp.RequiredFemaleCount ?? 0,
+                                    RequiredTotalCount = reqResp.RequiredTotalCount ?? 0,
+                                    HolidayRequiredMaleCount = reqResp.HolidayRequiredMaleCount,
+                                    HolidayRequiredFemaleCount = reqResp.HolidayRequiredFemaleCount,
+                                    HolidayRequiredTotalCount = reqResp.HolidayRequiredTotalCount
+                                };
+
+                                shiftRequirement.SpecialtyRequirements.Add(specialtyReq);
+                            }
                         }
                     }
 
@@ -2778,6 +2877,26 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         if (string.IsNullOrEmpty(uc.SpecialtyName))
                         {
                             uc.SpecialtyName = fallback.SpecialtyName;
+                        }
+                    }
+                }
+
+                // برای بخش‌های مسئولیت‌محور، در صورت عدم تعیین تخصص در نقش‌ها، تخصص پرسنل بخش را انتساب بده
+                if (constraints.StaffingMode is DepartmentStaffingMode.ResponsibilityBased or DepartmentStaffingMode.Hybrid)
+                {
+                    var commonUserSpecialty = constraints.UserConstraints
+                        .Where(u => u.SpecialtyId > 0)
+                        .Select(u => u.SpecialtyId)
+                        .FirstOrDefault();
+
+                    if (commonUserSpecialty > 0)
+                    {
+                        foreach (var s in constraints.ShiftRequirements)
+                        {
+                            foreach (var sr in s.SpecialtyRequirements.Where(sr => sr.SpecialtyId <= 0))
+                            {
+                                sr.SpecialtyId = commonUserSpecialty;
+                            }
                         }
                     }
                 }

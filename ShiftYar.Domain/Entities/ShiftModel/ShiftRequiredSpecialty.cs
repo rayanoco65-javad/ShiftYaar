@@ -1,11 +1,12 @@
-﻿using ShiftYar.Domain.Entities.BaseModel;
+using ShiftYar.Domain.Entities.BaseModel;
+using ShiftYar.Domain.Entities.DepartmentModel;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace ShiftYar.Domain.Entities.ShiftModel
 {
     /// <summary>
-    /// نیازمندی تخصص در یک شیفت — با امکان تعریف جداگانه برای روزهای غیرتعطیل و تعطیل.
+    /// نیازمندی تخصص یا مسئولیت در یک شیفت — با امکان تعریف جداگانه برای روزهای غیرتعطیل و تعطیل.
     /// اگر فیلدهای Holiday* خالی باشند، همان مقادیر روز غیرتعطیل اعمال می‌شود.
     /// </summary>
     public class ShiftRequiredSpecialty : BaseEntity
@@ -20,6 +21,10 @@ namespace ShiftYar.Domain.Entities.ShiftModel
         [ForeignKey("Specialty")]
         public int? SpecialtyId { get; set; }
         public Specialty? Specialty { get; set; }
+
+        [ForeignKey("DepartmentResponsibility")]
+        public int? DepartmentResponsibilityId { get; set; }
+        public DepartmentResponsibility? DepartmentResponsibility { get; set; }
 
         // --- روزهای غیرتعطیل (پیش‌فرض) ---
         public int? RequiredMaleCount { get; set; }
@@ -46,6 +51,8 @@ namespace ShiftYar.Domain.Entities.ShiftModel
             this.Shift = null;
             this.SpecialtyId = null;
             this.Specialty = null;
+            this.DepartmentResponsibilityId = null;
+            this.DepartmentResponsibility = null;
             this.RequiredMaleCount = null;
             this.RequiredFemaleCount = null;
             this.RequiredTottalCount = null;

@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading.Tasks;
 using static ShiftYar.Domain.Enums.ShiftModel.ShiftEnums;
 using static ShiftYar.Domain.Enums.UserModel.UserEnums;
+using static ShiftYar.Domain.Enums.DepartmentModel.DepartmentEnums;
 
 namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 {
@@ -38,6 +39,43 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 {
                     shiftReq.ManagerRequiredCount = 0;
                     shiftReq.ManagerMinLevel1Count = 0;
+                }
+            }
+
+            foreach (var shiftReq in constraints.ShiftRequirements)
+            {
+                if (shiftReq.SpecialtyRequirements.GroupBy(s => s.SpecialtyId).Any(g => g.Count() > 1))
+                {
+                    var aggregated = new List<SpecialtyRequirement>();
+                    foreach (var group in shiftReq.SpecialtyRequirements.GroupBy(s => s.SpecialtyId))
+                    {
+                        if (group.Count() == 1)
+                        {
+                            aggregated.Add(group.First());
+                        }
+                        else
+                        {
+                            var first = group.First();
+                            aggregated.Add(new SpecialtyRequirement
+                            {
+                                SpecialtyId = group.Key,
+                                SpecialtyName = first.SpecialtyName,
+                                RequiredMaleCount = group.Sum(r => r.RequiredMaleCount),
+                                RequiredFemaleCount = group.Sum(r => r.RequiredFemaleCount),
+                                RequiredTotalCount = group.Sum(r => r.RequiredTotalCount),
+                                OnCallMaleCount = group.Sum(r => r.OnCallMaleCount),
+                                OnCallFemaleCount = group.Sum(r => r.OnCallFemaleCount),
+                                OnCallTotalCount = group.Sum(r => r.OnCallTotalCount),
+                                HolidayRequiredMaleCount = group.Any(r => r.HolidayRequiredMaleCount.HasValue) ? group.Sum(r => r.HolidayRequiredMaleCount ?? 0) : null,
+                                HolidayRequiredFemaleCount = group.Any(r => r.HolidayRequiredFemaleCount.HasValue) ? group.Sum(r => r.HolidayRequiredFemaleCount ?? 0) : null,
+                                HolidayRequiredTotalCount = group.Any(r => r.HolidayRequiredTotalCount.HasValue) ? group.Sum(r => r.HolidayRequiredTotalCount ?? 0) : null,
+                                HolidayOnCallMaleCount = group.Any(r => r.HolidayOnCallMaleCount.HasValue) ? group.Sum(r => r.HolidayOnCallMaleCount ?? 0) : null,
+                                HolidayOnCallFemaleCount = group.Any(r => r.HolidayOnCallFemaleCount.HasValue) ? group.Sum(r => r.HolidayOnCallFemaleCount ?? 0) : null,
+                                HolidayOnCallTotalCount = group.Any(r => r.HolidayOnCallTotalCount.HasValue) ? group.Sum(r => r.HolidayOnCallTotalCount ?? 0) : null
+                            });
+                        }
+                    }
+                    shiftReq.SpecialtyRequirements = aggregated;
                 }
             }
 
@@ -363,7 +401,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
                     {
                         var eligibleUsers = availableUsers
-                            .Where(u => u.SpecialtyId == specialtyReq.SpecialtyId)
+                            .Where(u => specialtyReq.SpecialtyId == 0 || u.SpecialtyId == 0 || u.SpecialtyId == specialtyReq.SpecialtyId || _constraints.StaffingMode == DepartmentStaffingMode.ResponsibilityBased)
                             .Where(u => IsUserAvailableForShift(u, date, shiftReq.ShiftLabel, solution))
                             .Where(u => u.IsActive)
                             .Where(u => NightQuotaEligibility.CanAssignInCoverageFill(
@@ -384,7 +422,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
                     {
                         var eligibleUsers = availableUsers
-                            .Where(u => u.SpecialtyId == specialtyReq.SpecialtyId)
+                            .Where(u => specialtyReq.SpecialtyId == 0 || u.SpecialtyId == 0 || u.SpecialtyId == specialtyReq.SpecialtyId || _constraints.StaffingMode == DepartmentStaffingMode.ResponsibilityBased)
                             .Where(u => IsUserAvailableForShift(u, date, shiftReq.ShiftLabel, solution))
                             .Where(u => u.IsActive)
                             .Where(u => DayShiftQuotaEligibility.CanAssignInCoverageFill(
@@ -3513,7 +3551,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 .Max();
 
             foreach (var l1 in _constraints.UserConstraints
-                         .Where(u => u.IsActive && ShiftManagerRules.IsLevel1(u) && u.SpecialtyId == specialtyId)
+                         .Where(u => u.IsActive && ShiftManagerRules.IsLevel1(u) && (specialtyId == 0 || u.SpecialtyId == specialtyId || _constraints.StaffingMode == DepartmentStaffingMode.ResponsibilityBased))
                          .OrderBy(u => solution.GetUserAllAssignments(u.UserId).Count))
             {
                 foreach (var donorNight in solution.GetUserAllAssignments(l1.UserId)
@@ -3790,7 +3828,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             _constraints.UserConstraints
                 .Where(u => u.IsActive && ShiftManagerRules.IsManager(u))
                 .Where(u => !needLevel1 || ShiftManagerRules.IsLevel1(u))
-                .Where(u => u.SpecialtyId == specialtyId)
+                .Where(u => specialtyId == 0 || u.SpecialtyId == specialtyId || _constraints.StaffingMode == DepartmentStaffingMode.ResponsibilityBased)
                 .Where(u => !genderLocked || u.Gender == occupantGender)
                 .Where(u => !HasConflictingApprovedRequiredOnDate(u, date, shiftReq.ShiftLabel))
                 .Where(u => ShiftEligibilityResolver.MayTakeLabelOnDate(u, shiftReq.ShiftLabel, date))
@@ -5242,7 +5280,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 (!assignment.IsOnCall && (day.Value.RequiredMaleCount > 0 || day.Value.RequiredFemaleCount > 0)));
 
             var eligibleUsers = _constraints.UserConstraints
-                .Where(u => u.SpecialtyId == specialtyId)
+                .Where(u => specialtyId == 0 || u.SpecialtyId == specialtyId || _constraints.StaffingMode == DepartmentStaffingMode.ResponsibilityBased)
                 .Where(u => u.IsActive)
                 .Where(u => !lockGender || u.Gender == assignmentGender)
                 .Where(u => IsUserAvailableForShift(u, assignment.Date, assignment.ShiftLabel, solution))
@@ -5305,7 +5343,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var shiftReq = _constraints.ShiftRequirements.First(s => s.ShiftId == slot.ShiftId);
 
             var eligibleUsers = _constraints.UserConstraints
-                .Where(u => u.SpecialtyId == slot.SpecialtyId)
+                .Where(u => slot.SpecialtyId == 0 || u.SpecialtyId == slot.SpecialtyId || _constraints.StaffingMode == DepartmentStaffingMode.ResponsibilityBased)
                 .Where(u => u.IsActive)
                 .Where(u => IsUserAvailableForShiftOnShiftId(u, slot.Date, slot.ShiftId, solution))
                 .Where(u => !IsRequiredShiftSlotForOtherUser(u.UserId, slot.Date, shiftReq.ShiftLabel))

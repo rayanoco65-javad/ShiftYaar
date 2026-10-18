@@ -405,4 +405,86 @@ public class ShiftResponsibilityRulesTests
 
         ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
     }
+
+    [Fact]
+    public void SimulatedAnnealingScheduler_ResponsibilityBasedMode_UsesResponsibilitySpecialtyRequirementsDirectly()
+    {
+        // در این سناریو، ظرفیت شیفت دقیقاً بر اساس رکوردهای نقش‌های ذخیره‌شده در جدول ShiftRequiredSpecialties تنظیم شده است
+        // و هیچ نیازمندی تخصص عمومی مجزایی ثبت نشده است.
+        var startDate = new DateTime(2026, 10, 1);
+        var endDate = new DateTime(2026, 10, 1); // تک‌روزه برای تست سریع
+
+        var constraints = new ShiftConstraints
+        {
+            StartDate = startDate,
+            EndDate = endDate,
+            StaffingMode = DepartmentStaffingMode.ResponsibilityBased,
+            ShiftRequirements = new List<ShiftRequirement>
+            {
+                new()
+                {
+                    ShiftId = 1,
+                    ShiftLabel = ShiftLabel.Morning,
+                    DurationHours = 8,
+                    // دو نقش متفاوت که هر کدام به صورت یک رکورد با ظرفیت در SpecialtyRequirements قرار دارند
+                    SpecialtyRequirements = new List<SpecialtyRequirement>
+                    {
+                        new()
+                        {
+                            SpecialtyId = 1,
+                            DepartmentResponsibilityId = 101,
+                            RequiredTotalCount = 1
+                        },
+                        new()
+                        {
+                            SpecialtyId = 1,
+                            DepartmentResponsibilityId = 102,
+                            RequiredTotalCount = 1
+                        }
+                    },
+                    ResponsibilityRequirements = new List<ResponsibilityRequirement>
+                    {
+                        new() { DepartmentResponsibilityId = 101, ResponsibilityTitle = "اسکراب اول", Priority = 10, RequiredTotalCount = 1 },
+                        new() { DepartmentResponsibilityId = 102, ResponsibilityTitle = "سیرکولر", Priority = 1, IsDefault = true, RequiredTotalCount = 1 }
+                    }
+                }
+            },
+            UserConstraints = new List<UserConstraint>
+            {
+                new() { UserId = 1, UserName = "سارا", SpecialtyId = 1, IsActive = true, ShiftType = ShiftTypes.RotatingShift, ResponsibilityIds = new HashSet<int> { 101 } },
+                new() { UserId = 2, UserName = "رضا", SpecialtyId = 1, IsActive = true, ShiftType = ShiftTypes.RotatingShift, ResponsibilityIds = new HashSet<int>() }
+            },
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 }
+        };
+
+        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            InitialTemperature = 10,
+            FinalTemperature = 1,
+            CoolingRate = 0.9,
+            MaxIterations = 20
+        });
+
+        var solution = scheduler.Optimize();
+        Assert.NotNull(solution);
+
+        // هر دو اسلات شیفت (مجموع ظرفیت = ۲) باید پر شده باشند
+        var dayAssignments = solution.Assignments.Values.Where(a => a.ShiftId == 1 && a.Date.Date == startDate.Date).ToList();
+        Assert.Equal(2, dayAssignments.Count);
+
+        // نقش‌ها باید به درستی تخصیص داده شده باشند
+        var scrubAssignment = dayAssignments.FirstOrDefault(a => a.ResponsibilityId == 101);
+        var circulatorAssignment = dayAssignments.FirstOrDefault(a => a.ResponsibilityId == 102);
+
+        Assert.NotNull(scrubAssignment);
+        Assert.Equal(1, scrubAssignment.UserId); // سارا صلاحیت اسکراب اول را داشت
+
+        Assert.NotNull(circulatorAssignment);
+        Assert.Equal(2, circulatorAssignment.UserId); // رضا به عنوان نقش پیش‌فرض (سیرکولر) قرار گرفت
+    }
 }

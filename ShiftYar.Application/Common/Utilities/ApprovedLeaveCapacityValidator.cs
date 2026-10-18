@@ -35,10 +35,14 @@ public static class ApprovedLeaveCapacityValidator
         var total = 0;
         foreach (var shift in shifts)
         {
-            var req = shift.RequiredSpecialties?.FirstOrDefault(rs => rs.SpecialtyId == specialtyId);
-            if (req != null)
+            var reqs = shift.RequiredSpecialties?
+                .Where(rs => specialtyId == 0 ? (rs.SpecialtyId == null || rs.SpecialtyId == 0) : rs.SpecialtyId == specialtyId);
+            if (reqs != null)
             {
-                total += GetEffectiveRequiredTotalCount(req, isHoliday);
+                foreach (var req in reqs)
+                {
+                    total += GetEffectiveRequiredTotalCount(req, isHoliday);
+                }
             }
         }
         return total;
@@ -58,10 +62,14 @@ public static class ApprovedLeaveCapacityValidator
             var label = shift.Label ?? ShiftLabelResolver.InferLabelFromStartTime(shift);
             if (label == ShiftLabel.Night)
             {
-                var req = shift.RequiredSpecialties?.FirstOrDefault(rs => rs.SpecialtyId == specialtyId);
-                if (req != null)
+                var reqs = shift.RequiredSpecialties?
+                    .Where(rs => specialtyId == 0 ? (rs.SpecialtyId == null || rs.SpecialtyId == 0) : rs.SpecialtyId == specialtyId);
+                if (reqs != null)
                 {
-                    total += GetEffectiveRequiredTotalCount(req, isHoliday);
+                    foreach (var req in reqs)
+                    {
+                        total += GetEffectiveRequiredTotalCount(req, isHoliday);
+                    }
                 }
             }
         }

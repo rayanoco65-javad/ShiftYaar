@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 
 namespace ShiftYar.Application.DTOs.ShiftModel.ShiftRequiredSpecialtyModel
 {
@@ -7,8 +7,9 @@ namespace ShiftYar.Application.DTOs.ShiftModel.ShiftRequiredSpecialtyModel
         [Required(ErrorMessage = "شناسه شیفت الزامی است")]
         public int ShiftId { get; set; }
 
-        [Required(ErrorMessage = "شناسه تخصص الزامی است")]
-        public int SpecialtyId { get; set; }
+        public int? SpecialtyId { get; set; }
+
+        public int? DepartmentResponsibilityId { get; set; }
 
         // روزهای غیرتعطیل
         public int? RequiredMaleCount { get; set; }

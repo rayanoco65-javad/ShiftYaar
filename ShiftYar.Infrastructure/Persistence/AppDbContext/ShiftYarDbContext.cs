@@ -189,6 +189,14 @@ namespace ShiftYar.Infrastructure.Persistence.AppDbContext
                     .OnDelete(DeleteBehavior.Cascade);
             });
 
+            modelBuilder.Entity<ShiftRequiredSpecialty>(entity =>
+            {
+                entity.HasOne(s => s.DepartmentResponsibility)
+                    .WithMany(r => r.ShiftRequiredSpecialties)
+                    .HasForeignKey(s => s.DepartmentResponsibilityId)
+                    .OnDelete(DeleteBehavior.SetNull);
+            });
+
             modelBuilder.Entity<ShiftAssignment>()
                 .HasOne(a => a.DepartmentResponsibility)
                 .WithMany()
