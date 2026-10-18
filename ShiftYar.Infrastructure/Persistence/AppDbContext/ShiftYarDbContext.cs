@@ -195,6 +195,18 @@ namespace ShiftYar.Infrastructure.Persistence.AppDbContext
                 .HasForeignKey(a => a.DepartmentResponsibilityId)
                 .OnDelete(DeleteBehavior.SetNull);
 
+            modelBuilder.Entity<ShiftExchange>()
+                .HasOne(e => e.RequestingShiftAssignment)
+                .WithMany()
+                .HasForeignKey(e => e.RequestingShiftAssignmentId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<ShiftExchange>()
+                .HasOne(e => e.OfferingShiftAssignment)
+                .WithMany()
+                .HasForeignKey(e => e.OfferingShiftAssignmentId)
+                .OnDelete(DeleteBehavior.SetNull);
+
             modelBuilder.Entity<AlgorithmSettings>()
                 .HasOne(a => a.Department)
                 .WithMany()

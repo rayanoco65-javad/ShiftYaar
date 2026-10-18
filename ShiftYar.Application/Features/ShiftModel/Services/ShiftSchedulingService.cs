@@ -30,6 +30,7 @@ using Microsoft.AspNetCore.Http;
 using System.Security.Claims;
 using System.IO;
 using System.Text.Json;
+using ShiftYar.Domain.Entities.ShiftExchangeModel;
 
 namespace ShiftYar.Application.Features.ShiftModel.Services
 {
@@ -50,6 +51,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
         private readonly IEfRepository<ShiftRequiredSpecialty> _shiftRequiredSpecialtyRepository;
         private readonly IEfRepository<ShiftYar.Domain.Entities.ShiftRequestModel.ShiftRequest> _shiftRequestRepository; // مخزن درخواست‌های شیفت
         private readonly IEfRepository<ShiftAssignment> _shiftAssignmentRepository;
+        private readonly IEfRepository<ShiftExchange>? _shiftExchangeRepository;
         private readonly IEfRepository<ShiftDate> _shiftDateRepository;
         private readonly IAlgorithmSettingsService _algorithmSettingsService;
         private readonly ILogger<ShiftSchedulingService> _logger;
@@ -77,7 +79,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             ISchedulingJobStore schedulingJobStore,
             IHttpContextAccessor httpContextAccessor,
             ILogger<ShiftSchedulingService> logger,
-            IEfRepository<UserMonthlyRequiredHour>? monthlyRequiredHourRepository = null)
+            IEfRepository<UserMonthlyRequiredHour>? monthlyRequiredHourRepository = null,
+            IEfRepository<ShiftExchange>? shiftExchangeRepository = null)
         {
             _userRepository = userRepository;
             _monthlyNightQuotaRepository = monthlyNightQuotaRepository;
@@ -90,6 +93,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             _specialtyRepository = specialtyRepository;
             _shiftRequiredSpecialtyRepository = shiftRequiredSpecialtyRepository;
             _shiftAssignmentRepository = shiftAssignmentRepository;
+            _shiftExchangeRepository = shiftExchangeRepository;
             _shiftDateRepository = shiftDateRepository;
             _shiftRequestRepository = shiftRequestRepository;
             _algorithmSettingsService = algorithmSettingsService;
@@ -993,6 +997,49 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             if (assignments.Count == 0)
             {
                 return (0, total);
+            }
+
+            // اگر درخواست‌های جابجایی شیفت (ShiftExchanges) به انتساب‌های در حال حذف ارجاع داده باشند،
+            // کلیدهای خارجی آن‌ها را null می‌کنیم تا خطای FK رخ ندهد.
+            if (_shiftExchangeRepository != null)
+            {
+                var assignmentIds = assignments.Where(a => a.Id.HasValue).Select(a => a.Id!.Value).ToHashSet();
+                if (assignmentIds.Count > 0)
+                {
+                    var batches = assignmentIds.Chunk(500);
+                    var exchangeModified = false;
+                    foreach (var batch in batches)
+                    {
+                        var batchSet = batch.ToHashSet();
+                        var (exchanges, _) = await _shiftExchangeRepository.GetByFilterAsync(
+                            filter: new Application.Common.Filters.SimpleFilter<ShiftExchange>(e =>
+                                (e.RequestingShiftAssignmentId.HasValue && batchSet.Contains(e.RequestingShiftAssignmentId.Value)) ||
+                                (e.OfferingShiftAssignmentId.HasValue && batchSet.Contains(e.OfferingShiftAssignmentId.Value))));
+
+                        foreach (var ex in exchanges)
+                        {
+                            if (ex.RequestingShiftAssignmentId.HasValue && batchSet.Contains(ex.RequestingShiftAssignmentId.Value))
+                            {
+                                ex.RequestingShiftAssignmentId = null;
+                                exchangeModified = true;
+                            }
+                            if (ex.OfferingShiftAssignmentId.HasValue && batchSet.Contains(ex.OfferingShiftAssignmentId.Value))
+                            {
+                                ex.OfferingShiftAssignmentId = null;
+                                exchangeModified = true;
+                            }
+                            _shiftExchangeRepository.Update(ex);
+                        }
+                    }
+
+                    if (exchangeModified)
+                    {
+                        await _shiftExchangeRepository.SaveAsync();
+                        _logger.LogInformation(
+                            "Nullified ShiftAssignment foreign keys in ShiftExchange record(s) before deleting assignments for DepartmentId={DepartmentId}",
+                            departmentId);
+                    }
+                }
             }
 
             foreach (var assignment in assignments)

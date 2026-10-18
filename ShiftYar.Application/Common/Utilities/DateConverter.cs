@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Globalization;
 using System.Text;
 using ShiftYar.Domain.Entities.ProductivityModel;
@@ -35,8 +35,16 @@ namespace ShiftYar.Application.Common.Utilities
         /// <summary>
         /// تبدیل رشته تاریخ شمسی به تاریخ میلادی (نیمه‌شب، <see cref="DateTimeKind.Unspecified"/>).
         /// ورودی‌های مجاز مثلاً: 1405/06/03 ، ۱۴۰۵-۰۶-۰۳ ، 1405.6.3
+        /// اگر روز شمسی واردشده برای ماه‌های نیمه دوم سال (۳۰ روزه) یا اسفند (۲۹ روزه، یا ۳۰ در سال کبیسه)
+        /// بیشتر از تعداد روزهای آن ماه باشد (مثلاً ۳۱ برای آبان)، مقدار روز به آخرین روز معتبر همان ماه کلمپ می‌شود.
         /// </summary>
         public static DateTime ConvertToGregorianDate(string persianDate)
+            => ConvertToGregorianDate(persianDate, clampDayToMonthEnd: true);
+
+        /// <summary>
+        /// تبدیل رشته تاریخ شمسی به تاریخ میلادی با امکان تعیین کلمپ روز به انتهای ماه.
+        /// </summary>
+        public static DateTime ConvertToGregorianDate(string persianDate, bool clampDayToMonthEnd)
         {
             if (string.IsNullOrWhiteSpace(persianDate))
                 throw new ArgumentException("تاریخ وارد شده نامعتبر است.", nameof(persianDate));
@@ -53,7 +61,7 @@ namespace ShiftYar.Application.Common.Utilities
                 throw new FormatException($"اجزای تاریخ شمسی قابل عدد شدن نیستند (مقدار: '{persianDate}').");
             }
 
-            ValidatePersianDateParts(year, month, day, persianDate);
+            day = ValidateAndNormalizePersianDateParts(year, month, day, persianDate, clampDayToMonthEnd);
 
             try
             {
@@ -66,6 +74,29 @@ namespace ShiftYar.Application.Common.Utilities
                     nameof(persianDate),
                     $"تاریخ شمسی خارج از محدوده مجاز است (مقدار: '{persianDate}'). {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// تعداد روزهای یک ماه شمسی در سال مشخص (نیمه اول ۳۱، نیمه دوم ۳۰، اسفند ۲۹ یا ۳۰).
+        /// </summary>
+        public static int GetDaysInPersianMonth(int year, int month)
+        {
+            if (month < 1 || month > 12)
+                throw new ArgumentOutOfRangeException(nameof(month), "ماه باید بین ۱ تا ۱۲ باشد.");
+
+            return month <= 6 ? 31
+                : month <= 11 ? 30
+                : (PersianCalendar.IsLeapYear(year) ? 30 : 29);
+        }
+
+        /// <summary>
+        /// اگر رشته تاریخ شمسی دارای روزی بیشتر از روزهای آن ماه باشد (مثلاً 1405/08/31)،
+        /// آن را به آخرین روز معتبر ماه نرمال می‌کند (مثلاً 1405/08/30).
+        /// </summary>
+        public static string NormalizePersianDateStringToMonthEnd(string persianDate)
+        {
+            var g = ConvertToGregorianDate(persianDate, clampDayToMonthEnd: true);
+            return ConvertToPersianDate(g);
         }
 
         /// <summary>
@@ -129,7 +160,12 @@ namespace ShiftYar.Application.Common.Utilities
             return normalized.Trim('/');
         }
 
-        private static void ValidatePersianDateParts(int year, int month, int day, string original)
+        private static int ValidateAndNormalizePersianDateParts(
+            int year,
+            int month,
+            int day,
+            string original,
+            bool clampDayToMonthEnd)
         {
             if (year < 1200 || year > 1500)
                 throw new ArgumentOutOfRangeException(nameof(original), $"سال شمسی نامعتبر است ({year}). مقدار خام: '{original}'");
@@ -141,10 +177,28 @@ namespace ShiftYar.Application.Common.Utilities
                 : month <= 11 ? 30
                 : (PersianCalendar.IsLeapYear(year) ? 30 : 29);
 
-            if (day < 1 || day > maxDay)
+            if (day < 1)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(original),
+                    $"روز شمسی نامعتبر است ({day}) برای {year}/{month:00}. مقدار خام: '{original}'");
+            }
+
+            if (day > maxDay)
+            {
+                if (clampDayToMonthEnd && day <= 31)
+                {
+                    // در نیمه دوم سال ماه‌ها ۳۰ روزه هستند و اسفند ۲۹ روزه (یا ۳۰ در سال کبیسه).
+                    // اگر کلاینت یا کاربر روز ۳۱ را برای ماه ۳۰ روزه ارسال کند، به آخرین روز همان ماه کلمپ می‌شود.
+                    return maxDay;
+                }
+
                 throw new ArgumentOutOfRangeException(
                     nameof(original),
                     $"روز شمسی نامعتبر است ({day}) برای {year}/{month:00} (حداکثر {maxDay}). مقدار خام: '{original}'");
+            }
+
+            return day;
         }
     }
 }

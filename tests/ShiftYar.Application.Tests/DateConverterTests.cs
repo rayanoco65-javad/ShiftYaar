@@ -1,3 +1,4 @@
+#nullable enable
 using ShiftYar.Application.Common.Utilities;
 using System;
 using Xunit;
@@ -61,10 +62,28 @@ public class DateConverterTests
     [Theory]
     [InlineData("1405/13/01")]
     [InlineData("1405/06/32")]
-    [InlineData("1404/12/30")] // غیر کبیسه: اسفند حداکثر ۲۹ روز
+    [InlineData("1405/08/32")]
     public void ConvertToGregorianDate_InvalidCalendarDay_Throws(string input)
     {
         Assert.ThrowsAny<ArgumentOutOfRangeException>(() => DateConverter.ConvertToGregorianDate(input));
+    }
+
+    [Fact]
+    public void ConvertToGregorianDate_StrictValidation_ThrowsWhenDayExceedsMonthDays()
+    {
+        Assert.ThrowsAny<ArgumentOutOfRangeException>(() => DateConverter.ConvertToGregorianDate("1405/08/31", clampDayToMonthEnd: false));
+        Assert.ThrowsAny<ArgumentOutOfRangeException>(() => DateConverter.ConvertToGregorianDate("1404/12/30", clampDayToMonthEnd: false));
+    }
+
+    [Theory]
+    [InlineData("1405/08/31", 2026, 11, 21)] // آبان ۳۰ روزه است -> ۳۱ به ۳۰ کلمپ می‌شود
+    [InlineData("1405/07/31", 2026, 10, 22)] // مهر ۳۰ روزه است -> ۳۱ به ۳۰ کلمپ می‌شود
+    [InlineData("1404/12/30", 2026, 3, 20)]  // اسفند غیرکبیسه ۲۹ روزه -> ۳۰ به ۲۹ کلمپ می‌شود
+    [InlineData("1404/12/31", 2026, 3, 20)]  // اسفند غیرکبیسه ۲۹ روزه -> ۳۱ به ۲۹ کلمپ می‌شود
+    public void ConvertToGregorianDate_ClampsExcessDaysToMonthEnd(string persian, int y, int m, int d)
+    {
+        var result = DateConverter.ConvertToGregorianDate(persian, clampDayToMonthEnd: true);
+        Assert.Equal(new DateTime(y, m, d), result);
     }
 
     [Fact]
