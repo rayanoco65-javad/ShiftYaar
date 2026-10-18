@@ -14,6 +14,11 @@ public static class ShiftManagerMixGuard
 {
     public static void Enforce(ShiftSolution solution, ShiftConstraints constraints)
     {
+        if (!ShiftManagerRules.IsApplicable(constraints))
+        {
+            return;
+        }
+
         var scheduler = CreateScheduler(constraints);
         scheduler.EnforceShiftManagerMix(solution);
     }
@@ -23,6 +28,11 @@ public static class ShiftManagerMixGuard
     /// </summary>
     public static void StabilizeWithNightQuotas(ShiftSolution solution, ShiftConstraints constraints)
     {
+        if (!ShiftManagerRules.IsApplicable(constraints))
+        {
+            return;
+        }
+
         var scheduler = CreateScheduler(constraints);
         scheduler.StabilizeManagerMixAndNightQuotas(solution);
     }
@@ -30,12 +40,16 @@ public static class ShiftManagerMixGuard
     public static List<string> GetViolations(ShiftSolution solution, ShiftConstraints constraints)
     {
         var warnings = new List<string>();
+        if (!ShiftManagerRules.IsApplicable(constraints))
+        {
+            return warnings;
+        }
 
         for (var date = constraints.StartDate.Date; date <= constraints.EndDate.Date; date = date.AddDays(1))
         {
             foreach (var shiftReq in constraints.ShiftRequirements)
             {
-                var (requiredTotal, minLevel1) = ShiftManagerRules.GetRequirement(shiftReq);
+                var (requiredTotal, minLevel1) = ShiftManagerRules.GetRequirement(shiftReq, constraints);
                 if (requiredTotal <= 0)
                 {
                     continue;

@@ -24,7 +24,12 @@ public static class ManagerMixFeasibilityChecker
 
     public static string? TryGetInfeasibilityReason(ShiftConstraints constraints)
     {
-        if (!constraints.ShiftRequirements.Any(ShiftManagerRules.RequiresAnyManager))
+        if (!ShiftManagerRules.IsApplicable(constraints))
+        {
+            return null;
+        }
+
+        if (!constraints.ShiftRequirements.Any(s => ShiftManagerRules.RequiresAnyManager(s, constraints)))
         {
             return null;
         }

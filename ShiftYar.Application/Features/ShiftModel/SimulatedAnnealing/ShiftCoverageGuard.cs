@@ -555,7 +555,7 @@ public static class ShiftCoverageGuard
         DateTime date,
         SaShiftAssignment assignment)
     {
-        if (assignment.IsOnCall || !ShiftManagerRules.RequiresAnyManager(shiftReq))
+        if (!ShiftManagerRules.IsApplicable(constraints) || assignment.IsOnCall || !ShiftManagerRules.RequiresAnyManager(shiftReq, constraints))
         {
             return false;
         }

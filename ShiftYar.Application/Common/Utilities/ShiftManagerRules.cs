@@ -2,18 +2,32 @@ using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using static ShiftYar.Domain.Enums.DepartmentModel.DepartmentEnums;
 
 namespace ShiftYar.Application.Common.Utilities;
 
 /// <summary>
 /// قواعد مسئول شیفت سطح‌دار:
 /// Level null = مسئول نیست؛ 1 = سطح ۱؛ 2 = سطح ۲.
-/// الزام ترکیب فقط از تعریف شیفت (ShiftRequirement) خوانده می‌شود.
+/// الزام ترکیب فقط از تعریف شیفت (ShiftRequirement) خوانده می‌شود و تنها در حالت‌های
+/// LevelBased و Hybrid دپارتمان اعمال می‌گردد. در حالت‌های Simple و ResponsibilityBased
+/// (مانند اتاق عمل) سطح‌بندی مسئول شیفت غیرفعال است.
 /// </summary>
 public static class ShiftManagerRules
 {
     public const byte Level1 = 1;
     public const byte Level2 = 2;
+
+    /// <summary>
+    /// آیا قواعد مسئول شیفت سطح‌دار برای این حالت چیدمان یا قیود فعال است؟
+    /// فقط در حالت‌های LevelBased و Hybrid سطح‌بندی مسئول شیفت معتبر و فعال است.
+    /// در حالت‌های Simple و ResponsibilityBased (مانند اتاق عمل) سطح‌بندی مسئول شیفت اعمال نمی‌شود.
+    /// </summary>
+    public static bool IsApplicable(DepartmentStaffingMode staffingMode) =>
+        staffingMode is DepartmentStaffingMode.LevelBased or DepartmentStaffingMode.Hybrid;
+
+    public static bool IsApplicable(ShiftConstraints? constraints) =>
+        constraints != null && IsApplicable(constraints.StaffingMode);
 
     public static byte? NormalizeLevel(byte? level) =>
         level is Level1 or Level2 ? level : null;
@@ -43,9 +57,25 @@ public static class ShiftManagerRules
         return (required, minL1);
     }
 
+    public static (int RequiredTotal, int MinLevel1) GetRequirement(ShiftRequirement shift, ShiftConstraints? constraints)
+    {
+        if (constraints != null && !IsApplicable(constraints))
+        {
+            return (0, 0);
+        }
+
+        return GetRequirement(shift);
+    }
+
     public static bool RequiresAnyManager(ShiftRequirement shift)
     {
         var (required, _) = GetRequirement(shift);
+        return required > 0;
+    }
+
+    public static bool RequiresAnyManager(ShiftRequirement shift, ShiftConstraints? constraints)
+    {
+        var (required, _) = GetRequirement(shift, constraints);
         return required > 0;
     }
 
@@ -131,13 +161,18 @@ public static class ShiftManagerRules
         ShiftSolution solution,
         SaShiftAssignment assignment)
     {
+        if (!IsApplicable(constraints))
+        {
+            return false;
+        }
+
         var shiftReq = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftId == assignment.ShiftId);
         if (shiftReq == null)
         {
             return false;
         }
 
-        var (requiredTotal, minLevel1) = GetRequirement(shiftReq);
+        var (requiredTotal, minLevel1) = GetRequirement(shiftReq, constraints);
         if (requiredTotal <= 0)
         {
             return false;

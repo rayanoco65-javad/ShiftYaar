@@ -32,6 +32,15 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             _random = parameters.RandomSeed.HasValue ? new Random(parameters.RandomSeed.Value) : new Random();
             _statistics = new AlgorithmStatistics();
 
+            if (!ShiftManagerRules.IsApplicable(constraints))
+            {
+                foreach (var shiftReq in constraints.ShiftRequirements)
+                {
+                    shiftReq.ManagerRequiredCount = 0;
+                    shiftReq.ManagerMinLevel1Count = 0;
+                }
+            }
+
             var distinctShiftSpecialties = constraints.ShiftRequirements
                 .SelectMany(s => s.SpecialtyRequirements)
                 .Where(sr => sr.SpecialtyId > 0)
@@ -443,6 +452,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private void PerformManagerMixRepairMove(ShiftSolution solution)
         {
+            if (!ShiftManagerRules.IsApplicable(_constraints)) return;
+
             var dates = GetDateRange();
             if (dates.Count == 0) return;
             var date = dates[_random.Next(dates.Count)];
@@ -462,6 +473,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private double CalculateManagerMixPenalty(ShiftSolution solution)
         {
+            if (!ShiftManagerRules.IsApplicable(_constraints)) return 0;
+
             double penalty = 0;
             foreach (var date in GetDateRange())
             {
@@ -2133,6 +2146,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// </summary>
         public void EnforceShiftManagerMix(ShiftSolution solution)
         {
+            if (!ShiftManagerRules.IsApplicable(_constraints)) return;
+
             PlaceManagerSkeleton(solution);
             RunShiftManagerRepairPasses(solution);
         }
@@ -2142,6 +2157,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// </summary>
         public void BuildReservedManagerSkeleton(ShiftSolution solution)
         {
+            if (!ShiftManagerRules.IsApplicable(_constraints)) return;
+
             solution.ClearLockedSkeletonAssignments();
             PlaceManagerLayer(solution, strictPhase: true, lockAssignments: true);
         }
@@ -2161,6 +2178,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
         private void PlaceManagerLayer(ShiftSolution solution, bool strictPhase, bool lockAssignments)
         {
+            if (!ShiftManagerRules.IsApplicable(_constraints)) return;
+
             var dates = GetDateRange().ToList();
             var managerShifts = _constraints.ShiftRequirements
                 .Where(ShiftManagerRules.RequiresAnyManager)
@@ -2544,6 +2563,8 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
         /// </summary>
         public void PerformFinalManagerMixRepairSweep(ShiftSolution solution, bool throwIfUnsatisfied = true)
         {
+            if (!ShiftManagerRules.IsApplicable(_constraints)) return;
+
             var dateRange = GetDateRange();
             for (var pass = 0; pass < 2; pass++)
             {

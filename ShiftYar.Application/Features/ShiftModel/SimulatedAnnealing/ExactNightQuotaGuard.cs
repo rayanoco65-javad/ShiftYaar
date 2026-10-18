@@ -3495,7 +3495,12 @@ public static class ExactNightQuotaGuard
         ShiftRequirement shiftReq,
         DateTime date)
     {
-        var (requiredTotal, minLevel1) = ShiftManagerRules.GetRequirement(shiftReq);
+        if (!ShiftManagerRules.IsApplicable(constraints))
+        {
+            return true;
+        }
+
+        var (requiredTotal, minLevel1) = ShiftManagerRules.GetRequirement(shiftReq, constraints);
         if (requiredTotal <= 0)
         {
             return true;

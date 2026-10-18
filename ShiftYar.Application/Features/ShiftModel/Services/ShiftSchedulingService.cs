@@ -2443,6 +2443,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     monthlyComboShiftQuotasByUserId.TryGetValue(user.Id ?? 0, out var comboShiftQuota);
 
                     var hasValidSpec = user.SpecialtyId.HasValue && user.SpecialtyId.Value > 0;
+                    var isLevelBased = ShiftManagerRules.IsApplicable(constraints.StaffingMode);
                     var userConstraint = new UserConstraint
                     {
                         UserId = user.Id ?? 0,
@@ -2450,10 +2451,12 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         Gender = user.Gender ?? UserGender.Male,
                         SpecialtyId = hasValidSpec ? user.SpecialtyId.Value : defaultDeptSpecialtyId,
                         SpecialtyName = hasValidSpec ? (user.Specialty?.SpecialtyName ?? "") : (defaultDeptSpecialty?.SpecialtyName ?? ""),
-                        CanBeShiftManager = (user.CanBeShiftManager ?? false)
-                            || ShiftManagerRules.NormalizeLevel(user.ShiftManagerLevel).HasValue,
-                        ShiftManagerLevel = ShiftManagerRules.NormalizeLevel(user.ShiftManagerLevel)
-                            ?? ((user.CanBeShiftManager == true) ? ShiftManagerRules.Level1 : null),
+                        CanBeShiftManager = isLevelBased && ((user.CanBeShiftManager ?? false)
+                            || ShiftManagerRules.NormalizeLevel(user.ShiftManagerLevel).HasValue),
+                        ShiftManagerLevel = isLevelBased
+                            ? (ShiftManagerRules.NormalizeLevel(user.ShiftManagerLevel)
+                               ?? ((user.CanBeShiftManager == true) ? ShiftManagerRules.Level1 : null))
+                            : null,
                         IsActive = user.IsActive ?? true,
                         ShiftType = user.ShiftType ?? ShiftTypes.FixedShift,
                         ShiftSubType = user.ShiftSubType ?? ShiftSubTypes.FixedMorning,
@@ -2636,6 +2639,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                             shift.Id, resolvedLabel, shift.StartTime);
                     }
 
+                    var isLevelBased = ShiftManagerRules.IsApplicable(constraints.StaffingMode);
                     var shiftRequirement = new ShiftRequirement
                     {
                         ShiftId = shift.Id ?? 0,
@@ -2647,11 +2651,13 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         HolidayNonProductivityHours = shift.HolidayNonProductivityHours,
                         WeekdayProductivityPlanHours = shift.WeekdayProductivityPlanHours,
                         HolidayProductivityPlanHours = shift.HolidayProductivityPlanHours,
-                        ManagerRequiredCount = Math.Max(0, shift.ManagerRequiredCount),
-                        ManagerMinLevel1Count = Math.Clamp(
-                            Math.Max(0, shift.ManagerMinLevel1Count),
-                            0,
-                            Math.Max(0, shift.ManagerRequiredCount))
+                        ManagerRequiredCount = isLevelBased ? Math.Max(0, shift.ManagerRequiredCount) : 0,
+                        ManagerMinLevel1Count = isLevelBased
+                            ? Math.Clamp(
+                                Math.Max(0, shift.ManagerMinLevel1Count),
+                                0,
+                                Math.Max(0, shift.ManagerRequiredCount))
+                            : 0
                     };
                     var durationHours = CalculateShiftDurationHours(shiftRequirement.StartTime, shiftRequirement.EndTime);
                     shiftRequirement.DurationHours = durationHours;

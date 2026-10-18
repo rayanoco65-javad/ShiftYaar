@@ -324,4 +324,85 @@ public class ShiftResponsibilityRulesTests
         var violations = ShiftResponsibilityRules.GetViolations(solution, constraints);
         Assert.Empty(violations);
     }
+
+    [Fact]
+    public void ResponsibilityBased_WithLegacyShiftManagerRequirement_DoesNotEnforceShiftManagerMix()
+    {
+        // شبیه‌سازی وضعیت دپارتمان ۳ (اتاق عمل قلب باز) که چیدمان آن ResponsibilityBased است
+        // اما در دیتابیس شیفت شب دارای ManagerRequiredCount = 1 باقی مانده است.
+        var start = new DateTime(2026, 10, 22); // 1405/08/01
+        var end = start.AddDays(2);
+        var constraints = new ShiftConstraints
+        {
+            DepartmentId = 3,
+            StaffingMode = DepartmentStaffingMode.ResponsibilityBased,
+            StartDate = start,
+            EndDate = end,
+            DefaultDepartmentResponsibilityId = 103, // سیرکولر
+            ResponsibilityTitles = new Dictionary<int, string>
+            {
+                { 101, "اسکراب اول" },
+                { 102, "اسکراب دوم" },
+                { 103, "سیرکولر" }
+            },
+            ShiftRequirements = new List<ShiftRequirement>
+            {
+                new()
+                {
+                    ShiftId = 1,
+                    ShiftLabel = ShiftLabel.Night,
+                    DurationHours = 12,
+                    ManagerRequiredCount = 1, // مانده از قبل در دیتابیس
+                    ManagerMinLevel1Count = 0,
+                    ResponsibilityRequirements = new List<ResponsibilityRequirement>
+                    {
+                        new() { DepartmentResponsibilityId = 101, ResponsibilityTitle = "اسکراب اول", Priority = 10, RequiredTotalCount = 1 },
+                        new() { DepartmentResponsibilityId = 103, ResponsibilityTitle = "سیرکولر", Priority = 1, IsDefault = true, RequiredTotalCount = 1 }
+                    },
+                    SpecialtyRequirements = new List<SpecialtyRequirement>
+                    {
+                        new() { SpecialtyId = 1, RequiredTotalCount = 2 }
+                    }
+                }
+            },
+            UserConstraints = new List<UserConstraint>
+            {
+                // هیچ‌کدام مسئول شیفت سطح ۱ یا ۲ نیستند
+                new() { UserId = 1, UserName = "اسکراب ۱ کار", SpecialtyId = 1, IsActive = true, ShiftType = ShiftTypes.RotatingShift, ResponsibilityIds = new HashSet<int> { 101 }, CanBeShiftManager = false, ShiftManagerLevel = null },
+                new() { UserId = 2, UserName = "سیرکولر کار", SpecialtyId = 1, IsActive = true, ShiftType = ShiftTypes.RotatingShift, ResponsibilityIds = new HashSet<int>(), CanBeShiftManager = false, ShiftManagerLevel = null }
+            },
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 }
+        };
+
+        // ۱. قاعده کلی: برای حالت ResponsibilityBased سطح‌بندی مسئول شیفت فعال نیست
+        Assert.False(ShiftManagerRules.IsApplicable(constraints));
+        Assert.False(ShiftManagerRules.IsApplicable(constraints.StaffingMode));
+
+        // ۲. اعتبارسنجی امکان‌پذیری اولیه
+        var infeasibility = ManagerMixFeasibilityChecker.TryGetInfeasibilityReason(constraints);
+        Assert.Null(infeasibility);
+
+        // ۳. تست حل‌کننده SA: نباید خطای ترکیب مسئول شیفت پرتاب کند
+        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            InitialTemperature = 10,
+            FinalTemperature = 1,
+            CoolingRate = 0.9,
+            MaxIterations = 20
+        });
+
+        var solution = scheduler.Optimize();
+        Assert.NotNull(solution);
+
+        // ۴. گاردهای ترکیب مسئول نباید خطا گزارش کنند یا پرتاب کنند
+        var managerViolations = ShiftManagerMixGuard.GetViolations(solution, constraints);
+        Assert.Empty(managerViolations);
+
+        ShiftManagerMixGuard.EnsureOrThrow(solution, constraints);
+    }
 }
