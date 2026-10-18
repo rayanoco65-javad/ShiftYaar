@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Linq;
 using static ShiftYar.Domain.Enums.DepartmentModel.DepartmentEnums;
 using static ShiftYar.Domain.Enums.UserModel.UserEnums;
+using ShiftYar.Domain.Enums.ShiftModel;
+using static ShiftYar.Domain.Enums.ShiftModel.ShiftEnums;
 
 namespace ShiftYar.Application.Common.Utilities
 {
@@ -27,6 +29,20 @@ namespace ShiftYar.Application.Common.Utilities
         /// تخصیص بهینه و هوشمند مسئولیت‌ها به انتساب‌های یک اسلات شیفت مشخص
         /// با اولویت نقش‌های محدودتر/کمیاب‌تر و رعایت دقیق جنسیت و سهمیه کل.
         /// </summary>
+        private class DemandSlot
+        {
+            public int RespId { get; set; }
+            public bool IsDefault { get; set; }
+            public UserGender? RequiredGender { get; set; }
+            public int Priority { get; set; }
+            public int OriginalOrder { get; set; }
+        }
+
+        /// <summary>
+        /// تخصیص بهینه و هوشمند مسئولیت‌ها به انتساب‌های یک اسلات شیفت مشخص
+        /// با استفاده از الگوریتم تطابق بیشینه دو‌بخشی (Bipartite Matching / Augmenting Path)
+        /// با اولویت نقش‌های غیرپیش‌فرض/تخصصی‌تر و اولویت نفرات با انعطاف‌پذیری کمتر (MRV).
+        /// </summary>
         public static void AssignResponsibilitiesToSlot(
             List<SaShiftAssignment> slotAssignments,
             ShiftRequirement shiftReq,
@@ -40,89 +56,116 @@ namespace ShiftYar.Application.Common.Utilities
                 return;
             }
 
-            var activeReqs = (shiftReq.ResponsibilityRequirements ?? new List<ResponsibilityRequirement>())
-                .Where(r => r.ForDay(isHoliday).RequiredTotalCount > 0)
-                .OrderByDescending(r => r.Priority)
-                .ThenBy(r => r.IsDefault ? 1 : 0) // نقش‌های غیراستاندارد/تخصصی‌تر زودتر تخصیص می‌یابند
-                .ToList();
+            var defaultRespId = (shiftReq.ResponsibilityRequirements ?? new List<ResponsibilityRequirement>())
+                .FirstOrDefault(r => r.IsDefault)?.DepartmentResponsibilityId ?? defaultDepartmentResponsibilityId;
 
             var usersMap = allUsers.GroupBy(u => u.UserId).ToDictionary(g => g.Key, g => g.First());
-            var assignedUserIds = new HashSet<int>();
 
-            // ۱. تخصیص نقش‌های الزامی تعریف‌شده
-            foreach (var req in activeReqs)
+            // ۱. ساخت اسلات‌های مورد نیاز نقش‌ها
+            var demands = new List<DemandSlot>();
+            var order = 0;
+            foreach (var req in (shiftReq.ResponsibilityRequirements ?? new List<ResponsibilityRequirement>()))
             {
                 var dayCounts = req.ForDay(isHoliday);
                 var requiredMale = dayCounts.RequiredMaleCount;
                 var requiredFemale = dayCounts.RequiredFemaleCount;
                 var requiredTotal = dayCounts.RequiredTotalCount;
-                var currentCount = 0;
 
-                // الف: سهمیه مرد
-                if (requiredMale > 0)
+                for (var i = 0; i < requiredMale; i++)
                 {
-                    var maleCandidates = slotAssignments
-                        .Where(a => !assignedUserIds.Contains(a.UserId) && !a.IsOnCall)
-                        .Where(a => usersMap.TryGetValue(a.UserId, out var u) && u.Gender == UserGender.Male && u.CanPerformResponsibility(req.DepartmentResponsibilityId, req.IsDefault))
-                        .Take(requiredMale)
-                        .ToList();
-
-                    foreach (var asg in maleCandidates)
+                    demands.Add(new DemandSlot
                     {
-                        asg.ResponsibilityId = req.DepartmentResponsibilityId;
-                        assignedUserIds.Add(asg.UserId);
-                        currentCount++;
-                    }
+                        RespId = req.DepartmentResponsibilityId,
+                        IsDefault = req.IsDefault,
+                        RequiredGender = UserGender.Male,
+                        Priority = req.Priority,
+                        OriginalOrder = order++
+                    });
                 }
-
-                // ب: سهمیه زن
-                if (requiredFemale > 0)
+                for (var i = 0; i < requiredFemale; i++)
                 {
-                    var femaleCandidates = slotAssignments
-                        .Where(a => !assignedUserIds.Contains(a.UserId) && !a.IsOnCall)
-                        .Where(a => usersMap.TryGetValue(a.UserId, out var u) && u.Gender == UserGender.Female && u.CanPerformResponsibility(req.DepartmentResponsibilityId, req.IsDefault))
-                        .Take(requiredFemale)
-                        .ToList();
-
-                    foreach (var asg in femaleCandidates)
+                    demands.Add(new DemandSlot
                     {
-                        asg.ResponsibilityId = req.DepartmentResponsibilityId;
-                        assignedUserIds.Add(asg.UserId);
-                        currentCount++;
-                    }
+                        RespId = req.DepartmentResponsibilityId,
+                        IsDefault = req.IsDefault,
+                        RequiredGender = UserGender.Female,
+                        Priority = req.Priority,
+                        OriginalOrder = order++
+                    });
                 }
-
-                // ج: تکمیل باقیمانده سهمیه کل (شناور بدون محدودیت جنسیت)
-                var remainingTotalNeeded = requiredTotal - currentCount;
-                if (remainingTotalNeeded > 0)
+                var remaining = requiredTotal - requiredMale - requiredFemale;
+                for (var i = 0; i < remaining; i++)
                 {
-                    var neutralCandidates = slotAssignments
-                        .Where(a => !assignedUserIds.Contains(a.UserId) && !a.IsOnCall)
-                        .Where(a => usersMap.TryGetValue(a.UserId, out var u) && u.CanPerformResponsibility(req.DepartmentResponsibilityId, req.IsDefault))
-                        .Take(remainingTotalNeeded)
-                        .ToList();
-
-                    foreach (var asg in neutralCandidates)
+                    demands.Add(new DemandSlot
                     {
-                        asg.ResponsibilityId = req.DepartmentResponsibilityId;
-                        assignedUserIds.Add(asg.UserId);
-                    }
+                        RespId = req.DepartmentResponsibilityId,
+                        IsDefault = req.IsDefault,
+                        RequiredGender = null,
+                        Priority = req.Priority,
+                        OriginalOrder = order++
+                    });
                 }
             }
 
-            // ۲. تخصیص نقش پیش‌فرض (سیرکولر) به سایر نفراتی که در شیفت هستند اما نقش خاصی نگرفته‌اند
-            var defaultRespId = (shiftReq.ResponsibilityRequirements ?? new List<ResponsibilityRequirement>())
-                .FirstOrDefault(r => r.IsDefault)?.DepartmentResponsibilityId ?? defaultDepartmentResponsibilityId;
+            // ترتیب اسلات‌های تقاضا: ابتدا نقش‌های غیراستاندارد/تخصصی‌تر، سپس اولویت بالاتر
+            var orderedDemands = demands
+                .OrderBy(d => d.IsDefault ? 1 : 0)
+                .ThenByDescending(d => d.Priority)
+                .ThenBy(d => d.OriginalOrder)
+                .ToList();
 
-            if (defaultRespId.HasValue)
+            var assignees = slotAssignments.Where(a => !a.IsOnCall).ToList();
+
+            bool CanAssign(DemandSlot d, SaShiftAssignment a)
             {
-                var remainingAssignees = slotAssignments
-                    .Where(a => !assignedUserIds.Contains(a.UserId) && !a.IsOnCall)
-                    .ToList();
+                if (!usersMap.TryGetValue(a.UserId, out var u)) return false;
+                if (d.RequiredGender.HasValue && u.Gender != d.RequiredGender.Value) return false;
+                return u.CanPerformResponsibility(d.RespId, d.IsDefault);
+            }
 
-                foreach (var asg in remainingAssignees)
+            // ۲. تطابق دوبخشی بیشینه با مسیر افزاینده (Augmenting Paths)
+            var matchDemandToAssignee = new Dictionary<int, int>();
+            var matchAssigneeToDemand = new Dictionary<int, int>();
+
+            bool TryDfs(int demandIdx, HashSet<int> visitedAssignees)
+            {
+                var demand = orderedDemands[demandIdx];
+                var eligibleAssignees = Enumerable.Range(0, assignees.Count)
+                    .Where(aIdx => CanAssign(demand, assignees[aIdx]))
+                    .OrderBy(aIdx => usersMap.TryGetValue(assignees[aIdx].UserId, out var u) ? u.ResponsibilityIds.Count : 99);
+
+                foreach (var aIdx in eligibleAssignees)
                 {
-                    asg.ResponsibilityId = defaultRespId.Value;
+                    if (visitedAssignees.Contains(aIdx)) continue;
+                    visitedAssignees.Add(aIdx);
+
+                    if (!matchAssigneeToDemand.TryGetValue(aIdx, out var prevDemandIdx) || TryDfs(prevDemandIdx, visitedAssignees))
+                    {
+                        matchDemandToAssignee[demandIdx] = aIdx;
+                        matchAssigneeToDemand[aIdx] = demandIdx;
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            for (var dIdx = 0; dIdx < orderedDemands.Count; dIdx++)
+            {
+                var visited = new HashSet<int>();
+                TryDfs(dIdx, visited);
+            }
+
+            // ۳. اعمال نتایج روی انتساب‌های اسلات
+            for (var aIdx = 0; aIdx < assignees.Count; aIdx++)
+            {
+                if (matchAssigneeToDemand.TryGetValue(aIdx, out var matchedDemandIdx))
+                {
+                    assignees[aIdx].ResponsibilityId = orderedDemands[matchedDemandIdx].RespId;
+                }
+                else if (defaultRespId.HasValue)
+                {
+                    assignees[aIdx].ResponsibilityId = defaultRespId.Value;
                 }
             }
         }
@@ -204,15 +247,15 @@ namespace ShiftYar.Application.Common.Utilities
 
                         if (dayCounts.RequiredMaleCount > 0 && males < dayCounts.RequiredMaleCount)
                         {
-                            penalty += (dayCounts.RequiredMaleCount - males) * 150.0;
+                            penalty += (dayCounts.RequiredMaleCount - males) * 4000.0;
                         }
                         if (dayCounts.RequiredFemaleCount > 0 && females < dayCounts.RequiredFemaleCount)
                         {
-                            penalty += (dayCounts.RequiredFemaleCount - females) * 150.0;
+                            penalty += (dayCounts.RequiredFemaleCount - females) * 4000.0;
                         }
                         if (total < dayCounts.RequiredTotalCount)
                         {
-                            penalty += (dayCounts.RequiredTotalCount - total) * 200.0;
+                            penalty += (dayCounts.RequiredTotalCount - total) * 5000.0;
                         }
                     }
                 }
@@ -223,17 +266,21 @@ namespace ShiftYar.Application.Common.Utilities
 
         /// <summary>
         /// استخراج خطاهای عدم پوشش مسئولیت‌های مورد نیاز در صورت وجود
+        /// قبل از بررسی، انتساب دقیق نقش‌ها بر روی تمام اسلات‌ها انجام می‌شود تا از شمارش دقیق اطمینان حاصل گردد.
         /// </summary>
         public static List<string> GetViolations(ShiftSolution solution, ShiftConstraints constraints)
         {
             var violations = new List<string>();
             if (!IsApplicable(constraints)) return violations;
 
+            AssignResponsibilitiesToAllSlots(solution, constraints);
+
             var usersMap = constraints.UserConstraints.GroupBy(u => u.UserId).ToDictionary(g => g.Key, g => g.First());
 
             for (var date = constraints.StartDate.Date; date <= constraints.EndDate.Date; date = date.AddDays(1))
             {
                 var isHoliday = constraints.IsHoliday(date);
+                var persianDate = DateConverter.ConvertToPersianDate(date);
                 foreach (var shiftReq in constraints.ShiftRequirements)
                 {
                     if (shiftReq.ResponsibilityRequirements == null || shiftReq.ResponsibilityRequirements.Count == 0) continue;
@@ -263,7 +310,7 @@ namespace ShiftYar.Application.Common.Utilities
                                 ? req.ResponsibilityTitle
                                 : constraints.ResponsibilityTitles.GetValueOrDefault(req.DepartmentResponsibilityId, "مسئولیت");
 
-                            violations.Add($"کمبود نیرو برای مسئولیت '{title}' در شیفت {shiftReq.ShiftLabel} تاریخ {date:yyyy-MM-dd} " +
+                            violations.Add($"کمبود نیرو برای مسئولیت '{title}' در شیفت {shiftReq.ShiftLabel} تاریخ {persianDate} ({date:yyyy-MM-dd}) " +
                                            $"(نیاز: کل={dayCounts.RequiredTotalCount}، مرد={dayCounts.RequiredMaleCount}، زن={dayCounts.RequiredFemaleCount} | موجود: کل={total}، مرد={males}، زن={females})");
                         }
                     }
@@ -271,6 +318,146 @@ namespace ShiftYar.Application.Common.Utilities
             }
 
             return violations;
+        }
+
+        /// <summary>
+        /// فاز جبران و ترمیم کسری مسئولیت‌ها:
+        /// شناسایی اسلات‌هایی که کمبود نقش دارند و جایگزینی پرسنل مازاد/پیش‌فرض با پرسنل واجد شرایط.
+        /// </summary>
+        public static void RepairResponsibilityDeficits(ShiftSolution solution, ShiftConstraints constraints)
+        {
+            if (solution == null || constraints == null || !IsApplicable(constraints))
+                return;
+
+            var usersMap = constraints.UserConstraints.GroupBy(u => u.UserId).ToDictionary(g => g.Key, g => g.First());
+
+            for (var pass = 0; pass < 5; pass++)
+            {
+                var deficitsFound = false;
+
+                for (var date = constraints.StartDate.Date; date <= constraints.EndDate.Date; date = date.AddDays(1))
+                {
+                    var isHoliday = constraints.IsHoliday(date);
+
+                    foreach (var shiftReq in constraints.ShiftRequirements)
+                    {
+                        if (shiftReq.ResponsibilityRequirements == null || shiftReq.ResponsibilityRequirements.Count == 0)
+                            continue;
+
+                        var slotAssignments = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                            .Where(a => !a.IsOnCall)
+                            .ToList();
+
+                        if (slotAssignments.Count == 0) continue;
+
+                        AssignResponsibilitiesToSlot(
+                            slotAssignments,
+                            shiftReq,
+                            date,
+                            isHoliday,
+                            constraints.UserConstraints,
+                            constraints.DefaultDepartmentResponsibilityId);
+
+                        foreach (var req in shiftReq.ResponsibilityRequirements)
+                        {
+                            var dayCounts = req.ForDay(isHoliday);
+                            if (dayCounts.RequiredTotalCount <= 0) continue;
+
+                            var assigneesWithResp = slotAssignments
+                                .Where(a => a.ResponsibilityId == req.DepartmentResponsibilityId)
+                                .ToList();
+
+                            var males = assigneesWithResp.Count(a => usersMap.TryGetValue(a.UserId, out var u) && u.Gender == UserGender.Male);
+                            var females = assigneesWithResp.Count(a => usersMap.TryGetValue(a.UserId, out var u) && u.Gender == UserGender.Female);
+                            var total = assigneesWithResp.Count;
+
+                            var missingTotal = dayCounts.RequiredTotalCount - total;
+                            var missingMale = Math.Max(0, dayCounts.RequiredMaleCount - males);
+                            var missingFemale = Math.Max(0, dayCounts.RequiredFemaleCount - females);
+
+                            if (missingTotal <= 0 && missingMale <= 0 && missingFemale <= 0)
+                                continue;
+
+                            deficitsFound = true;
+
+                            // پرسنل واجد شرایطی که در این اسلات نیستند
+                            var candidates = constraints.UserConstraints
+                                .Where(u => !slotAssignments.Any(a => a.UserId == u.UserId))
+                                .Where(u => u.CanPerformResponsibility(req.DepartmentResponsibilityId, req.IsDefault))
+                                .Where(u => missingMale == 0 || u.Gender == UserGender.Male)
+                                .Where(u => missingFemale == 0 || u.Gender == UserGender.Female)
+                                .OrderBy(u => u.ResponsibilityIds.Count)
+                                .ToList();
+
+                            // پرسنل قابل تعویض در این اسلات (دارای نقش پیش‌فرض یا دارای مازاد)
+                            var defaultId = constraints.DefaultDepartmentResponsibilityId ?? (shiftReq.ResponsibilityRequirements.FirstOrDefault(r => r.IsDefault)?.DepartmentResponsibilityId ?? 0);
+                            var replaceable = slotAssignments
+                                .Where(a => a.ResponsibilityId == defaultId || slotAssignments.Count(x => x.ResponsibilityId == a.ResponsibilityId) > 1)
+                                .OrderByDescending(a => a.ResponsibilityId == defaultId ? 1 : 0)
+                                .ToList();
+
+                            var repaired = false;
+                            foreach (var cand in candidates)
+                            {
+                                var candDaily = solution.Assignments.Values
+                                    .Where(a => a.UserId == cand.UserId && a.Date.Date == date && !a.IsOnCall)
+                                    .ToList();
+
+                                var maxDaily = constraints.HardRules.EnforceMaxShiftsPerDay
+                                    ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
+                                    : 2;
+
+                                if (candDaily.Count >= maxDaily)
+                                    continue;
+
+                                var prevNight = solution.Assignments.Values.Any(a => a.UserId == cand.UserId && a.Date.Date == date.AddDays(-1) && a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
+                                if (prevNight && shiftReq.ShiftLabel == ShiftLabel.Morning)
+                                    continue;
+
+                                var nextMorning = solution.Assignments.Values.Any(a => a.UserId == cand.UserId && a.Date.Date == date.AddDays(1) && a.ShiftLabel == ShiftLabel.Morning && !a.IsOnCall);
+                                if (nextMorning && shiftReq.ShiftLabel == ShiftLabel.Night)
+                                    continue;
+
+                                foreach (var rep in replaceable)
+                                {
+                                    solution.RemoveAssignment(rep.UserId, shiftReq.ShiftId, date);
+                                    solution.AddAssignment(cand.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel);
+
+                                    var newSlotAssignees = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                                        .Where(a => !a.IsOnCall)
+                                        .ToList();
+
+                                    AssignResponsibilitiesToSlot(
+                                        newSlotAssignees,
+                                        shiftReq,
+                                        date,
+                                        isHoliday,
+                                        constraints.UserConstraints,
+                                        constraints.DefaultDepartmentResponsibilityId);
+
+                                    var newCount = newSlotAssignees.Count(a => a.ResponsibilityId == req.DepartmentResponsibilityId);
+                                    if (newCount > total)
+                                    {
+                                        repaired = true;
+                                        break;
+                                    }
+                                    else
+                                    {
+                                        solution.RemoveAssignment(cand.UserId, shiftReq.ShiftId, date);
+                                        solution.AddAssignment(rep.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel);
+                                    }
+                                }
+
+                                if (repaired) break;
+                            }
+                        }
+                    }
+                }
+
+                if (!deficitsFound) break;
+            }
+
+            AssignResponsibilitiesToAllSlots(solution, constraints);
         }
     }
 }

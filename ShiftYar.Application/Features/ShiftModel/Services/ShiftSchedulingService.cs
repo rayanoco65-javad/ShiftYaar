@@ -172,13 +172,13 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     result.FinalScore, result.AlgorithmUsed);
 
                 var underCapacityViolations = result.Violations?
-                    .Where(v => v.Contains("ظرفیت تکمیل نشده") || v.Contains("Under capacity"))
+                    .Where(IsUnderCapacityOrDeficitViolation)
                     .ToList() ?? new List<string>();
 
                 if (underCapacityViolations.Count > 0 || result.AlgorithmStatus == "Failed")
                 {
                     var errorMsg = underCapacityViolations.Count > 0
-                        ? "امکان تکمیل شیفت‌بندی وجود ندارد؛ ظرفیت شیفت‌ها در روزهای زیر تکمیل نشده است:\n" + string.Join("\n", underCapacityViolations)
+                        ? "امکان تکمیل شیفت‌بندی وجود ندارد؛ ظرفیت شیفت‌ها یا مسئولیت‌های مورد نیاز در روزهای زیر تکمیل نشده است:\n" + string.Join("\n", underCapacityViolations)
                         : (result.Violations?.FirstOrDefault() ?? "الگوریتم بهینه‌سازی موفق به تکمیل کلیهٔ ظرفیت‌های درخواستی نشد.");
                     _logger.LogWarning("Optimization finished with incomplete shift coverage for DepartmentId={DepartmentId}: {Error}", request.DepartmentId, errorMsg);
                     return ApiResponse<ShiftSchedulingResultDto>.Fail(errorMsg, result);
@@ -241,13 +241,13 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     result.FinalScore, result.AlgorithmUsed);
 
                 var underCapacityViolations = result.Violations?
-                    .Where(v => v.Contains("ظرفیت تکمیل نشده") || v.Contains("Under capacity"))
+                    .Where(IsUnderCapacityOrDeficitViolation)
                     .ToList() ?? new List<string>();
 
                 if (underCapacityViolations.Count > 0 || result.AlgorithmStatus == "Failed")
                 {
                     var errorMsg = underCapacityViolations.Count > 0
-                        ? "امکان تکمیل شیفت‌بندی وجود ندارد؛ ظرفیت شیفت‌ها در روزهای زیر تکمیل نشده است:\n" + string.Join("\n", underCapacityViolations)
+                        ? "امکان تکمیل شیفت‌بندی وجود ندارد؛ ظرفیت شیفت‌ها یا مسئولیت‌های مورد نیاز در روزهای زیر تکمیل نشده است:\n" + string.Join("\n", underCapacityViolations)
                         : (result.Violations?.FirstOrDefault() ?? "الگوریتم بهینه‌سازی موفق به تکمیل کلیهٔ ظرفیت‌های درخواستی نشد.");
                     _logger.LogWarning("Optimization finished with incomplete shift coverage for DepartmentId={DepartmentId}: {Error}", request.DepartmentId, errorMsg);
                     return ApiResponse<ShiftSchedulingResultDto>.Fail(errorMsg, result);
@@ -263,7 +263,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error occurred during shift scheduling optimization");
-                return ApiResponse<ShiftSchedulingResultDto>.Fail($"Error: {ex.Message}");
+                return ApiResponse<ShiftSchedulingResultDto>.Fail(ex.Message);
             }
         }
 
@@ -320,13 +320,16 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     return ApiResponse<object>.Fail(optimizationResult.Message ?? "Optimization failed");
                 }
 
-                if (optimizationResult.Data?.Violations != null &&
-                    optimizationResult.Data.Violations.Any(v => v.Contains("ظرفیت تکمیل نشده") || v.Contains("Under capacity")))
+                var underCapacityOrDeficitViolations = optimizationResult.Data?.Violations?
+                    .Where(IsUnderCapacityOrDeficitViolation)
+                    .ToList() ?? new List<string>();
+
+                if (optimizationResult.Data?.AlgorithmStatus == "Failed" || underCapacityOrDeficitViolations.Count > 0)
                 {
-                    var underCapacityViolations = optimizationResult.Data.Violations
-                        .Where(v => v.Contains("ظرفیت تکمیل نشده") || v.Contains("Under capacity"))
-                        .ToList();
-                    return ApiResponse<object>.Fail("امکان ذخیره شیفت‌بندی ناقص وجود ندارد؛ ظرفیت شیفت‌ها در روزهای زیر تکمیل نشده است:\n" + string.Join("\n", underCapacityViolations));
+                    var errorMsg = underCapacityOrDeficitViolations.Count > 0
+                        ? "امکان ذخیره شیفت‌بندی ناقص وجود ندارد؛ ظرفیت شیفت‌ها یا مسئولیت‌های مورد نیاز در روزهای زیر تکمیل نشده است:\n" + string.Join("\n", underCapacityOrDeficitViolations)
+                        : (optimizationResult.Data?.Violations?.FirstOrDefault() ?? "الگوریتم بهینه‌سازی موفق به تکمیل کلیهٔ ظرفیت‌های درخواستی نشد.");
+                    return ApiResponse<object>.Fail(errorMsg);
                 }
 
                 await ReportJobProgressAsync(backgroundJobId, "Saving optimized schedule...");
@@ -588,10 +591,16 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     return ApiResponse<string>.Fail("No assignments to save");
                 }
 
-                if (result.Violations != null && result.Violations.Any(v => v.Contains("ظرفیت تکمیل نشده") || v.Contains("Under capacity")))
+                var underCapacityOrDeficitViolations = result.Violations?
+                    .Where(IsUnderCapacityOrDeficitViolation)
+                    .ToList() ?? new List<string>();
+
+                if (result.AlgorithmStatus == "Failed" || underCapacityOrDeficitViolations.Count > 0)
                 {
-                    var underCapacityViolations = result.Violations.Where(v => v.Contains("ظرفیت تکمیل نشده") || v.Contains("Under capacity")).ToList();
-                    return ApiResponse<string>.Fail("امکان ذخیره شیفت‌بندی ناقص وجود ندارد؛ ظرفیت شیفت‌ها در برخی روزها تکمیل نشده است:\n" + string.Join("\n", underCapacityViolations));
+                    var errorMsg = underCapacityOrDeficitViolations.Count > 0
+                        ? "امکان ذخیره شیفت‌بندی ناقص وجود ندارد؛ ظرفیت شیفت‌ها یا مسئولیت‌های مورد نیاز در برخی روزها تکمیل نشده است:\n" + string.Join("\n", underCapacityOrDeficitViolations)
+                        : "امکان ذخیره شیفت‌بندی با وضعیت ناموفق وجود ندارد.";
+                    return ApiResponse<string>.Fail(errorMsg);
                 }
 
                 _logger.LogInformation("Saving optimized schedule with {Count} assignments", result.Assignments.Count);
@@ -1148,8 +1157,14 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     CoupledShiftRuleGuard.Enforce(candidateSolution, constraints);
                     DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
                     ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
-                    AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
                     ApprovedRequestGuard.ForceApply(candidateSolution, constraints);
+
+                    if (ShiftResponsibilityRules.IsApplicable(constraints))
+                    {
+                        ShiftResponsibilityRules.RepairResponsibilityDeficits(candidateSolution, constraints);
+                        ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(candidateSolution, constraints);
+                    }
+
                     scheduler.RefreshSolutionViolations(candidateSolution);
 
                     if (!scheduler.AreExactNightQuotasSatisfied(candidateSolution, out _))
@@ -1816,16 +1831,34 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             }
         }
 
+        private static bool IsUnderCapacityOrDeficitViolation(string v)
+        {
+            if (string.IsNullOrWhiteSpace(v)) return false;
+            return v.Contains("ظرفیت تکمیل نشده") || 
+                   v.Contains("Under capacity") || 
+                   v.Contains("کمبود نیرو برای مسئولیت") || 
+                   v.Contains("Deficit");
+        }
+
         private static void EnsureAllShiftCoverageSatisfiedOrThrow(ShiftSolution solution, ShiftConstraints constraints)
         {
             var under = ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints);
-            if (under.Count == 0)
+            if (under.Count > 0)
             {
-                return;
+                throw new InvalidOperationException(
+                    "امکان تکمیل شیفت‌بندی وجود ندارد؛ ظرفیت شیفت‌ها در روزهای زیر تکمیل نشده است:\n" + string.Join("\n", under));
             }
 
-            throw new InvalidOperationException(
-                "تکمیل نفرات شیفت‌ها در برخی روزها امکان‌پذیر نشد:\n" + string.Join("\n", under));
+            if (ShiftResponsibilityRules.IsApplicable(constraints))
+            {
+                ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(solution, constraints);
+                var respViolations = ShiftResponsibilityRules.GetViolations(solution, constraints);
+                if (respViolations.Count > 0)
+                {
+                    throw new InvalidOperationException(
+                        "امکان تکمیل شیفت‌بندی وجود ندارد؛ ظرفیت مسئولیت‌های مورد نیاز در روزهای زیر تکمیل نشده است:\n" + string.Join("\n", respViolations));
+                }
+            }
         }
 
         /// <summary>
@@ -3520,16 +3553,19 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
             if (ShiftResponsibilityRules.IsApplicable(constraints))
             {
+                ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(solution, constraints);
                 freshViolations.AddRange(ShiftResponsibilityRules.GetViolations(solution, constraints));
             }
 
             solution.Violations = freshViolations;
 
+            var hasIncompleteCoverage = freshViolations.Any(IsUnderCapacityOrDeficitViolation);
+
             var result = new ShiftSchedulingResultDto
             {
                 FinalScore = solution.Score,
                 Violations = solution.Violations,
-                AlgorithmStatus = freshViolations.Any(v => v.Contains("ظرفیت تکمیل نشده") || v.Contains("Under capacity")) ? "Failed" : "Completed"
+                AlgorithmStatus = hasIncompleteCoverage ? "Failed" : "Completed"
             };
 
             // تبدیل انتساب‌ها
@@ -4026,8 +4062,14 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     CoupledShiftRuleGuard.Enforce(candidateSolution, constraints);
                     DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
                     ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
-                    AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
                     ApprovedRequestGuard.ForceApply(candidateSolution, constraints);
+
+                    if (ShiftResponsibilityRules.IsApplicable(constraints))
+                    {
+                        ShiftResponsibilityRules.RepairResponsibilityDeficits(candidateSolution, constraints);
+                        ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(candidateSolution, constraints);
+                    }
+
                     scheduler.RefreshSolutionViolations(candidateSolution);
 
                     EnsureApprovedRequestsOrThrow(scheduler, candidateSolution, constraints);

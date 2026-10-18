@@ -179,6 +179,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             ApprovedRequestGuard.ForceApply(bestSolution, _constraints);
             if (ShiftResponsibilityRules.IsApplicable(_constraints))
             {
+                ShiftResponsibilityRules.RepairResponsibilityDeficits(bestSolution, _constraints);
                 ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(bestSolution, _constraints);
             }
             RefreshSolutionViolations(bestSolution);
@@ -1937,6 +1938,11 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             }
             HolidayMorningEveningFairnessGuard.Enforce(solution, _constraints);
             HolidayQuotaRules.EnforceZeroQuotaGuarantees(solution, _constraints);
+            if (ShiftResponsibilityRules.IsApplicable(_constraints))
+            {
+                ShiftResponsibilityRules.RepairResponsibilityDeficits(solution, _constraints);
+                ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(solution, _constraints);
+            }
             solution.Score = CalculateSolutionScore(solution);
             RefreshSolutionViolations(solution);
         }
@@ -1959,6 +1965,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
 
             if (ShiftResponsibilityRules.IsApplicable(_constraints))
             {
+                ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(solution, _constraints);
                 solution.Violations.AddRange(ShiftResponsibilityRules.GetViolations(solution, _constraints));
             }
         }

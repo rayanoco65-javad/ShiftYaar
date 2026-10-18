@@ -487,4 +487,97 @@ public class ShiftResponsibilityRulesTests
         Assert.NotNull(circulatorAssignment);
         Assert.Equal(2, circulatorAssignment.UserId); // رضا به عنوان نقش پیش‌فرض (سیرکولر) قرار گرفت
     }
+
+    [Fact]
+    public void AssignResponsibilitiesToSlot_AvoidsGreedyTrap_WhenSingleRoleUserPresent()
+    {
+        // کاربری که فقط می‌تواند سیرکولر باشد
+        var users = new List<UserConstraint>
+        {
+            new() { UserId = 42, UserName = "زینب", ResponsibilityIds = new HashSet<int> { 36 } }, // فقط سیرکولر
+            new() { UserId = 43, UserName = "نسیم", ResponsibilityIds = new HashSet<int> { 38, 36 } } // اسکراب اول + سیرکولر
+        };
+
+        // سیرکولر اولویت عددی بالاتری در دیتابیس دارد (۱۰) ولی پیش‌فرض است
+        // اسکراب اول اولویت ۱ دارد ولی تخصصی و غیرپیش‌فرض است
+        var shiftReq = new ShiftRequirement
+        {
+            ShiftId = 1,
+            ShiftLabel = ShiftLabel.Morning,
+            ResponsibilityRequirements = new List<ResponsibilityRequirement>
+            {
+                new() { DepartmentResponsibilityId = 36, ResponsibilityTitle = "سیرکولر", Priority = 10, IsDefault = true, RequiredTotalCount = 1 },
+                new() { DepartmentResponsibilityId = 38, ResponsibilityTitle = "اسکراب اول", Priority = 1, IsDefault = false, RequiredTotalCount = 1 }
+            }
+        };
+
+        var assignments = new List<SaShiftAssignment>
+        {
+            new() { UserId = 43, ShiftId = 1, Date = new DateTime(2026, 10, 24) },
+            new() { UserId = 42, ShiftId = 1, Date = new DateTime(2026, 10, 24) }
+        };
+
+        ShiftResponsibilityRules.AssignResponsibilitiesToSlot(
+            assignments,
+            shiftReq,
+            new DateTime(2026, 10, 24),
+            isHoliday: false,
+            users,
+            defaultDepartmentResponsibilityId: 36);
+
+        // نسیم باید حتماً اسکراب اول شود و زینب سیرکولر
+        var scrub = assignments.FirstOrDefault(a => a.ResponsibilityId == 38);
+        var circ = assignments.FirstOrDefault(a => a.ResponsibilityId == 36);
+
+        Assert.NotNull(scrub);
+        Assert.Equal(43, scrub.UserId);
+
+        Assert.NotNull(circ);
+        Assert.Equal(42, circ.UserId);
+    }
+
+    [Fact]
+    public void GetViolations_AutoAssignsResponsibilities_AndIncludesPersianDate()
+    {
+        var date = new DateTime(2026, 10, 24);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = date,
+            EndDate = date,
+            StaffingMode = DepartmentStaffingMode.ResponsibilityBased,
+            ShiftRequirements = new List<ShiftRequirement>
+            {
+                new()
+                {
+                    ShiftId = 1,
+                    ShiftLabel = ShiftLabel.Morning,
+                    ResponsibilityRequirements = new List<ResponsibilityRequirement>
+                    {
+                        new() { DepartmentResponsibilityId = 38, ResponsibilityTitle = "اسکراب اول", RequiredTotalCount = 1 },
+                        new() { DepartmentResponsibilityId = 36, ResponsibilityTitle = "سیرکولر", IsDefault = true, RequiredTotalCount = 1 }
+                    }
+                }
+            },
+            UserConstraints = new List<UserConstraint>
+            {
+                new() { UserId = 1, UserName = "کاربر ۱", ResponsibilityIds = new HashSet<int> { 38 } },
+                new() { UserId = 2, UserName = "کاربر ۲", ResponsibilityIds = new HashSet<int> { 36 } }
+            }
+        };
+
+        var solution = new ShiftSolution();
+        // انتساب‌ها بدون ResponsibilityId (null) ساخته می‌شوند
+        solution.AddAssignment(1, 1, date, ShiftLabel.Morning);
+        solution.AddAssignment(2, 1, date, ShiftLabel.Morning);
+
+        Assert.Null(solution.Assignments.Values.First().ResponsibilityId);
+
+        // فراخوانی GetViolations باید خودکار انتساب را انجام دهد و هیچ نقضی گزارش نکند
+        var violations = ShiftResponsibilityRules.GetViolations(solution, constraints);
+        Assert.Empty(violations);
+
+        // انتساب‌ها باید نقش گرفته باشند
+        Assert.Equal(38, solution.Assignments.Values.First(a => a.UserId == 1).ResponsibilityId);
+        Assert.Equal(36, solution.Assignments.Values.First(a => a.UserId == 2).ResponsibilityId);
+    }
 }
