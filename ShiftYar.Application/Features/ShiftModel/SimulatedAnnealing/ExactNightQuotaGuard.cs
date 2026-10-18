@@ -2373,7 +2373,7 @@ public static class ExactNightQuotaGuard
             .Count(a => !a.IsOnCall && a.UserId != ignoreUserId);
         var totalCapacity = nightShift.SpecialtyRequirements
             .Sum(r => r.ForDay(isHoliday).RequiredTotalCount);
-        if (totalRegular >= Math.Max(totalCapacity, 1))
+        if (totalCapacity <= 0 || totalRegular >= totalCapacity)
         {
             return false;
         }
@@ -2386,12 +2386,17 @@ public static class ExactNightQuotaGuard
         }
 
         var day = specialtyReq.ForDay(isHoliday);
+        if (day.RequiredTotalCount <= 0)
+        {
+            return false;
+        }
+
         var current = solution.GetShiftAssignments(nightShift.ShiftId, date)
             .Count(a => !a.IsOnCall
                         && a.UserId != ignoreUserId
                         && (GetSpecialty(constraints, a.UserId) == specialtyReq.SpecialtyId ||
                             (nightShift.SpecialtyRequirements.Count == 1 && GetSpecialty(constraints, a.UserId) <= 0)));
-        return current < Math.Max(day.RequiredTotalCount, 1);
+        return current < day.RequiredTotalCount;
     }
 
     private static SaShiftAssignment? FindBestDonorAssignment(
@@ -2797,10 +2802,22 @@ public static class ExactNightQuotaGuard
                        solution, constraints, user, date));
     }
 
-    private static IEnumerable<DateTime> AllCandidateDates(ShiftConstraints constraints, bool holidayOnly) =>
-        Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
+    private static IEnumerable<DateTime> AllCandidateDates(ShiftConstraints constraints, bool holidayOnly)
+    {
+        var nightShift = constraints.ShiftRequirements.FirstOrDefault(s => s.ShiftLabel == ShiftLabel.Night);
+        return Enumerable.Range(0, (constraints.EndDate.Date - constraints.StartDate.Date).Days + 1)
             .Select(offset => constraints.StartDate.Date.AddDays(offset))
-            .Where(d => !holidayOnly || constraints.IsHolidayWeekendNight(d));
+            .Where(d => !holidayOnly || constraints.IsHolidayWeekendNight(d))
+            .Where(d =>
+            {
+                if (nightShift == null) return false;
+                var isHoliday = constraints.IsHoliday(d);
+                var cap = nightShift.SpecialtyRequirements.Sum(r => r.ForDay(isHoliday).RequiredTotalCount);
+                if (cap > 0) return true;
+                return constraints.UserConstraints.Any(u =>
+                    u.RequiredShiftSlots.Any(s => s.Date.Date == d.Date && s.ShiftLabel == ShiftLabel.Night));
+            });
+    }
 
     /// <summary>
     /// جابه‌جایی شب‌های موجود به تاریخ‌های خلوت‌تر بدون خالی گذاشتن ظرفیت (در صورت نیاز swap).
@@ -3304,7 +3321,7 @@ public static class ExactNightQuotaGuard
             .Count(a => !a.IsOnCall);
         var totalCapacity = nightShift.SpecialtyRequirements
             .Sum(r => r.ForDay(isHoliday).RequiredTotalCount);
-        if (totalRegular >= Math.Max(totalCapacity, 1))
+        if (totalCapacity <= 0 || totalRegular >= totalCapacity)
         {
             return false;
         }
@@ -3317,11 +3334,16 @@ public static class ExactNightQuotaGuard
         }
 
         var day = specialtyReq.ForDay(isHoliday);
+        if (day.RequiredTotalCount <= 0)
+        {
+            return false;
+        }
+
         var current = solution.GetShiftAssignments(nightShift.ShiftId, date)
             .Count(a => !a.IsOnCall &&
                         (GetSpecialty(constraints, a.UserId) == specialtyReq.SpecialtyId ||
                          (nightShift.SpecialtyRequirements.Count == 1 && GetSpecialty(constraints, a.UserId) <= 0)));
-        return current < Math.Max(day.RequiredTotalCount, 1);
+        return current < day.RequiredTotalCount;
     }
 
     private static int GetMaxShiftsPerDay(ShiftConstraints constraints, UserConstraint user = null, DateTime? date = null)

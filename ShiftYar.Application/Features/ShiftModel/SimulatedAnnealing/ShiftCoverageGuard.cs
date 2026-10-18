@@ -445,11 +445,6 @@ public static class ShiftCoverageGuard
                 .Where(a => !IsProtectedAssignment(constraints, solution, a))
                 .ToList();
 
-            if (unprot.Count == 0)
-            {
-                break;
-            }
-
             // اولویت حذف با انتساب‌هایی است که ترکیب مسئول شیفت را نقض نکنند
             var removable = unprot
                 .Where(a => !WouldBreakManagerMix(solution, constraints, shiftReq, date, a))
@@ -464,6 +459,25 @@ public static class ShiftCoverageGuard
                     .Take(remainingNeeded)
                     .ToList();
                 removable.AddRange(additional);
+            }
+
+            if (removable.Count < excess)
+            {
+                var remainingNeeded = excess - removable.Count;
+                var fallback = assignments
+                    .Where(a => !removable.Contains(a))
+                    .Where(a =>
+                    {
+                        var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
+                        if (u != null && ApprovedRequestGuard.IsApprovedRequiredSlot(u, a.Date, a.ShiftLabel, a.ShiftId))
+                            return false;
+                        if (u != null && IsCoupledShiftOnDate(solution, u, a.Date, a.ShiftLabel))
+                            return false;
+                        return true;
+                    })
+                    .Take(remainingNeeded)
+                    .ToList();
+                removable.AddRange(fallback);
             }
 
             if (removable.Count == 0)
@@ -515,11 +529,6 @@ public static class ShiftCoverageGuard
                 .Where(a => !IsProtectedAssignment(constraints, solution, a))
                 .ToList();
 
-            if (unprot.Count == 0)
-            {
-                break;
-            }
-
             var removable = unprot
                 .Where(a => !WouldBreakManagerMix(solution, constraints, shiftReq, date, a))
                 .Take(excess)
@@ -533,6 +542,25 @@ public static class ShiftCoverageGuard
                     .Take(remainingNeeded)
                     .ToList();
                 removable.AddRange(additional);
+            }
+
+            if (removable.Count < excess)
+            {
+                var remainingNeeded = excess - removable.Count;
+                var fallback = regularAssignments
+                    .Where(a => !removable.Contains(a))
+                    .Where(a =>
+                    {
+                        var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
+                        if (u != null && ApprovedRequestGuard.IsApprovedRequiredSlot(u, a.Date, a.ShiftLabel, a.ShiftId))
+                            return false;
+                        if (u != null && IsCoupledShiftOnDate(solution, u, a.Date, a.ShiftLabel))
+                            return false;
+                        return true;
+                    })
+                    .Take(remainingNeeded)
+                    .ToList();
+                removable.AddRange(fallback);
             }
 
             if (removable.Count == 0)

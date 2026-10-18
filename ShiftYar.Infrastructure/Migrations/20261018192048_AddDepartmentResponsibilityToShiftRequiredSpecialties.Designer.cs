@@ -9,10 +9,10 @@ using ShiftYar.Infrastructure.Persistence.AppDbContext;
 
 #nullable disable
 
-namespace ShiftYar.Infrastructure.Persistence.Migrations
+namespace ShiftYar.Infrastructure.Migrations
 {
     [DbContext(typeof(ShiftYarDbContext))]
-    [Migration("20261018183055_AddDepartmentResponsibilityToShiftRequiredSpecialties")]
+    [Migration("20261018192048_AddDepartmentResponsibilityToShiftRequiredSpecialties")]
     partial class AddDepartmentResponsibilityToShiftRequiredSpecialties
     {
         /// <inheritdoc />

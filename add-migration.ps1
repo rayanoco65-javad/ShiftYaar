@@ -1,4 +1,4 @@
-﻿param (
+param (
     [string]$Name
 )
 
@@ -10,7 +10,7 @@ if (-not $Name) {
 # تعریف پروژه‌ها
 $project = "ShiftYar.Infrastructure"
 $startupProject = "ShiftYar.API"
-$outputDir = "Persistence/Migrations"
+$outputDir = "Migrations"
 
 # تولید تاریخ و زمان برای یکتایی اسم
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"

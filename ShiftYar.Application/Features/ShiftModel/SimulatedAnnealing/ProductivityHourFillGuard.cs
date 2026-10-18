@@ -1292,7 +1292,7 @@ public static class ProductivityHourFillGuard
             .Count(a => !a.IsOnCall && a.UserId > 0);
         var totalCapacity = shiftReq.SpecialtyRequirements
             .Sum(r => r.ForDay(isHoliday).RequiredTotalCount);
-        if (totalRegular >= Math.Max(totalCapacity, 1))
+        if (totalCapacity <= 0 || totalRegular >= totalCapacity)
         {
             return false;
         }
@@ -1311,11 +1311,16 @@ public static class ProductivityHourFillGuard
         }
 
         var requiredTotalForSpecialty = targetSpecialtyReqs.Sum(r => r.ForDay(isHoliday).RequiredTotalCount);
+        if (requiredTotalForSpecialty <= 0)
+        {
+            return false;
+        }
+
         var current = solution.GetShiftAssignments(shiftReq.ShiftId, date)
             .Count(a => !a.IsOnCall && a.UserId > 0 &&
                         (constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)?.SpecialtyId == specialtyId ||
                          (shiftReq.SpecialtyRequirements.Count == 1 && (constraints.UserConstraints.FirstOrDefault(u => u.UserId == a.UserId)?.SpecialtyId ?? 0) <= 0)));
-        return current < Math.Max(requiredTotalForSpecialty, 1);
+        return current < requiredTotalForSpecialty;
     }
 
     private static double EstimateShiftHours(

@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace ShiftYar.Infrastructure.Persistence.Migrations
+namespace ShiftYar.Infrastructure.Migrations
 {
     /// <inheritdoc />
     public partial class AddDepartmentResponsibilityToShiftRequiredSpecialties : Migration
@@ -10,14 +10,6 @@ namespace ShiftYar.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropForeignKey(
-                name: "FK_ShiftExchanges_ShiftAssignments_OfferingShiftAssignmentId",
-                table: "ShiftExchanges");
-
-            migrationBuilder.DropForeignKey(
-                name: "FK_ShiftExchanges_ShiftAssignments_RequestingShiftAssignmentId",
-                table: "ShiftExchanges");
-
             migrationBuilder.AddColumn<int>(
                 name: "DepartmentResponsibilityId",
                 table: "ShiftRequiredSpecialties",
@@ -28,22 +20,6 @@ namespace ShiftYar.Infrastructure.Persistence.Migrations
                 name: "IX_ShiftRequiredSpecialties_DepartmentResponsibilityId",
                 table: "ShiftRequiredSpecialties",
                 column: "DepartmentResponsibilityId");
-
-            migrationBuilder.AddForeignKey(
-                name: "FK_ShiftExchanges_ShiftAssignments_OfferingShiftAssignmentId",
-                table: "ShiftExchanges",
-                column: "OfferingShiftAssignmentId",
-                principalTable: "ShiftAssignments",
-                principalColumn: "Id",
-                onDelete: ReferentialAction.SetNull);
-
-            migrationBuilder.AddForeignKey(
-                name: "FK_ShiftExchanges_ShiftAssignments_RequestingShiftAssignmentId",
-                table: "ShiftExchanges",
-                column: "RequestingShiftAssignmentId",
-                principalTable: "ShiftAssignments",
-                principalColumn: "Id",
-                onDelete: ReferentialAction.SetNull);
 
             migrationBuilder.AddForeignKey(
                 name: "FK_ShiftRequiredSpecialties_DepartmentResponsibilities_DepartmentResponsibilityId",
@@ -100,14 +76,6 @@ namespace ShiftYar.Infrastructure.Persistence.Migrations
             ");
 
             migrationBuilder.DropForeignKey(
-                name: "FK_ShiftExchanges_ShiftAssignments_OfferingShiftAssignmentId",
-                table: "ShiftExchanges");
-
-            migrationBuilder.DropForeignKey(
-                name: "FK_ShiftExchanges_ShiftAssignments_RequestingShiftAssignmentId",
-                table: "ShiftExchanges");
-
-            migrationBuilder.DropForeignKey(
                 name: "FK_ShiftRequiredSpecialties_DepartmentResponsibilities_DepartmentResponsibilityId",
                 table: "ShiftRequiredSpecialties");
 
@@ -118,20 +86,6 @@ namespace ShiftYar.Infrastructure.Persistence.Migrations
             migrationBuilder.DropColumn(
                 name: "DepartmentResponsibilityId",
                 table: "ShiftRequiredSpecialties");
-
-            migrationBuilder.AddForeignKey(
-                name: "FK_ShiftExchanges_ShiftAssignments_OfferingShiftAssignmentId",
-                table: "ShiftExchanges",
-                column: "OfferingShiftAssignmentId",
-                principalTable: "ShiftAssignments",
-                principalColumn: "Id");
-
-            migrationBuilder.AddForeignKey(
-                name: "FK_ShiftExchanges_ShiftAssignments_RequestingShiftAssignmentId",
-                table: "ShiftExchanges",
-                column: "RequestingShiftAssignmentId",
-                principalTable: "ShiftAssignments",
-                principalColumn: "Id");
         }
     }
 }
