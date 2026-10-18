@@ -3384,4 +3384,246 @@ public class DiagnoseDept2NightQuotasTests
         Assert.True(finalU18Hours >= (double)u18.ProductivityRequiredHours!.Value - 0.25, $"U18 has deficit: Worked={finalU18Hours}, Req={u18.ProductivityRequiredHours}");
         Assert.Empty(violations);
     }
+
+    [Fact]
+    public async Task Test_InspectAban1405_AnesthesiaHolidayDistribution()
+    {
+        var connStr = "Data Source=chogolisa.liara.cloud,34729;Initial Catalog=ShiftYarDb2;User Id=sa;Password=DwOr8efLcjXBVQ10jGYx5dhy;MultipleActiveResultSets=true;TrustServerCertificate=true";
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string>
+        {
+            ["ConnectionStrings:DefaultConnection"] = connStr
+        }).Build();
+        services.AddSingleton<IConfiguration>(config);
+        services.AddLogging(builder => builder.AddConsole());
+        services.AddInfrastructure(config);
+        var sp = services.BuildServiceProvider();
+        var db = sp.GetRequiredService<ShiftYar.Infrastructure.Persistence.AppDbContext.ShiftYarDbContext>();
+
+        var sb = new System.Text.StringBuilder();
+
+        var depts = await db.Departments.Include(d => d.Hospital).ToListAsync();
+        foreach (var d in depts)
+        {
+            sb.AppendLine($"Dept Id: {d.Id}, Name: {d.Name}, Hospital: {d.Hospital?.Name}");
+        }
+
+        var users = await db.Users.Where(u => u.FullName.Contains("جعفری")).ToListAsync();
+        foreach (var u in users)
+        {
+            sb.AppendLine($"User: Id={u.Id}, Name={u.FullName}, DeptId={u.DepartmentId}, SpecId={u.SpecialtyId}, ShiftType={u.ShiftType}");
+        }
+
+        var targetDeptId = users.FirstOrDefault()?.DepartmentId ?? 0;
+        var settings = await db.DepartmentSchedulingSettings.FirstOrDefaultAsync(s => s.DepartmentId == targetDeptId);
+        if (settings != null)
+        {
+            sb.AppendLine($"Dept {targetDeptId} Settings: EnableHoliday={settings.EnableHolidayShiftDistribution}, HolidayType={settings.HolidayShiftDistributionType}, Weight={settings.HolidayShiftDistributionWeight}, StaffingMode={settings.StaffingMode}");
+        }
+
+        var jobs = await db.SchedulingJobRecords
+            .Where(j => j.DepartmentId == targetDeptId)
+            .OrderByDescending(j => j.Id)
+            .Take(5)
+            .ToListAsync();
+        foreach (var j in jobs)
+        {
+            sb.AppendLine($"Job Id: {j.Id}, Status: {j.Status}, Completed: {j.CompletedAtUtc}, Req: {j.RequestJson}");
+        }
+
+        var jsonPath = @"C:\Users\Paria\.gemini\antigravity-ide\brain\7ad2e8d3-17b5-42f3-993c-7f587a38859a\scratch\job_437_result.json";
+        var json = await System.IO.File.ReadAllTextAsync(jsonPath);
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        var root = doc.RootElement.GetProperty("optimizationResult");
+        var assignments = root.GetProperty("assignments").EnumerateArray().ToList();
+
+        // Fridays in Aban 1405: 2026-10-23, 2026-10-30, 2026-11-06, 2026-11-13, 2026-11-20
+        var fridays = new HashSet<DateTime>
+        {
+            new DateTime(2026, 10, 23),
+            new DateTime(2026, 10, 30),
+            new DateTime(2026, 11, 06),
+            new DateTime(2026, 11, 13),
+            new DateTime(2026, 11, 20)
+        };
+
+        var allUsers = await db.Users.Where(u => u.DepartmentId == targetDeptId).ToListAsync();
+        sb.AppendLine("\n=== HOLIDAY SHIFTS PER USER IN JOB 437 ===");
+        var holidayAsgs = assignments
+            .Where(a => fridays.Contains(a.GetProperty("date").GetDateTime().Date))
+            .ToList();
+
+        sb.AppendLine($"Total holiday assignments count: {holidayAsgs.Count}");
+        foreach (var u in allUsers.OrderBy(u => u.Id))
+        {
+            var userHolidayAsgs = holidayAsgs
+                .Where(a => a.GetProperty("userId").GetInt32() == u.Id)
+                .ToList();
+            var details = string.Join(", ", userHolidayAsgs.Select(a =>
+                $"{a.GetProperty("date").GetDateTime():yyyy-MM-dd} (Label={a.GetProperty("shiftLabel").GetInt32()})"));
+            sb.AppendLine($"User {u.Id,2} ({u.FullName,-22}): Total Holidays={userHolidayAsgs.Count} [{details}]");
+        }
+
+        sb.AppendLine("\n=== ALL HOLIDAY ASSIGNMENTS BY DATE ===");
+        foreach (var f in fridays.OrderBy(f => f))
+        {
+            var onDate = holidayAsgs.Where(a => a.GetProperty("date").GetDateTime().Date == f.Date).ToList();
+            sb.AppendLine($"Date {f:yyyy-MM-dd} (Friday):");
+            foreach (var a in onDate)
+            {
+                sb.AppendLine($"   User {a.GetProperty("userId").GetInt32()} ({a.GetProperty("userName").GetString()}): Label={a.GetProperty("shiftLabel").GetInt32()}");
+            }
+        }
+
+        // Also check quotas for Aban 1405 (1405/08)
+        var dayQuotas = await db.UserMonthlyDayShiftQuotas
+            .Where(q => q.PersianYear == 1405 && q.PersianMonth == 8)
+            .ToListAsync();
+        sb.AppendLine("\n=== DAY QUOTAS FOR 1405/08 ===");
+        foreach (var q in dayQuotas)
+        {
+            sb.AppendLine($"User {q.UserId}: M={q.ExactMorningShiftCount}, E={q.ExactEveningShiftCount}, HM={q.ExactHolidayMorningShiftCount}, HE={q.ExactHolidayEveningShiftCount}, TotalH={q.ExactHolidayShiftCount}");
+        }
+
+        var nightQuotas = await db.UserMonthlyNightQuotas
+            .Where(q => q.PersianYear == 1405 && q.PersianMonth == 8)
+            .ToListAsync();
+        sb.AppendLine("\n=== NIGHT QUOTAS FOR 1405/08 ===");
+        foreach (var q in nightQuotas)
+        {
+            sb.AppendLine($"User {q.UserId}: N={q.ExactNightShiftCount}, HN={q.ExactHolidayWeekendNightShiftCount}, TotalH={q.ExactHolidayShiftCount}");
+        }
+
+        // Let's inspect weekday shifts of User 7 (Parisa) and the 1-holiday users (3, 6, 8, 9, 11)
+        sb.AppendLine("\n=== DETAILED ASSIGNMENTS FOR USER 7 AND 1-HOLIDAY USERS ===");
+        var candidateIds = new[] { 3, 6, 8, 9, 11, 7 };
+        foreach (var uid in candidateIds)
+        {
+            var uasgs = assignments.Where(a => a.GetProperty("userId").GetInt32() == uid).ToList();
+            var holCount = uasgs.Count(a => fridays.Contains(a.GetProperty("date").GetDateTime().Date));
+            sb.AppendLine($"User {uid} (Holidays={holCount}, Total={uasgs.Count}):");
+            foreach (var a in uasgs.OrderBy(a => a.GetProperty("date").GetDateTime()))
+            {
+                var dt = a.GetProperty("date").GetDateTime();
+                var isFri = fridays.Contains(dt.Date);
+                sb.AppendLine($"   {dt:yyyy-MM-dd} ({dt.DayOfWeek,-9}) [Label={a.GetProperty("shiftLabel").GetInt32()}] {(isFri ? "*** HOLIDAY ***" : "")}");
+            }
+        }
+
+        var outPath = @"C:\Users\Paria\.gemini\antigravity-ide\brain\7ad2e8d3-17b5-42f3-993c-7f587a38859a\scratch\diagnostic_summary.txt";
+        await System.IO.File.WriteAllTextAsync(outPath, sb.ToString());
+
+        services.AddApplication();
+        services.AddHttpContextAccessor();
+        services.AddSingleton<ISchedulingJobStore, SchedulingJobStore>();
+        var sp2 = services.BuildServiceProvider();
+        var schedulingService = sp2.GetRequiredService<IShiftSchedulingService>();
+
+        var reqDto = new ShiftSchedulingRequestDto
+        {
+            DepartmentId = targetDeptId,
+            StartDate = "1405/08/01",
+            EndDate = "1405/08/30",
+            Algorithm = SchedulingAlgorithm.SimulatedAnnealing
+        };
+        var constraints = await schedulingService.LoadConstraintsAsync(reqDto);
+        var constraintsJson = System.Text.Json.JsonSerializer.Serialize(constraints, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        await System.IO.File.WriteAllTextAsync(@"C:\Users\Paria\.gemini\antigravity-ide\brain\7ad2e8d3-17b5-42f3-993c-7f587a38859a\scratch\dept1_aban1405_constraints.json", constraintsJson);
+    }
+
+    [Fact]
+    public async Task Test_Aban1405_AnesthesiaHolidayDistribution_FixesParisaJafariHolidayCount()
+    {
+        var constraintsJsonPath = @"C:\Users\Paria\.gemini\antigravity-ide\brain\7ad2e8d3-17b5-42f3-993c-7f587a38859a\scratch\dept1_aban1405_constraints.json";
+        var constraintsJson = await System.IO.File.ReadAllTextAsync(constraintsJsonPath);
+        var constraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(constraintsJson, new System.Text.Json.JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        })!;
+
+        var jobJsonPath = @"C:\Users\Paria\.gemini\antigravity-ide\brain\7ad2e8d3-17b5-42f3-993c-7f587a38859a\scratch\job_437_result.json";
+        var jobJson = await System.IO.File.ReadAllTextAsync(jobJsonPath);
+        using var doc = System.Text.Json.JsonDocument.Parse(jobJson);
+        var root = doc.RootElement.GetProperty("optimizationResult");
+        var assignments = root.GetProperty("assignments").EnumerateArray().ToList();
+
+        var solution = new ShiftSolution();
+        foreach (var a in assignments)
+        {
+            var uid = a.GetProperty("userId").GetInt32();
+            var sid = a.GetProperty("shiftId").GetInt32();
+            var dt = a.GetProperty("date").GetDateTime();
+            var label = (ShiftLabel)a.GetProperty("shiftLabel").GetInt32();
+            var onCall = a.GetProperty("isOnCall").GetBoolean();
+            solution.AddAssignment(uid, sid, dt, label, onCall);
+        }
+
+        // Before guard: Parisa Jafari (UserId = 7) has 4 holiday shifts
+        var parisaHolidaysBefore = HolidayMorningEveningFairnessGuard.CountTotalHolidayShifts(solution, constraints, 7);
+        Assert.Equal(4, parisaHolidaysBefore);
+
+        // Run the fairness guard
+        HolidayMorningEveningFairnessGuard.Enforce(solution, constraints);
+
+        // After guard: Parisa Jafari (UserId = 7) must have 2 holiday shifts!
+        var parisaHolidaysAfter = HolidayMorningEveningFairnessGuard.CountTotalHolidayShifts(solution, constraints, 7);
+        Assert.Equal(2, parisaHolidaysAfter);
+
+        // All 9 users must have 1 or 2 holiday shifts (no one has 0, 3, or 4)
+        var peerCounts = constraints.UserConstraints
+            .Where(u => u.IsActive && u.ShiftType != ShiftTypes.FixedShift)
+            .Select(u => (User: u, Holidays: HolidayMorningEveningFairnessGuard.CountTotalHolidayShifts(solution, constraints, u.UserId), Total: solution.GetUserAllAssignments(u.UserId).Count))
+            .ToList();
+
+        Assert.Equal(9, peerCounts.Count);
+        var holidayCounts = peerCounts.Select(p => p.Holidays).ToList();
+        Assert.True(holidayCounts.Max() <= 2, $"Max holiday shifts should be <= 2, but found {holidayCounts.Max()}");
+        Assert.True(holidayCounts.Min() >= 1, $"Min holiday shifts should be >= 1, but found {holidayCounts.Min()}");
+        Assert.True(holidayCounts.Max() - holidayCounts.Min() <= 1, $"Holiday spread should be <= 1, counts: [{string.Join(", ", holidayCounts)}]");
+
+        // And verify each user's details
+        foreach (var p in peerCounts)
+        {
+            Assert.True(p.Holidays is 1 or 2, $"User {p.User.UserId} ({p.User.UserName}) has {p.Holidays} holidays!");
+        }
+    }
+
+    [Fact]
+    public async Task Test_Aban1405_AnesthesiaHolidayDistribution_FullOptimizer_NoUserExceedsTwoHolidays()
+    {
+        var constraintsJsonPath = @"C:\Users\Paria\.gemini\antigravity-ide\brain\7ad2e8d3-17b5-42f3-993c-7f587a38859a\scratch\dept1_aban1405_constraints.json";
+        var constraintsJson = await System.IO.File.ReadAllTextAsync(constraintsJsonPath);
+        var constraints = System.Text.Json.JsonSerializer.Deserialize<ShiftConstraints>(constraintsJson, new System.Text.Json.JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        })!;
+
+        var parameters = new SimulatedAnnealingParameters
+        {
+            InitialTemperature = 1000,
+            FinalTemperature = 0.05,
+            CoolingRate = 0.98,
+            MaxIterations = 4000,
+            MaxIterationsWithoutImprovement = 800,
+            PenaltyWeight = 1000
+        };
+
+        var scheduler = new SimulatedAnnealingScheduler(constraints, parameters);
+        var solution = scheduler.Optimize();
+
+        // Parisa Jafari (UserId = 7)
+        var parisaHolidays = HolidayMorningEveningFairnessGuard.CountTotalHolidayShifts(solution, constraints, 7);
+        Assert.True(parisaHolidays <= 2, $"Parisa Jafari should have <= 2 holiday shifts, but got {parisaHolidays}");
+
+        var peerCounts = constraints.UserConstraints
+            .Where(u => u.IsActive && u.ShiftType != ShiftTypes.FixedShift)
+            .Select(u => (User: u, Holidays: HolidayMorningEveningFairnessGuard.CountTotalHolidayShifts(solution, constraints, u.UserId)))
+            .ToList();
+
+        var holidayCounts = peerCounts.Select(p => p.Holidays).ToList();
+        Assert.True(holidayCounts.Max() <= 2, $"Max holiday shifts across all users must be <= 2, but found {holidayCounts.Max()}");
+        Assert.True(holidayCounts.Min() >= 1, $"Min holiday shifts across all users must be >= 1, but found {holidayCounts.Min()}");
+        Assert.True(holidayCounts.Max() - holidayCounts.Min() <= 1, $"Holiday spread should be <= 1, counts: [{string.Join(", ", holidayCounts)}]");
+    }
 }
+

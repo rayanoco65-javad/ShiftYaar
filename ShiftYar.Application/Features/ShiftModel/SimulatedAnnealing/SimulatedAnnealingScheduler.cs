@@ -1035,7 +1035,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                          .Where(u => u.IsActive && u.ShiftType != ShiftTypes.FixedShift)
                          .GroupBy(u => u.SpecialtyId))
             {
-                foreach (var label in new[] { ShiftLabel.Morning, ShiftLabel.Evening })
+                foreach (var label in new[] { ShiftLabel.Morning, ShiftLabel.Evening, ShiftLabel.Night })
                 {
                     var eligible = specialtyGroup
                         .Where(u => ShiftEligibilityResolver.MayEverTakeLabel(u, label))
@@ -1075,6 +1075,55 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     if (distributionType == 0 && spread >= 2)
                     {
                         penalty += spread * spread * 4.0;
+                    }
+                }
+
+                // جریمه عدم تعادل مجموع کل شیفت‌های تعطیل (Total Holiday Shifts across all labels)
+                var allEligible = specialtyGroup
+                    .Where(u => u.IsActive)
+                    .ToList();
+                if (allEligible.Count >= 2)
+                {
+                    var totalCounts = allEligible
+                        .Select(u => HolidayMorningEveningFairnessGuard.CountTotalHolidayShifts(
+                            solution, _constraints, u.UserId))
+                        .ToList();
+                    var totalHolidayShifts = totalCounts.Sum();
+                    if (totalHolidayShifts > 0)
+                    {
+                        var totalFairShares = HolidayMorningEveningFairnessGuard.BuildHolidayFairShares(
+                            allEligible,
+                            totalHolidayShifts,
+                            _constraints.StartDate,
+                            distributionType,
+                            slope,
+                            label: null);
+
+                        for (int i = 0; i < allEligible.Count; i++)
+                        {
+                            var user = allEligible[i];
+                            var count = totalCounts[i];
+                            var target = totalFairShares.TryGetValue(user.UserId, out var f)
+                                ? f
+                                : (totalHolidayShifts / (double)allEligible.Count);
+                            penalty += Math.Abs(count - target) * 8.0;
+
+                            if (distributionType == 0)
+                            {
+                                var ceilTarget = Math.Ceiling(target);
+                                if (count > ceilTarget)
+                                {
+                                    // جریمه سنگین برای دریافت شیفت تعطیل بیشتر از سقف سهم مساوی
+                                    penalty += (count - ceilTarget) * 25.0;
+                                }
+                            }
+                        }
+
+                        var totalSpread = totalCounts.Max() - totalCounts.Min();
+                        if (distributionType == 0 && totalSpread >= 2)
+                        {
+                            penalty += totalSpread * totalSpread * 15.0;
+                        }
                     }
                 }
             }
@@ -4763,6 +4812,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     }
                     return 0;
                 })
+                .ThenBy(u => isHoliday
+                    ? HolidayMorningEveningFairnessGuard.CountTotalHolidayShifts(solution, _constraints, u.UserId)
+                    : CountUserLabelShifts(solution, u.UserId, shiftLabel))
                 .ThenBy(u => isHoliday
                     ? HolidayMorningEveningFairnessGuard.CountHolidayLabel(solution, _constraints, u.UserId, shiftLabel)
                     : CountUserLabelShifts(solution, u.UserId, shiftLabel))
