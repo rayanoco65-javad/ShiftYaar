@@ -182,6 +182,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 ShiftResponsibilityRules.RepairResponsibilityDeficits(bestSolution, _constraints);
                 ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(bestSolution, _constraints);
             }
+            ShiftEligibilityGuard.StripIneligibleAssignments(bestSolution, _constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSolution, _constraints);
+            DailyDuplicateAssignmentGuard.StripDuplicates(bestSolution, _constraints);
             RefreshSolutionViolations(bestSolution);
             stopwatch.Stop();
             _statistics.ExecutionTime = stopwatch.Elapsed;
@@ -1943,6 +1946,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 ShiftResponsibilityRules.RepairResponsibilityDeficits(solution, _constraints);
                 ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(solution, _constraints);
             }
+            ShiftEligibilityGuard.StripIneligibleAssignments(solution, _constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
+            DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             solution.Score = CalculateSolutionScore(solution);
             RefreshSolutionViolations(solution);
         }

@@ -1,4 +1,5 @@
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
+using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -331,7 +332,7 @@ namespace ShiftYar.Application.Common.Utilities
 
             var usersMap = constraints.UserConstraints.GroupBy(u => u.UserId).ToDictionary(g => g.Key, g => g.First());
 
-            for (var pass = 0; pass < 5; pass++)
+            for (var pass = 0; pass < 3; pass++)
             {
                 var deficitsFound = false;
 
@@ -380,18 +381,73 @@ namespace ShiftYar.Application.Common.Utilities
 
                             deficitsFound = true;
 
-                            // پرسنل واجد شرایطی که در این اسلات نیستند
+                            // کاندیداهای معتبر: پرسنل فعال و واجد صلاحیت مسئولیت که با رعایت سقف روزانه دپارتمان و مجوزهای نوع شیفت کاربر مجاز به اخذ این شیفت هستند
                             var candidates = constraints.UserConstraints
-                                .Where(u => !slotAssignments.Any(a => a.UserId == u.UserId))
+                                .Where(u => u.IsActive)
+                                .Where(u => u.SpecialtyId == 0 || shiftReq.SpecialtyRequirements.Any(sr => sr.SpecialtyId == u.SpecialtyId) || constraints.StaffingMode == DepartmentStaffingMode.ResponsibilityBased)
                                 .Where(u => u.CanPerformResponsibility(req.DepartmentResponsibilityId, req.IsDefault))
                                 .Where(u => missingMale == 0 || u.Gender == UserGender.Male)
                                 .Where(u => missingFemale == 0 || u.Gender == UserGender.Female)
+                                // نباید مرخصی یا عدم دسترسی در این تاریخ داشته باشد
+                                .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
+                                .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
+                                // بررسی سقف شیفت روزانه دپارتمان و مجوزهای نوع شیفت کاربر (یک شیفت یا دو شیفت مجاز)
+                                .Where(u =>
+                                {
+                                    var existingAssignments = solution.GetUserAssignments(u.UserId, date)
+                                        .Where(a => !a.IsOnCall)
+                                        .ToList();
+
+                                    var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
+                                        ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
+                                        : 2;
+                                    var approvedCount = u.RequiredShiftSlots.Count(s => s.Date.Date == date.Date);
+                                    var effectiveMax = Math.Max(maxPerDay, approvedCount);
+
+                                    var existingLabels = existingAssignments.Select(a => a.ShiftLabel).Distinct().ToList();
+                                    var trialLabels = existingLabels.Append(shiftReq.ShiftLabel).Distinct().ToList();
+                                    if (u.CanBypassMaxShiftsPerDay(trialLabels, date) && effectiveMax < 2)
+                                    {
+                                        effectiveMax = 2;
+                                    }
+
+                                    if (existingAssignments.Count >= effectiveMax)
+                                    {
+                                        return false;
+                                    }
+
+                                    if (!DailyAssignmentRules.IsValidDaySet(trialLabels, effectiveMax, constraints.HardRules.ForbidDuplicateDailyAssignments))
+                                    {
+                                        return false;
+                                    }
+
+                                    return ShiftEligibilityResolver.IsAssignmentAllowed(
+                                        u,
+                                        existingLabels,
+                                        shiftReq.ShiftLabel,
+                                        effectiveMax,
+                                        constraints.HardRules.ForbidDuplicateDailyAssignments,
+                                        date,
+                                        constraints.StartDate);
+                                })
+                                // عدم تداخل توالی شیفت‌های مجاور (شب قبل از صبح، عصر بعد از شب و ...)
+                                .Where(u => !AdjacentShiftRestRules.WouldConflict(solution.GetUserAllAssignments(u.UserId), date, shiftReq.ShiftLabel, constraints))
+                                // عدم تجاوز از سقف روزهای کاری متوالی
+                                .Where(u => !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(solution, constraints, u, date))
                                 .OrderBy(u => u.ResponsibilityIds.Count)
                                 .ToList();
 
-                            // پرسنل قابل تعویض در این اسلات (دارای نقش پیش‌فرض یا دارای مازاد)
+                            // پرسنل قابل تعویض در این اسلات: دارای نقش پیش‌فرض یا مازاد، بدون درخواست تأییدشده یا قفل اسکلتون
                             var defaultId = constraints.DefaultDepartmentResponsibilityId ?? (shiftReq.ResponsibilityRequirements.FirstOrDefault(r => r.IsDefault)?.DepartmentResponsibilityId ?? 0);
                             var replaceable = slotAssignments
+                                .Where(a =>
+                                {
+                                    var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
+                                    if (u == null) return false;
+                                    if (ApprovedRequestGuard.IsApprovedRequiredSlot(u, date, a.ShiftLabel, a.ShiftId)) return false;
+                                    if (solution.IsLockedSkeleton(a.UserId, a.ShiftId, date)) return false;
+                                    return true;
+                                })
                                 .Where(a => a.ResponsibilityId == defaultId || slotAssignments.Count(x => x.ResponsibilityId == a.ResponsibilityId) > 1)
                                 .OrderByDescending(a => a.ResponsibilityId == defaultId ? 1 : 0)
                                 .ToList();
@@ -399,49 +455,54 @@ namespace ShiftYar.Application.Common.Utilities
                             var repaired = false;
                             foreach (var cand in candidates)
                             {
-                                var candDaily = solution.Assignments.Values
-                                    .Where(a => a.UserId == cand.UserId && a.Date.Date == date && !a.IsOnCall)
-                                    .ToList();
-
-                                var maxDaily = constraints.HardRules.EnforceMaxShiftsPerDay
-                                    ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
-                                    : 2;
-
-                                if (candDaily.Count >= maxDaily)
-                                    continue;
-
-                                var prevNight = solution.Assignments.Values.Any(a => a.UserId == cand.UserId && a.Date.Date == date.AddDays(-1) && a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall);
-                                if (prevNight && shiftReq.ShiftLabel == ShiftLabel.Morning)
-                                    continue;
-
-                                var nextMorning = solution.Assignments.Values.Any(a => a.UserId == cand.UserId && a.Date.Date == date.AddDays(1) && a.ShiftLabel == ShiftLabel.Morning && !a.IsOnCall);
-                                if (nextMorning && shiftReq.ShiftLabel == ShiftLabel.Night)
-                                    continue;
-
                                 foreach (var rep in replaceable)
                                 {
+                                    // شبیه‌سازی جابجایی با حفظ راه‌حل پشتیبان
                                     solution.RemoveAssignment(rep.UserId, shiftReq.ShiftId, date);
                                     solution.AddAssignment(cand.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel);
 
-                                    var newSlotAssignees = solution.GetShiftAssignments(shiftReq.ShiftId, date)
-                                        .Where(a => !a.IsOnCall)
-                                        .ToList();
-
-                                    AssignResponsibilitiesToSlot(
-                                        newSlotAssignees,
-                                        shiftReq,
-                                        date,
-                                        isHoliday,
-                                        constraints.UserConstraints,
-                                        constraints.DefaultDepartmentResponsibilityId);
-
-                                    var newCount = newSlotAssignees.Count(a => a.ResponsibilityId == req.DepartmentResponsibilityId);
-                                    if (newCount > total)
+                                    var isSafe = true;
+                                    // ۱. حفظ الزامات مسئول شیفت
+                                    if (ShiftManagerRules.RequiresAnyManager(shiftReq) &&
+                                        !OvertimeBalanceGuard.WouldPreserveManagerMix(solution, constraints, shiftReq.ShiftId, date, rep.UserId, cand.UserId))
                                     {
-                                        repaired = true;
-                                        break;
+                                        isSafe = false;
                                     }
-                                    else
+                                    // ۲. عدم ایجاد هرگونه نقض توالی مجاور، نوع شیفت یا تکرار روزانه
+                                    else if (AdjacentShiftRestGuard.GetViolations(solution, constraints).Count > 0 ||
+                                             ShiftEligibilityGuard.GetViolations(solution, constraints).Count > 0 ||
+                                             DailyDuplicateAssignmentGuard.GetViolations(solution, constraints).Count > 0)
+                                    {
+                                        isSafe = false;
+                                    }
+
+                                    if (isSafe)
+                                    {
+                                        var newSlotAssignees = solution.GetShiftAssignments(shiftReq.ShiftId, date)
+                                            .Where(a => !a.IsOnCall)
+                                            .ToList();
+
+                                        AssignResponsibilitiesToSlot(
+                                            newSlotAssignees,
+                                            shiftReq,
+                                            date,
+                                            isHoliday,
+                                            constraints.UserConstraints,
+                                            constraints.DefaultDepartmentResponsibilityId);
+
+                                        var newCount = newSlotAssignees.Count(a => a.ResponsibilityId == req.DepartmentResponsibilityId);
+                                        if (newCount > total)
+                                        {
+                                            repaired = true;
+                                            break;
+                                        }
+                                        else
+                                        {
+                                            isSafe = false;
+                                        }
+                                    }
+
+                                    if (!isSafe)
                                     {
                                         solution.RemoveAssignment(cand.UserId, shiftReq.ShiftId, date);
                                         solution.AddAssignment(rep.UserId, shiftReq.ShiftId, date, shiftReq.ShiftLabel);
@@ -456,7 +517,6 @@ namespace ShiftYar.Application.Common.Utilities
 
                 if (!deficitsFound) break;
             }
-
             AssignResponsibilitiesToAllSlots(solution, constraints);
         }
     }

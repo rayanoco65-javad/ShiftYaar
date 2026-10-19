@@ -580,4 +580,98 @@ public class ShiftResponsibilityRulesTests
         Assert.Equal(38, solution.Assignments.Values.First(a => a.UserId == 1).ResponsibilityId);
         Assert.Equal(36, solution.Assignments.Values.First(a => a.UserId == 2).ResponsibilityId);
     }
+
+    [Fact]
+    public void RepairResponsibilityDeficits_WhenDeptAllowsTwoShifts_ConsidersUserWithMorningEveningSameDay()
+    {
+        var date = new DateTime(2026, 10, 24);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = date,
+            EndDate = date,
+            StaffingMode = DepartmentStaffingMode.ResponsibilityBased,
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 2 },
+            HardRules = new HardRuleSet
+            {
+                EnforceMaxShiftsPerDay = true,
+                ForbidDuplicateDailyAssignments = true
+            },
+            ShiftRequirements = new List<ShiftRequirement>
+            {
+                new()
+                {
+                    ShiftId = 1,
+                    ShiftLabel = ShiftLabel.Morning,
+                    ResponsibilityRequirements = new List<ResponsibilityRequirement>
+                    {
+                        new() { DepartmentResponsibilityId = 36, ResponsibilityTitle = "سیرکولر", IsDefault = true, RequiredTotalCount = 1 }
+                    }
+                },
+                new()
+                {
+                    ShiftId = 2,
+                    ShiftLabel = ShiftLabel.Evening,
+                    ResponsibilityRequirements = new List<ResponsibilityRequirement>
+                    {
+                        new() { DepartmentResponsibilityId = 38, ResponsibilityTitle = "اسکراب اول", RequiredTotalCount = 1 },
+                        new() { DepartmentResponsibilityId = 36, ResponsibilityTitle = "سیرکولر", IsDefault = true, RequiredTotalCount = 1 }
+                    }
+                }
+            },
+            UserConstraints = new List<UserConstraint>
+            {
+                // کاربر ۱: دارای تخصص اسکراب اول، در صبح شیفت دارد، و مجوز دو شیفت در روز (MorningEveningSameDay) دارد
+                new()
+                {
+                    UserId = 1,
+                    UserName = "کاربر مجاز دوشیفت",
+                    IsActive = true,
+                    AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.MorningEveningSameDay,
+                    ResponsibilityIds = new HashSet<int> { 38 }
+                },
+                // کاربر ۲: فقط سیرکولر
+                new()
+                {
+                    UserId = 2,
+                    UserName = "کاربر عصر",
+                    IsActive = true,
+                    AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening,
+                    ResponsibilityIds = new HashSet<int> { 36 }
+                },
+                // کاربر ۳: سیرکولر اضافی در عصر
+                new()
+                {
+                    UserId = 3,
+                    UserName = "کاربر مازاد عصر",
+                    IsActive = true,
+                    AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening,
+                    ResponsibilityIds = new HashSet<int> { 36 }
+                }
+            }
+        };
+
+        var solution = new ShiftSolution();
+        solution.AddAssignment(1, 1, date, ShiftLabel.Morning); // کاربر ۱ در صبح
+        solution.AddAssignment(2, 2, date, ShiftLabel.Evening); // کاربر ۲ در عصر
+        solution.AddAssignment(3, 2, date, ShiftLabel.Evening); // کاربر ۳ در عصر (مازاد سیرکولر)
+
+        // در عصر کمبود اسکراب اول (۳۸) داریم. کاربر ۳ جایگزین‌پذیر است و کاربر ۱ واجد شرایط است و مجوز دوشیفت دارد
+        ShiftResponsibilityRules.RepairResponsibilityDeficits(solution, constraints);
+
+        // باید کاربر ۱ به عصر اضافه شده باشد (دو شیفت در روز) تا کسری اسکراب جبران شود
+        var eveningAssignees = solution.GetShiftAssignments(2, date).ToList();
+        Assert.Equal(2, eveningAssignees.Count);
+        Assert.Contains(eveningAssignees, a => a.UserId == 1);
+        Assert.True(eveningAssignees.Any(a => a.UserId == 2) || eveningAssignees.Any(a => a.UserId == 3));
+
+        var violations = ShiftResponsibilityRules.GetViolations(solution, constraints);
+        Assert.Empty(violations);
+
+        var dailyViolations = DailyDuplicateAssignmentGuard.GetViolations(solution, constraints);
+        Assert.Empty(dailyViolations);
+
+        var eligibilityViolations = ShiftEligibilityGuard.GetViolations(solution, constraints);
+        Assert.Empty(eligibilityViolations);
+    }
 }
+

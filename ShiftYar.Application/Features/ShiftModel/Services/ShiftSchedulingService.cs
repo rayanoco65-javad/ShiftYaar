@@ -1164,6 +1164,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         ShiftResponsibilityRules.RepairResponsibilityDeficits(candidateSolution, constraints);
                         ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(candidateSolution, constraints);
                     }
+                    ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
+                    AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
+                    DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
 
                     scheduler.RefreshSolutionViolations(candidateSolution);
 
@@ -4069,6 +4072,9 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         ShiftResponsibilityRules.RepairResponsibilityDeficits(candidateSolution, constraints);
                         ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(candidateSolution, constraints);
                     }
+                    ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
+                    AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
+                    DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
 
                     scheduler.RefreshSolutionViolations(candidateSolution);
 
