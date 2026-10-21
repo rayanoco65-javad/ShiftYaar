@@ -65,21 +65,6 @@ public static class ShiftEligibilityResolver
 
     public static UserShiftPermission NormalizePermissions(UserShiftPermission value)
     {
-        if (value == UserShiftPermission.None)
-        {
-            return value;
-        }
-
-        if (value.HasFlag(UserShiftPermission.MorningEveningSameDay))
-        {
-            value |= UserShiftPermission.Morning | UserShiftPermission.Evening;
-        }
-
-        if (value.HasFlag(UserShiftPermission.MorningNightSameDay))
-        {
-            value |= UserShiftPermission.Morning;
-        }
-
         return value;
     }
 
@@ -186,8 +171,14 @@ public static class ShiftEligibilityResolver
                 return true;
             }
 
-            return label == ShiftLabel.Night
-                   && user.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningNightSameDay);
+            if (label == ShiftLabel.Night
+                && user.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningNightSameDay))
+            {
+                return true;
+            }
+
+            return label == ShiftLabel.Evening
+                   && user.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningEveningSameDay);
         }
 
         return IsLabelAllowed(user.AllowedShiftLabels, label);
@@ -200,6 +191,16 @@ public static class ShiftEligibilityResolver
     /// </summary>
     public static bool HasInherentPermission(UserConstraint user, ShiftLabel label)
     {
+        if (user.ShiftType == ShiftTypes.FixedShift)
+        {
+            return user.ShiftSubType switch
+            {
+                ShiftSubTypes.FixedEvening => label == ShiftLabel.Evening,
+                ShiftSubTypes.FixedNight => label == ShiftLabel.Night,
+                _ => label == ShiftLabel.Morning
+            };
+        }
+
         if (UsesPermissionModel(user))
         {
             if (HasSinglePermission(user.AllowedShiftPermissions, label))
@@ -207,8 +208,14 @@ public static class ShiftEligibilityResolver
                 return true;
             }
 
-            return label == ShiftLabel.Night
-                   && user.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningNightSameDay);
+            if (label == ShiftLabel.Night
+                && user.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningNightSameDay))
+            {
+                return true;
+            }
+
+            return label == ShiftLabel.Evening
+                   && user.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningEveningSameDay);
         }
 
         return IsLabelAllowed(user.AllowedShiftLabels, label);
@@ -248,11 +255,9 @@ public static class ShiftEligibilityResolver
 
     public static bool SupportsMorningEveningCombo(UserConstraint user, int maxShiftsPerDay = 1) =>
         UsesPermissionModel(user)
-            ? (user.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningEveningSameDay)
-               || (maxShiftsPerDay >= 2 && !user.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningNightSameDay)))
-              && HasSinglePermission(user.AllowedShiftPermissions, ShiftLabel.Morning)
-              && HasSinglePermission(user.AllowedShiftPermissions, ShiftLabel.Evening)
-            : IsLabelAllowed(user.AllowedShiftLabels, ShiftLabel.Morning)
+            ? user.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningEveningSameDay)
+            : maxShiftsPerDay >= 2
+              && IsLabelAllowed(user.AllowedShiftLabels, ShiftLabel.Morning)
               && IsLabelAllowed(user.AllowedShiftLabels, ShiftLabel.Evening);
 
     public static bool SupportsMorningNightCombo(UserConstraint user) =>
@@ -290,6 +295,23 @@ public static class ShiftEligibilityResolver
 
             return DailyAssignmentRules.CanAddShift(
                 existingOnDay, newLabel, effectiveMax, forbidDuplicateLabels);
+        }
+
+        // پرسنل شیفت ثابت در صورتی که درخواست تأییدشده‌ای برای این شیفت در این تاریخ نداشته باشند،
+        // فقط مجاز به دریافت شیفت پیش‌فرض فیکس خود هستند.
+        if (user.ShiftType == ShiftTypes.FixedShift)
+        {
+            var fixedLabel = user.ShiftSubType switch
+            {
+                ShiftSubTypes.FixedEvening => ShiftLabel.Evening,
+                ShiftSubTypes.FixedNight => ShiftLabel.Night,
+                _ => ShiftLabel.Morning
+            };
+
+            if (newLabel != fixedLabel)
+            {
+                return false;
+            }
         }
 
         // بررسی قانون تناوب هفتگی شیفت‌های روزانه (صبح و عصر)
@@ -369,16 +391,12 @@ public static class ShiftEligibilityResolver
             case 2:
                 if (labelsOnDay.Contains(ShiftLabel.Morning) && labelsOnDay.Contains(ShiftLabel.Evening))
                 {
-                    return (permissions.HasFlag(UserShiftPermission.MorningEveningSameDay)
-                            || (maxShiftsPerDay >= 2 && !permissions.HasFlag(UserShiftPermission.MorningNightSameDay)))
-                           && HasSinglePermission(permissions, ShiftLabel.Morning)
-                           && HasSinglePermission(permissions, ShiftLabel.Evening);
+                    return permissions.HasFlag(UserShiftPermission.MorningEveningSameDay);
                 }
 
                 if (labelsOnDay.Contains(ShiftLabel.Morning) && labelsOnDay.Contains(ShiftLabel.Night))
                 {
-                    return permissions.HasFlag(UserShiftPermission.MorningNightSameDay)
-                           && HasSinglePermission(permissions, ShiftLabel.Morning);
+                    return permissions.HasFlag(UserShiftPermission.MorningNightSameDay);
                 }
 
                 return false;

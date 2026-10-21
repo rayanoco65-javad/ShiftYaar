@@ -821,6 +821,7 @@ public static class ShiftCoverageGuard
 
         var candidates = constraints.UserConstraints
             .Where(u => u.IsActive && u.SpecialtyId == specialtyReq.SpecialtyId)
+            .Where(u => u.ShiftType != ShiftTypes.FixedShift)
             .Where(u => ShiftEligibilityResolver.MayTakeLabelOnDate(u, shiftReq.ShiftLabel, date))
             .Where(u => IsEligibleForCoverageFill(solution, constraints, u, shiftReq.ShiftLabel, date, allowEmergencyRelaxation))
             .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
@@ -1410,7 +1411,7 @@ public static class ShiftCoverageGuard
 
         if (user.ShiftType == ShiftTypes.FixedShift)
         {
-            score -= 100; // فیکس‌ها برای پوشش روزانه مناسب‌اند
+            score += 1000;
         }
 
         return score;

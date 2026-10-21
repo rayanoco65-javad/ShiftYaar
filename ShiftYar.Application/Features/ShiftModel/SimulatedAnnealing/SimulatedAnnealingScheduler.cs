@@ -415,6 +415,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
                     {
                         var eligibleUsers = availableUsers
+                            .Where(u => u.ShiftType != ShiftTypes.FixedShift)
                             .Where(u => specialtyReq.SpecialtyId == 0 || u.SpecialtyId == 0 || u.SpecialtyId == specialtyReq.SpecialtyId || _constraints.StaffingMode == DepartmentStaffingMode.ResponsibilityBased)
                             .Where(u => IsUserAvailableForShift(u, date, shiftReq.ShiftLabel, solution))
                             .Where(u => u.IsActive)
@@ -436,6 +437,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                     foreach (var specialtyReq in shiftReq.SpecialtyRequirements)
                     {
                         var eligibleUsers = availableUsers
+                            .Where(u => u.ShiftType != ShiftTypes.FixedShift)
                             .Where(u => specialtyReq.SpecialtyId == 0 || u.SpecialtyId == 0 || u.SpecialtyId == specialtyReq.SpecialtyId || _constraints.StaffingMode == DepartmentStaffingMode.ResponsibilityBased)
                             .Where(u => IsUserAvailableForShift(u, date, shiftReq.ShiftLabel, solution))
                             .Where(u => u.IsActive)
@@ -5276,6 +5278,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 return;
             }
 
+            var u1 = _constraints.UserConstraints.FirstOrDefault(u => u.UserId == assignment1.UserId);
+            var u2 = _constraints.UserConstraints.FirstOrDefault(u => u.UserId == assignment2.UserId);
+            if (u1?.ShiftType == ShiftTypes.FixedShift || u2?.ShiftType == ShiftTypes.FixedShift)
+            {
+                return;
+            }
+
             if (IsProtectedAssignment(solution, assignment1) || IsProtectedAssignment(solution, assignment2))
             {
                 return;
@@ -5325,6 +5334,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 (!assignment.IsOnCall && (day.Value.RequiredMaleCount > 0 || day.Value.RequiredFemaleCount > 0)));
 
             var eligibleUsers = _constraints.UserConstraints
+                .Where(u => u.ShiftType != ShiftTypes.FixedShift)
                 .Where(u => specialtyId == 0 || u.SpecialtyId == specialtyId || _constraints.StaffingMode == DepartmentStaffingMode.ResponsibilityBased)
                 .Where(u => u.IsActive)
                 .Where(u => !lockGender || u.Gender == assignmentGender)
@@ -5388,6 +5398,7 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             var shiftReq = _constraints.ShiftRequirements.First(s => s.ShiftId == slot.ShiftId);
 
             var eligibleUsers = _constraints.UserConstraints
+                .Where(u => u.ShiftType != ShiftTypes.FixedShift)
                 .Where(u => slot.SpecialtyId == 0 || u.SpecialtyId == slot.SpecialtyId || _constraints.StaffingMode == DepartmentStaffingMode.ResponsibilityBased)
                 .Where(u => u.IsActive)
                 .Where(u => IsUserAvailableForShiftOnShiftId(u, slot.Date, slot.ShiftId, solution))

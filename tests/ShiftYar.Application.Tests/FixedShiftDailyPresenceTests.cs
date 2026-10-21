@@ -553,6 +553,268 @@ public class FixedShiftDailyPresenceTests
 
         Assert.Empty(ShiftCoverageGuard.GetOverCapacityViolations(solution, constraints));
     }
+
+    [Fact]
+    public void FixedMorning_WithComboMorningEveningPermission_WithoutRequest_NeverAssignedEvening()
+    {
+        var start = new DateTime(2026, 8, 23);
+        var days = 7;
+        var holiday = start.AddDays(5);
+
+        var fixedUser = new UserConstraint
+        {
+            UserId = 10,
+            Gender = UserGender.Female,
+            SpecialtyId = 10,
+            IsActive = true,
+            ShiftType = ShiftTypes.FixedShift,
+            ShiftSubType = ShiftSubTypes.FixedMorning,
+            AllowedShiftLabels = [ShiftLabel.Morning, ShiftLabel.Evening],
+            AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.MorningEveningSameDay
+        };
+
+        var rotating1 = RotatingUser(11, UserGender.Male);
+        var rotating2 = RotatingUser(12, UserGender.Female);
+        var rotating3 = RotatingUser(13, UserGender.Male);
+
+        var constraints = new ShiftConstraints
+        {
+            DepartmentId = 1,
+            StartDate = start,
+            EndDate = start.AddDays(days - 1),
+            HolidayDates = [holiday.Date],
+            UserConstraints = [fixedUser, rotating1, rotating2, rotating3],
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning, requiredTotal: 2),
+                Shift(2, ShiftLabel.Evening, requiredTotal: 2),
+                Shift(3, ShiftLabel.Night, requiredTotal: 1)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = false,
+                EnforceMinRestDays = false,
+                EnforceMaxConsecutiveShifts = false,
+                EnforceWeeklyMaxShifts = false,
+                EnforceSpecialtyCapacity = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 2 }
+        };
+
+        for (var d = start.Date; d <= constraints.EndDate.Date; d = d.AddDays(1))
+        {
+            if (constraints.HolidayDates.Contains(d))
+            {
+                fixedUser.UnavailableDates.Add(d);
+                continue;
+            }
+
+            fixedUser.RequiredShiftSlots.Add(new ShiftSlotConstraint
+            {
+                Date = d,
+                ShiftLabel = ShiftLabel.Morning
+            });
+        }
+
+        var solution = new SimulatedAnnealingScheduler(constraints, FastParameters).Optimize();
+
+        // Even though Evening was in shortage (requiredTotal: 2 with rotating users),
+        // fixedUser must NOT be assigned any Evening shifts because there was no approved request!
+        var eveningAssignments = solution.GetUserAllAssignments(fixedUser.UserId)
+            .Where(a => a.ShiftLabel == ShiftLabel.Evening)
+            .ToList();
+
+        Assert.Empty(eveningAssignments);
+
+        // Fixed user must have morning on every non-holiday workday
+        for (var d = start.Date; d <= constraints.EndDate.Date; d = d.AddDays(1))
+        {
+            if (constraints.HolidayDates.Contains(d)) continue;
+            var morningCount = solution.GetUserAssignments(fixedUser.UserId, d).Count(a => a.ShiftLabel == ShiftLabel.Morning);
+            Assert.Equal(1, morningCount);
+        }
+    }
+
+    [Fact]
+    public void FixedMorning_WithComboMorningEveningPermission_WithApprovedRequest_AssignedComboOnRequestDate()
+    {
+        var start = new DateTime(2026, 8, 23);
+        var days = 7;
+        var holiday = start.AddDays(5);
+        var requestDate = start.AddDays(2); // روز دارای درخواست تأییدشده عصر
+
+        var fixedUser = new UserConstraint
+        {
+            UserId = 10,
+            Gender = UserGender.Female,
+            SpecialtyId = 10,
+            IsActive = true,
+            ShiftType = ShiftTypes.FixedShift,
+            ShiftSubType = ShiftSubTypes.FixedMorning,
+            AllowedShiftLabels = [ShiftLabel.Morning, ShiftLabel.Evening],
+            AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.MorningEveningSameDay
+        };
+
+        var rotating1 = RotatingUser(11, UserGender.Male);
+        var rotating2 = RotatingUser(12, UserGender.Female);
+
+        var constraints = new ShiftConstraints
+        {
+            DepartmentId = 1,
+            StartDate = start,
+            EndDate = start.AddDays(days - 1),
+            HolidayDates = [holiday.Date],
+            UserConstraints = [fixedUser, rotating1, rotating2],
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning, requiredTotal: 2),
+                Shift(2, ShiftLabel.Evening, requiredTotal: 1),
+                Shift(3, ShiftLabel.Night, requiredTotal: 1)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = false,
+                EnforceSpecialtyCapacity = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 2 }
+        };
+
+        // شبیه‌سازی ثبت شیفت‌ها در ShiftSchedulingService برای FixedMorning با مجوز MorningEveningSameDay:
+        // در روز دارای درخواست عصر (requestDate)، هر دو شیفت صبح و عصر اضافه می‌شوند (ترکیبی)
+        // در سایر روزها فقط شیفت صبح اضافه می‌شود
+        for (var d = start.Date; d <= constraints.EndDate.Date; d = d.AddDays(1))
+        {
+            if (constraints.HolidayDates.Contains(d))
+            {
+                fixedUser.UnavailableDates.Add(d);
+                continue;
+            }
+
+            fixedUser.RequiredShiftSlots.Add(new ShiftSlotConstraint
+            {
+                Date = d,
+                ShiftLabel = ShiftLabel.Morning
+            });
+
+            if (d.Date == requestDate.Date)
+            {
+                fixedUser.RequiredShiftSlots.Add(new ShiftSlotConstraint
+                {
+                    Date = d,
+                    ShiftLabel = ShiftLabel.Evening
+                });
+            }
+        }
+
+        var solution = new SimulatedAnnealingScheduler(constraints, FastParameters).Optimize();
+
+        // در روز درخواست: کاربر باید هر دو شیفت صبح و عصر را داشته باشد
+        var requestDayAssignments = solution.GetUserAssignments(fixedUser.UserId, requestDate).ToList();
+        Assert.Equal(2, requestDayAssignments.Count);
+        Assert.Contains(requestDayAssignments, a => a.ShiftLabel == ShiftLabel.Morning);
+        Assert.Contains(requestDayAssignments, a => a.ShiftLabel == ShiftLabel.Evening);
+
+        // در سایر روزهای غیرتعطیل: فقط شیفت صبح، بدون عصر اضافی
+        for (var d = start.Date; d <= constraints.EndDate.Date; d = d.AddDays(1))
+        {
+            if (constraints.HolidayDates.Contains(d) || d.Date == requestDate.Date) continue;
+            var dayAssignments = solution.GetUserAssignments(fixedUser.UserId, d).ToList();
+            Assert.Single(dayAssignments);
+            Assert.Equal(ShiftLabel.Morning, dayAssignments[0].ShiftLabel);
+        }
+    }
+
+    [Fact]
+    public void FixedMorning_WithSingleEveningPermission_WithApprovedRequest_ReplacesFixedMorningOnRequestDate()
+    {
+        var start = new DateTime(2026, 8, 23);
+        var days = 7;
+        var holiday = start.AddDays(5);
+        var requestDate = start.AddDays(2); // روز درخواست تأییدشده عصر تکی
+
+        var fixedUser = new UserConstraint
+        {
+            UserId = 10,
+            Gender = UserGender.Female,
+            SpecialtyId = 10,
+            IsActive = true,
+            ShiftType = ShiftTypes.FixedShift,
+            ShiftSubType = ShiftSubTypes.FixedMorning,
+            AllowedShiftLabels = [ShiftLabel.Morning, ShiftLabel.Evening],
+            AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening
+        };
+
+        var rotating1 = RotatingUser(11, UserGender.Male);
+        var rotating2 = RotatingUser(12, UserGender.Female);
+
+        var constraints = new ShiftConstraints
+        {
+            DepartmentId = 1,
+            StartDate = start,
+            EndDate = start.AddDays(days - 1),
+            HolidayDates = [holiday.Date],
+            UserConstraints = [fixedUser, rotating1, rotating2],
+            ShiftRequirements =
+            [
+                Shift(1, ShiftLabel.Morning, requiredTotal: 2),
+                Shift(2, ShiftLabel.Evening, requiredTotal: 1),
+                Shift(3, ShiftLabel.Night, requiredTotal: 1)
+            ],
+            HardRules = new HardRuleSet
+            {
+                ForbidDuplicateDailyAssignments = true,
+                EnforceMaxShiftsPerDay = true,
+                EnforceSpecialtyCapacity = true
+            },
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 }
+        };
+
+        // شبیه‌سازی ShiftSchedulingService برای مجوز تکی:
+        // در روز درخواست عصر تکی، شیفت عصر جایگزین شیفت صبح می‌شود (شیفت صبح اضافه نمی‌شود)
+        for (var d = start.Date; d <= constraints.EndDate.Date; d = d.AddDays(1))
+        {
+            if (constraints.HolidayDates.Contains(d))
+            {
+                fixedUser.UnavailableDates.Add(d);
+                continue;
+            }
+
+            if (d.Date == requestDate.Date)
+            {
+                fixedUser.RequiredShiftSlots.Add(new ShiftSlotConstraint
+                {
+                    Date = d,
+                    ShiftLabel = ShiftLabel.Evening
+                });
+            }
+            else
+            {
+                fixedUser.RequiredShiftSlots.Add(new ShiftSlotConstraint
+                {
+                    Date = d,
+                    ShiftLabel = ShiftLabel.Morning
+                });
+            }
+        }
+
+        var solution = new SimulatedAnnealingScheduler(constraints, FastParameters).Optimize();
+
+        // در روز درخواست تکی: فقط شیفت عصر
+        var requestDayAssignments = solution.GetUserAssignments(fixedUser.UserId, requestDate).ToList();
+        Assert.Single(requestDayAssignments);
+        Assert.Equal(ShiftLabel.Evening, requestDayAssignments[0].ShiftLabel);
+
+        // در سایر روزهای غیرتعطیل: فقط شیفت صبح
+        for (var d = start.Date; d <= constraints.EndDate.Date; d = d.AddDays(1))
+        {
+            if (constraints.HolidayDates.Contains(d) || d.Date == requestDate.Date) continue;
+            var dayAssignments = solution.GetUserAssignments(fixedUser.UserId, d).ToList();
+            Assert.Single(dayAssignments);
+            Assert.Equal(ShiftLabel.Morning, dayAssignments[0].ShiftLabel);
+        }
+    }
 }
 
 

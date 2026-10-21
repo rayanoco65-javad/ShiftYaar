@@ -18,6 +18,11 @@ public static class DayShiftQuotaEligibility
         ShiftLabel label,
         DateTime date)
     {
+        if (user.ShiftType == ShiftTypes.FixedShift)
+        {
+            return false;
+        }
+
         if (label != ShiftLabel.Morning && label != ShiftLabel.Evening)
         {
             return true;
