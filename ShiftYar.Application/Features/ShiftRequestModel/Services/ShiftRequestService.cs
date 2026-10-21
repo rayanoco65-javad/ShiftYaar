@@ -267,7 +267,12 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
         {
             try
             {
-                var entity = await _repository.GetByIdAsync(id, "User", "Supervisor", "User.Specialty");
+                var entity = await _repository.GetByIdAsync(id,
+                    "User",
+                    "Supervisor",
+                    "User.Specialty",
+                    "User.UserResponsibilities",
+                    "User.UserResponsibilities.DepartmentResponsibility");
                 if (entity == null)
                     return ApiResponse<ShiftRequestDtoGet>.Fail("درخواست مورد نظر یافت نشد.");
 
@@ -536,6 +541,7 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
 
         /// <summary>
         /// سوپروایزر نباید درخواست حضور (ON) بیش از ظرفیت شیفت/تخصص در همان روز تأیید کند.
+        /// در حالت‌های مسئولیت‌محور (اتاق عمل و ...) ظرفیت کل شیفت و انطباق نقش‌های پرسنل بررسی می‌شود.
         /// </summary>
         private async Task<string?> ValidateOnShiftCapacityAsync(ShiftRequest entity)
         {
@@ -544,16 +550,20 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 !entity.ShiftLabel.HasValue ||
                 !entity.RequestDate.HasValue ||
                 entity.User == null ||
-                !entity.User.SpecialtyId.HasValue ||
                 !entity.User.DepartmentId.HasValue)
             {
                 return null;
             }
 
             var departmentId = entity.User.DepartmentId.Value;
-            var specialtyId = entity.User.SpecialtyId.Value;
             var requestDate = entity.RequestDate.Value.Date;
             var shiftLabel = entity.ShiftLabel.Value;
+            var isHoliday = await IsHolidayDateAsync(requestDate);
+
+            // استخراج تنظیمات چیدمان دپارتمان جهت تعیین حالت (سطح‌بندی vs مسئولیت‌محور)
+            var (deptSettingsList, _) = await _deptSettingsRepository.GetByFilterAsync(
+                new SimpleFilter<DepartmentSchedulingSettings>(s => s.DepartmentId == departmentId));
+            var staffingMode = deptSettingsList.FirstOrDefault()?.StaffingMode;
 
             var (shifts, _) = await _shiftRepository.GetByFilterAsync(
                 new ShiftFilter
@@ -562,29 +572,92 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                     PageNumber = 1,
                     PageSize = 100
                 },
-                "RequiredSpecialties");
+                "RequiredSpecialties",
+                "RequiredSpecialties.DepartmentResponsibility",
+                "RequiredResponsibilities",
+                "RequiredResponsibilities.DepartmentResponsibility");
+
+            var deptRecord = await _repositorDepartment.GetByIdAsync(departmentId, "Responsibilities");
+            var departmentResponsibilities = deptRecord?.Responsibilities?.ToList() ?? new List<DepartmentResponsibility>();
+
+            // در صورتی که دپارتمان مسئولیت‌محور (اتاق عمل و ...) باشد
+            if (ApprovedResponsibilityCapacityValidator.IsResponsibilityBased(staffingMode, shifts, departmentResponsibilities))
+            {
+                var (departmentUsers, _) = await _repositoryUser.GetByFilterAsync(
+                    new SimpleFilter<User>(u =>
+                        u.DepartmentId == departmentId &&
+                        (u.IsActive == null || u.IsActive == true)),
+                    "UserResponsibilities", "UserResponsibilities.DepartmentResponsibility");
+
+                var departmentUserIds = departmentUsers
+                    .Where(u => u.Id.HasValue)
+                    .Select(u => u.Id!.Value)
+                    .ToHashSet();
+
+                if (departmentUserIds.Count == 0)
+                {
+                    return null;
+                }
+
+                var (approvedRequests, _) = await _repository.GetByFilterAsync(
+                    new SimpleFilter<ShiftRequest>(r =>
+                        r.Id != entity.Id &&
+                        r.Status == RequestStatus.Approved &&
+                        r.RequestAction == RequestAction.RequestToBeOnShift &&
+                        r.RequestType == RequestType.SpecificShift &&
+                        r.ShiftLabel == shiftLabel &&
+                        r.RequestDate != null &&
+                        r.RequestDate.Value.Date == requestDate &&
+                        r.UserId != null &&
+                        departmentUserIds.Contains(r.UserId.Value)),
+                    "User", "User.UserResponsibilities", "User.UserResponsibilities.DepartmentResponsibility");
+
+                var requestingUser = entity.User;
+                if (requestingUser.UserResponsibilities == null && requestingUser.Id.HasValue)
+                {
+                    requestingUser = departmentUsers.FirstOrDefault(u => u.Id == requestingUser.Id.Value) ?? requestingUser;
+                }
+
+                return ApprovedResponsibilityCapacityValidator.ValidateOnShiftCapacity(
+                    shifts,
+                    shiftLabel,
+                    requestDate,
+                    isHoliday,
+                    requestingUser,
+                    departmentResponsibilities,
+                    approvedRequests,
+                    departmentUsers);
+            }
+
+            // حالت سطح‌بندی (LevelBased) یا ساده (Simple)
+            if (!entity.User.SpecialtyId.HasValue)
+            {
+                return null;
+            }
+
+            var specialtyId = entity.User.SpecialtyId.Value;
 
             var capacity = ApprovedOnShiftCapacityValidator.ResolveCapacityForSpecialty(
-                shifts, shiftLabel, specialtyId, await IsHolidayDateAsync(requestDate));
+                shifts, shiftLabel, specialtyId, isHoliday);
             if (capacity <= 0)
             {
                 return null;
             }
 
-            var (departmentUsers, _) = await _repositoryUser.GetByFilterAsync(
+            var (deptUsersForSpecialty, _) = await _repositoryUser.GetByFilterAsync(
                 new SimpleFilter<User>(u =>
                     u.DepartmentId == departmentId &&
                     u.SpecialtyId == specialtyId));
-            var departmentUserIds = departmentUsers
+            var specialtyUserIds = deptUsersForSpecialty
                 .Where(u => u.Id.HasValue)
                 .Select(u => u.Id!.Value)
                 .ToHashSet();
-            if (departmentUserIds.Count == 0)
+            if (specialtyUserIds.Count == 0)
             {
                 return null;
             }
 
-            var (approvedRequests, _) = await _repository.GetByFilterAsync(
+            var (approvedSpecialtyRequests, _) = await _repository.GetByFilterAsync(
                 new SimpleFilter<ShiftRequest>(r =>
                     r.Id != entity.Id &&
                     r.Status == RequestStatus.Approved &&
@@ -594,15 +667,15 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                     r.RequestDate != null &&
                     r.RequestDate.Value.Date == requestDate &&
                     r.UserId != null &&
-                    departmentUserIds.Contains(r.UserId.Value)),
+                    specialtyUserIds.Contains(r.UserId.Value)),
                 "User");
 
-            var approvedNames = approvedRequests
+            var approvedNames = approvedSpecialtyRequests
                 .Select(r => FormatUserDisplayName(r.User))
                 .ToList();
 
             return ApprovedOnShiftCapacityValidator.BuildExceededCapacityMessage(
-                approvedRequests.Count,
+                approvedSpecialtyRequests.Count,
                 capacity,
                 shiftLabel,
                 requestDate,
@@ -612,6 +685,7 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
         /// <summary>
         /// سوپروایزر نباید درخواست مرخصی بیش از سقف مجاز روزانه را تأیید کند.
         /// سقف مجاز = کل پرسنل فعال - (مجموع شیفت‌های امروز + شیفت شب روز قبل)
+        /// در حالت‌های مسئولیت‌محور، علاوه بر سقف کل دپارتمان، سقف مجاز تک‌تک نقش‌های تخصصی کاربر نیز بررسی می‌شود تا کسر نیرو رخ ندهد.
         /// </summary>
         private async Task<string?> ValidateDailyLeaveCapacityAsync(ShiftRequest entity)
         {
@@ -619,32 +693,22 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 entity.RequestType != RequestType.FullDay ||
                 !entity.RequestDate.HasValue ||
                 entity.User == null ||
-                !entity.User.DepartmentId.HasValue ||
-                !entity.User.SpecialtyId.HasValue)
+                !entity.User.DepartmentId.HasValue)
             {
                 return null;
             }
 
             var departmentId = entity.User.DepartmentId.Value;
-            var specialtyId = entity.User.SpecialtyId.Value;
             var requestDate = entity.RequestDate.Value.Date;
             var prevDate = requestDate.AddDays(-1);
 
-            var (departmentUsers, _) = await _repositoryUser.GetByFilterAsync(
-                new SimpleFilter<User>(u =>
-                    u.DepartmentId == departmentId &&
-                    u.SpecialtyId == specialtyId &&
-                    (u.IsActive == null || u.IsActive == true)));
+            var isHolidayToday = await IsHolidayDateAsync(requestDate);
+            var isHolidayYesterday = await IsHolidayDateAsync(prevDate);
 
-            var departmentUserIds = departmentUsers
-                .Where(u => u.Id.HasValue)
-                .Select(u => u.Id!.Value)
-                .ToHashSet();
-
-            if (departmentUserIds.Count == 0)
-            {
-                return null;
-            }
+            // استخراج تنظیمات چیدمان دپارتمان جهت تعیین حالت (سطح‌بندی vs مسئولیت‌محور)
+            var (deptSettingsList, _) = await _deptSettingsRepository.GetByFilterAsync(
+                new SimpleFilter<DepartmentSchedulingSettings>(s => s.DepartmentId == departmentId));
+            var staffingMode = deptSettingsList.FirstOrDefault()?.StaffingMode;
 
             var (shifts, _) = await _shiftRepository.GetByFilterAsync(
                 new ShiftFilter
@@ -653,21 +717,96 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                     PageNumber = 1,
                     PageSize = 100
                 },
-                "RequiredSpecialties");
+                "RequiredSpecialties",
+                "RequiredSpecialties.DepartmentResponsibility",
+                "RequiredResponsibilities",
+                "RequiredResponsibilities.DepartmentResponsibility");
 
-            var isHolidayToday = await IsHolidayDateAsync(requestDate);
-            var isHolidayYesterday = await IsHolidayDateAsync(prevDate);
+            var deptRecord = await _repositorDepartment.GetByIdAsync(departmentId, "Responsibilities");
+            var departmentResponsibilities = deptRecord?.Responsibilities?.ToList() ?? new List<DepartmentResponsibility>();
+
+            // در صورتی که دپارتمان مسئولیت‌محور (اتاق عمل و ...) باشد
+            if (ApprovedResponsibilityCapacityValidator.IsResponsibilityBased(staffingMode, shifts, departmentResponsibilities))
+            {
+                var (departmentUsers, _) = await _repositoryUser.GetByFilterAsync(
+                    new SimpleFilter<User>(u =>
+                        u.DepartmentId == departmentId &&
+                        (u.IsActive == null || u.IsActive == true)),
+                    "UserResponsibilities", "UserResponsibilities.DepartmentResponsibility");
+
+                var departmentUserIds = departmentUsers
+                    .Where(u => u.Id.HasValue)
+                    .Select(u => u.Id!.Value)
+                    .ToHashSet();
+
+                if (departmentUserIds.Count == 0)
+                {
+                    return null;
+                }
+
+                var (approvedRequests, _) = await _repository.GetByFilterAsync(
+                    new SimpleFilter<ShiftRequest>(r =>
+                        r.Id != entity.Id &&
+                        r.Status == RequestStatus.Approved &&
+                        r.RequestAction == RequestAction.RequestToBeOffShift &&
+                        r.RequestType == RequestType.FullDay &&
+                        r.RequestDate != null &&
+                        r.RequestDate.Value.Date == requestDate &&
+                        r.UserId != null &&
+                        departmentUserIds.Contains(r.UserId.Value)),
+                    "User", "User.UserResponsibilities", "User.UserResponsibilities.DepartmentResponsibility");
+
+                var requestingUser = entity.User;
+                if (requestingUser.UserResponsibilities == null && requestingUser.Id.HasValue)
+                {
+                    requestingUser = departmentUsers.FirstOrDefault(u => u.Id == requestingUser.Id.Value) ?? requestingUser;
+                }
+
+                return ApprovedResponsibilityCapacityValidator.ValidateDailyLeaveCapacity(
+                    shifts,
+                    requestDate,
+                    isHolidayToday,
+                    isHolidayYesterday,
+                    requestingUser,
+                    departmentResponsibilities,
+                    approvedRequests,
+                    departmentUsers);
+            }
+
+            // حالت سطح‌بندی (LevelBased) یا ساده (Simple)
+            if (!entity.User.SpecialtyId.HasValue)
+            {
+                return null;
+            }
+
+            var specialtyId = entity.User.SpecialtyId.Value;
+
+            var (deptUsersForSpecialty, _) = await _repositoryUser.GetByFilterAsync(
+                new SimpleFilter<User>(u =>
+                    u.DepartmentId == departmentId &&
+                    u.SpecialtyId == specialtyId &&
+                    (u.IsActive == null || u.IsActive == true)));
+
+            var specialtyUserIds = deptUsersForSpecialty
+                .Where(u => u.Id.HasValue)
+                .Select(u => u.Id!.Value)
+                .ToHashSet();
+
+            if (specialtyUserIds.Count == 0)
+            {
+                return null;
+            }
 
             var todayShiftDemand = ApprovedLeaveCapacityValidator.CalculateDailyShiftDemandForSpecialty(
                 shifts, specialtyId, isHolidayToday);
             var yesterdayNightDemand = ApprovedLeaveCapacityValidator.CalculateNightShiftDemandForSpecialty(
                 shifts, specialtyId, isHolidayYesterday);
 
-            var totalActivePersonnel = departmentUsers.Count;
+            var totalActivePersonnel = deptUsersForSpecialty.Count;
             var maxCapacity = ApprovedLeaveCapacityValidator.CalculateMaxDailyLeaveCapacity(
                 totalActivePersonnel, todayShiftDemand, yesterdayNightDemand);
 
-            var (approvedRequests, _) = await _repository.GetByFilterAsync(
+            var (approvedSpecialtyRequests, _) = await _repository.GetByFilterAsync(
                 new SimpleFilter<ShiftRequest>(r =>
                     r.Id != entity.Id &&
                     r.Status == RequestStatus.Approved &&
@@ -676,16 +815,16 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                     r.RequestDate != null &&
                     r.RequestDate.Value.Date == requestDate &&
                     r.UserId != null &&
-                    departmentUserIds.Contains(r.UserId.Value)),
+                    specialtyUserIds.Contains(r.UserId.Value)),
                 "User");
 
-            var approvedUserIds = approvedRequests
+            var approvedUserIds = approvedSpecialtyRequests
                 .Where(r => r.UserId.HasValue)
                 .Select(r => r.UserId!.Value)
                 .Distinct()
                 .ToHashSet();
 
-            var approvedNames = approvedRequests
+            var approvedNames = approvedSpecialtyRequests
                 .Where(r => r.UserId.HasValue && approvedUserIds.Contains(r.UserId.Value))
                 .GroupBy(r => r.UserId)
                 .Select(g => FormatUserDisplayName(g.First().User))

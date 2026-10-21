@@ -1781,6 +1781,8 @@ worked ≈ required − shortfall + (مازاد داخل سقف رضایت) + ov
 - `ShiftYar.Api/Controllers/ShiftRequestModel/ShiftRequestController.cs`
 - `ShiftYar.Application/Features/ShiftRequestModel/Services/ShiftRequestService.cs`
 - `ShiftYar.Application/Common/Utilities/ApprovedOnShiftCapacityValidator.cs`
+- `ShiftYar.Application/Common/Utilities/ApprovedLeaveCapacityValidator.cs`
+- `ShiftYar.Application/Common/Utilities/ApprovedResponsibilityCapacityValidator.cs` (اعتبارسنجی سقف ظرفیت حضور و مرخصی بر اساس نقش‌ها در اتاق عمل)
 - `ShiftYar.Api/Controllers/ShiftExchangeModel/ShiftExchangeController.cs`
 - `ShiftYar.Application/Features/ShiftExchangeModel/Services/ShiftExchangeService.cs`
 - `ShiftYar.Application/Common/Utilities/ShiftExchangeValidator.cs`
