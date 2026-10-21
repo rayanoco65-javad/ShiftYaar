@@ -177,14 +177,24 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             OvertimeBalanceGuard.Enforce(bestSolution, _constraints);
             AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSolution, _constraints);
             ApprovedRequestGuard.ForceApply(bestSolution, _constraints);
+            if (ShiftCoverageGuard.GetUnderCapacityViolations(bestSolution, _constraints).Count > 0)
+            {
+                ShiftCoverageGuard.ForceFillAllMissingCoverage(bestSolution, _constraints);
+                ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
+            }
+            if (!AreExactNightQuotasSatisfied(bestSolution, out _))
+            {
+                ExactNightQuotaGuard.ForceSatisfyAllDeficits(bestSolution, _constraints);
+                ExactNightQuotaGuard.GlobalRebalanceNightQuotas(bestSolution, _constraints);
+                ExactNightQuotaGuard.Enforce(bestSolution, _constraints);
+                ShiftCoverageGuard.ForceFillAllMissingCoverage(bestSolution, _constraints);
+                ShiftCoverageGuard.StripExcessCoverage(bestSolution, _constraints);
+            }
             if (ShiftResponsibilityRules.IsApplicable(_constraints))
             {
                 ShiftResponsibilityRules.RepairResponsibilityDeficits(bestSolution, _constraints);
                 ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(bestSolution, _constraints);
             }
-            ShiftEligibilityGuard.StripIneligibleAssignments(bestSolution, _constraints);
-            AdjacentShiftRestGuard.StripForbiddenAdjacencies(bestSolution, _constraints);
-            DailyDuplicateAssignmentGuard.StripDuplicates(bestSolution, _constraints);
             RefreshSolutionViolations(bestSolution);
             stopwatch.Stop();
             _statistics.ExecutionTime = stopwatch.Elapsed;
@@ -1946,9 +1956,6 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 ShiftResponsibilityRules.RepairResponsibilityDeficits(solution, _constraints);
                 ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(solution, _constraints);
             }
-            ShiftEligibilityGuard.StripIneligibleAssignments(solution, _constraints);
-            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, _constraints);
-            DailyDuplicateAssignmentGuard.StripDuplicates(solution, _constraints);
             solution.Score = CalculateSolutionScore(solution);
             RefreshSolutionViolations(solution);
         }
@@ -4270,7 +4277,9 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 var trial = new[] { s.ShiftLabel, installLabel };
                 var curMax = effectiveMax;
                 if (user.CanBypassMaxShiftsPerDay(trial, date) && curMax < 2) curMax = 2;
-                return !DailyAssignmentRules.IsValidDaySet(trial, curMax, forbidDup);
+                if (!DailyAssignmentRules.IsValidDaySet(trial, curMax, forbidDup)) return true;
+                return !ShiftEligibilityResolver.IsAssignmentAllowed(
+                    user, new[] { s.ShiftLabel }, installLabel, curMax, forbidDup, date);
             });
         }
 
@@ -4456,7 +4465,13 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 {
                     curMax = 2;
                 }
-                if (!DailyAssignmentRules.IsValidDaySet(trial, curMax, forbidDup))
+                var allowed = DailyAssignmentRules.IsValidDaySet(trial, curMax, forbidDup);
+                if (allowed && user != null)
+                {
+                    allowed = ShiftEligibilityResolver.IsAssignmentAllowed(
+                        user, new[] { assignment.ShiftLabel }, keepLabel, curMax, forbidDup, date);
+                }
+                if (!allowed)
                 {
                     solution.UnlockSkeletonAssignment(userId, assignment.ShiftId, date);
                     solution.RemoveAssignment(userId, assignment.ShiftId, date, force: true);
@@ -5163,11 +5178,28 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
             {
                 effectiveMax = 2;
             }
-            return !DailyAssignmentRules.CanAddShift(
+            if (!DailyAssignmentRules.CanAddShift(
                 existing,
                 newLabel,
                 effectiveMax,
-                _constraints.HardRules.ForbidDuplicateDailyAssignments);
+                _constraints.HardRules.ForbidDuplicateDailyAssignments))
+            {
+                return true;
+            }
+
+            if (user != null && !ShiftEligibilityResolver.IsAssignmentAllowed(
+                user,
+                existing,
+                newLabel,
+                effectiveMax,
+                _constraints.HardRules.ForbidDuplicateDailyAssignments,
+                date,
+                _constraints.StartDate))
+            {
+                return true;
+            }
+
+            return false;
         }
 
         private int CountSpecialtyAssignments(ShiftSolution solution, int shiftId, DateTime date, int specialtyId, bool isOnCall)

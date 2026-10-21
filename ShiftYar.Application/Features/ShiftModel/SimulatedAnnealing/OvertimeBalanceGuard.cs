@@ -199,10 +199,23 @@ public static class OvertimeBalanceGuard
                                 var dayShiftAsg = dayCand.Assignment;
                                 var dayDonor = dayCand.Donor!;
 
+                                var maxDaily = constraints.HardRules.EnforceMaxShiftsPerDay
+                                    ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
+                                    : 2;
+                                var rApproved = receiver.RequiredShiftSlots.Count(s => s.Date.Date == freedDate);
+                                var rEffectiveMax = Math.Max(maxDaily, rApproved);
+                                var rExisting = receiverAsgsWithoutRNight.Where(a => a.Date.Date == freedDate).Select(a => a.ShiftLabel).ToList();
+
                                 if (receiver.UnavailableShiftSlots.Any(s => s.Date.Date == freedDate && s.ShiftLabel == dayShiftAsg.ShiftLabel))
                                     continue;
 
                                 if (!ShiftEligibilityResolver.MayTakeLabelOnDate(receiver, dayShiftAsg.ShiftLabel, freedDate))
+                                    continue;
+
+                                if (!DailyAssignmentRules.CanAddShift(rExisting, dayShiftAsg.ShiftLabel, rEffectiveMax, constraints.HardRules.ForbidDuplicateDailyAssignments))
+                                    continue;
+
+                                if (!ShiftEligibilityResolver.IsAssignmentAllowed(receiver, rExisting, dayShiftAsg.ShiftLabel, rEffectiveMax, constraints.HardRules.ForbidDuplicateDailyAssignments, freedDate, constraints.StartDate))
                                     continue;
 
                                 if (AdjacentShiftRestRules.WouldConflict(receiverAsgsWithoutRNight, freedDate, dayShiftAsg.ShiftLabel, constraints))
@@ -224,10 +237,19 @@ public static class OvertimeBalanceGuard
                                     .Where(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall && a.Date.Date != freedDate)
                                     .Select(a => a.Date.Date)
                                     .Distinct()
-                                    .Where(d => !receiver.UnavailableDates.Any(x => x.Date == d)
+                                    .Where(d =>
+                                    {
+                                        var tApproved = receiver.RequiredShiftSlots.Count(s => s.Date.Date == d);
+                                        var tEffectiveMax = Math.Max(maxDaily, tApproved);
+                                        var tExisting = receiverAsgsWithNewDay.Where(a => a.Date.Date == d).Select(a => a.ShiftLabel).ToList();
+                                        return !receiver.UnavailableDates.Any(x => x.Date == d)
                                              && !receiver.UnavailableShiftSlots.Any(s => s.Date.Date == d && s.ShiftLabel == ShiftLabel.Night)
+                                             && NightQuotaEligibility.CanAssignInCoverageFill(solution, constraints, receiver, d)
+                                             && DailyAssignmentRules.CanAddShift(tExisting, ShiftLabel.Night, tEffectiveMax, constraints.HardRules.ForbidDuplicateDailyAssignments)
+                                             && ShiftEligibilityResolver.IsAssignmentAllowed(receiver, tExisting, ShiftLabel.Night, tEffectiveMax, constraints.HardRules.ForbidDuplicateDailyAssignments, d, constraints.StartDate)
                                              && !AdjacentShiftRestRules.WouldConflict(receiverAsgsWithNewDay, d, ShiftLabel.Night, constraints)
-                                             && !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(receiverAsgsWithNewDay, receiver, d, constraints.HardRules.EnforceMaxConsecutiveShifts))
+                                             && !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(receiverAsgsWithNewDay, receiver, d, constraints.HardRules.EnforceMaxConsecutiveShifts);
+                                    })
                                     .OrderByDescending(d => d)
                                     .ToList();
 
@@ -243,7 +265,19 @@ public static class OvertimeBalanceGuard
                                 var maxConsec = MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(dayDonorAsgsWithoutDayShift, dayDonor, freedDate, constraints.HardRules.EnforceMaxConsecutiveShifts);
                                 var mgrMix = WouldPreserveManagerMix(solution, constraints, nightShiftReq.ShiftId, freedDate, receiver.UserId, dayDonor.UserId);
 
-                                var dayDonorCanTakeFreedNight = !unavailDate && !unavailSlot && eligibility && !adjacent && !maxConsec && mgrMix;
+                                var dApproved = dayDonor.RequiredShiftSlots.Count(s => s.Date.Date == freedDate);
+                                var dEffectiveMax = Math.Max(maxDaily, dApproved);
+                                var dExisting = dayDonorAsgsWithoutDayShift.Where(a => a.Date.Date == freedDate).Select(a => a.ShiftLabel).ToList();
+
+                                var dayDonorCanTakeFreedNight = !unavailDate 
+                                    && !unavailSlot 
+                                    && eligibility
+                                    && NightQuotaEligibility.CanAssignInCoverageFill(solution, constraints, dayDonor, freedDate)
+                                    && DailyAssignmentRules.CanAddShift(dExisting, ShiftLabel.Night, dEffectiveMax, constraints.HardRules.ForbidDuplicateDailyAssignments)
+                                    && ShiftEligibilityResolver.IsAssignmentAllowed(dayDonor, dExisting, ShiftLabel.Night, dEffectiveMax, constraints.HardRules.ForbidDuplicateDailyAssignments, freedDate, constraints.StartDate)
+                                    && !adjacent 
+                                    && !maxConsec 
+                                    && mgrMix;
 
                                 LogAction?.Invoke($"      DayDonor {dayDonor.UserName} canTakeNight={dayDonorCanTakeFreedNight} (unavailDate={unavailDate}, unavailSlot={unavailSlot}, elig={eligibility}, adj={adjacent}, maxConsec={maxConsec}, mgrMix={mgrMix})");
 
@@ -386,6 +420,13 @@ public static class OvertimeBalanceGuard
                                         var donorAsgsWithoutTarget = solution.GetUserAllAssignments(u!.UserId)
                                             .Where(a => a.Date.Date != targetDate && !(u.UserId == dayDonor.UserId && a.ShiftId == dayShiftAsg.ShiftId && a.Date.Date == freedDate))
                                             .ToList();
+                                        var uApproved = u.RequiredShiftSlots.Count(s => s.Date.Date == freedDate);
+                                        var uEffectiveMax = Math.Max(maxDaily, uApproved);
+                                        var uExisting = donorAsgsWithoutTarget.Where(a => a.Date.Date == freedDate).Select(a => a.ShiftLabel).ToList();
+                                        if (!ShiftEligibilityResolver.MayTakeLabelOnDate(u, ShiftLabel.Night, freedDate)) reasons.Add("IneligibleLabelFreed");
+                                        if (!NightQuotaEligibility.CanAssignInCoverageFill(solution, constraints, u, freedDate)) reasons.Add("QuotaIneligibleFreed");
+                                        if (!DailyAssignmentRules.CanAddShift(uExisting, ShiftLabel.Night, uEffectiveMax, constraints.HardRules.ForbidDuplicateDailyAssignments)) reasons.Add("DailyAssignmentForbiddenFreed");
+                                        if (!ShiftEligibilityResolver.IsAssignmentAllowed(u, uExisting, ShiftLabel.Night, uEffectiveMax, constraints.HardRules.ForbidDuplicateDailyAssignments, freedDate, constraints.StartDate)) reasons.Add("IneligibleFreed");
                                         if (AdjacentShiftRestRules.WouldConflict(donorAsgsWithoutTarget, freedDate, ShiftLabel.Night, constraints)) reasons.Add("AdjacentConflictFreed");
                                         if (MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(donorAsgsWithoutTarget, u, freedDate, constraints.HardRules.EnforceMaxConsecutiveShifts)) reasons.Add("MaxConsecutiveWorkdays");
                                         if (!WouldPreserveManagerMix(solution, constraints, nightShiftReq.ShiftId, targetDate, u.UserId, receiver.UserId)) reasons.Add("BreakMgrMixTarget");
@@ -1300,6 +1341,18 @@ public static class OvertimeBalanceGuard
                 label,
                 effectiveMax,
                 constraints.HardRules.ForbidDuplicateDailyAssignments))
+        {
+            return false;
+        }
+
+        if (!ShiftEligibilityResolver.IsAssignmentAllowed(
+                user,
+                existing,
+                label,
+                effectiveMax,
+                constraints.HardRules.ForbidDuplicateDailyAssignments,
+                date,
+                constraints.StartDate))
         {
             return false;
         }

@@ -2356,8 +2356,21 @@ public static class ExactNightQuotaGuard
 
         var labels = solution.GetUserAssignments(user.UserId, takeDate)
             .Where(a => !(a.ShiftLabel == ShiftLabel.Night && a.Date.Date == takeDate.Date))
-            .Select(a => a.ShiftLabel);
-        return DailyAssignmentRules.CanAddShift(labels, ShiftLabel.Night, GetMaxShiftsPerDay(constraints));
+            .Select(a => a.ShiftLabel)
+            .ToList();
+        var maxPerDay = GetMaxShiftsPerDay(constraints, user, takeDate);
+        if (!DailyAssignmentRules.CanAddShift(labels, ShiftLabel.Night, maxPerDay))
+        {
+            return false;
+        }
+        return ShiftEligibilityResolver.IsAssignmentAllowed(
+            user,
+            labels,
+            ShiftLabel.Night,
+            maxPerDay,
+            forbidDuplicateLabels: true,
+            date: takeDate,
+            rangeStartDate: constraints.StartDate);
     }
 
     private static bool HasSpecialtyCapacityIgnoring(
@@ -2774,7 +2787,8 @@ public static class ExactNightQuotaGuard
                 return true;
             })
             .Select(a => a.ShiftLabel);
-        if (!DailyAssignmentRules.CanAddShift(labels, ShiftLabel.Night, maxPerDay))
+        if (!DailyAssignmentRules.CanAddShift(labels, ShiftLabel.Night, maxPerDay)
+            || !ShiftEligibilityResolver.IsAssignmentAllowed(user, labels, ShiftLabel.Night, maxPerDay, date: date))
         {
             return false;
         }
@@ -3113,16 +3127,22 @@ public static class ExactNightQuotaGuard
 
         var otherLabelsAtFrom = solution.GetUserAssignments(other.UserId, userFrom)
             .Where(a => !(a.ShiftLabel == ShiftLabel.Night && a.Date.Date == userFrom))
-            .Select(a => a.ShiftLabel);
-        if (!DailyAssignmentRules.CanAddShift(otherLabelsAtFrom, ShiftLabel.Night, GetMaxShiftsPerDay(constraints)))
+            .Select(a => a.ShiftLabel)
+            .ToList();
+        var otherMaxPerDay = GetMaxShiftsPerDay(constraints, other, userFrom);
+        if (!DailyAssignmentRules.CanAddShift(otherLabelsAtFrom, ShiftLabel.Night, otherMaxPerDay)
+            || !ShiftEligibilityResolver.IsAssignmentAllowed(other, otherLabelsAtFrom, ShiftLabel.Night, otherMaxPerDay, forbidDuplicateLabels: true, date: userFrom, rangeStartDate: constraints.StartDate))
         {
             return false;
         }
 
         var userLabelsAtTo = solution.GetUserAssignments(user.UserId, userTo)
             .Where(a => !(a.ShiftId == nightShift.ShiftId && a.Date.Date == userTo))
-            .Select(a => a.ShiftLabel);
-        if (!DailyAssignmentRules.CanAddShift(userLabelsAtTo, ShiftLabel.Night, GetMaxShiftsPerDay(constraints)))
+            .Select(a => a.ShiftLabel)
+            .ToList();
+        var userMaxPerDay = GetMaxShiftsPerDay(constraints, user, userTo);
+        if (!DailyAssignmentRules.CanAddShift(userLabelsAtTo, ShiftLabel.Night, userMaxPerDay)
+            || !ShiftEligibilityResolver.IsAssignmentAllowed(user, userLabelsAtTo, ShiftLabel.Night, userMaxPerDay, forbidDuplicateLabels: true, date: userTo, rangeStartDate: constraints.StartDate))
         {
             return false;
         }
@@ -3208,8 +3228,22 @@ public static class ExactNightQuotaGuard
         var existingLabels = solution.GetUserAssignments(user.UserId, date)
             .Where(a => !(ignoreUserNightOnDate && a.ShiftLabel == ShiftLabel.Night))
             .Where(a => !(a.Date.Date == date.Date && a.ShiftLabel == ShiftLabel.Evening && !IsProtected(constraints, user.UserId, a)))
-            .Select(a => a.ShiftLabel);
-        if (!DailyAssignmentRules.CanAddShift(existingLabels, ShiftLabel.Night, GetMaxShiftsPerDay(constraints, user, date)))
+            .Select(a => a.ShiftLabel)
+            .ToList();
+        var maxPerDay = GetMaxShiftsPerDay(constraints, user, date);
+        if (!DailyAssignmentRules.CanAddShift(existingLabels, ShiftLabel.Night, maxPerDay))
+        {
+            return false;
+        }
+
+        if (!ShiftEligibilityResolver.IsAssignmentAllowed(
+            user,
+            existingLabels,
+            ShiftLabel.Night,
+            maxPerDay,
+            forbidDuplicateLabels: true,
+            date: date,
+            rangeStartDate: constraints.StartDate))
         {
             return false;
         }

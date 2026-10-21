@@ -885,6 +885,18 @@ public static class HolidayMorningEveningFairnessGuard
             return false;
         }
 
+        if (!ShiftEligibilityResolver.IsAssignmentAllowed(
+                receiver,
+                existingLabelsOnDate,
+                label,
+                effectiveMax,
+                constraints.HardRules.ForbidDuplicateDailyAssignments,
+                date,
+                constraints.StartDate))
+        {
+            return false;
+        }
+
         if (AdjacentShiftRestRules.WouldConflict(remaining, date, label, constraints))
         {
             return false;

@@ -587,12 +587,25 @@ public static class ShiftSeniorityDistributionGuard
         var approvedCount = user.RequiredShiftSlots.Count(s => s.Date.Date == assignment.Date.Date);
         var effectiveMax = Math.Max(maxPerDay, approvedCount);
         var existingLabels = solution.GetUserAssignments(user.UserId, assignment.Date)
-            .Select(a => a.ShiftLabel);
+            .Select(a => a.ShiftLabel)
+            .ToList();
         if (!DailyAssignmentRules.CanAddShift(
                 existingLabels,
                 assignment.ShiftLabel,
                 effectiveMax,
                 constraints.HardRules.ForbidDuplicateDailyAssignments))
+        {
+            return false;
+        }
+
+        if (!ShiftEligibilityResolver.IsAssignmentAllowed(
+                user,
+                existingLabels,
+                assignment.ShiftLabel,
+                effectiveMax,
+                constraints.HardRules.ForbidDuplicateDailyAssignments,
+                assignment.Date,
+                constraints.StartDate))
         {
             return false;
         }

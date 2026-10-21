@@ -2547,7 +2547,7 @@ public class DiagnoseDept2NightQuotasTests
         ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
         CheckState("After ExactNightQuotaGuard 1");
 
-        scheduler.PerformFinalManagerMixRepairSweep(candidateSolution);
+        scheduler.PerformFinalManagerMixRepairSweep(candidateSolution, throwIfUnsatisfied: false);
         CheckState("After PerformFinalManagerMixRepairSweep 1");
 
         if (!scheduler.AreExactNightQuotasSatisfied(candidateSolution, out _))

@@ -437,7 +437,7 @@ namespace ShiftYar.Application.Common.Utilities
                                 .OrderBy(u => u.ResponsibilityIds.Count)
                                 .ToList();
 
-                            // پرسنل قابل تعویض در این اسلات: دارای نقش پیش‌فرض یا مازاد، بدون درخواست تأییدشده یا قفل اسکلتون
+                            // پرسنل قابل تعویض در این اسلات: بدون درخواست تأییدشده یا قفل اسکلتون، با اولویت نقش پیش‌فرض
                             var defaultId = constraints.DefaultDepartmentResponsibilityId ?? (shiftReq.ResponsibilityRequirements.FirstOrDefault(r => r.IsDefault)?.DepartmentResponsibilityId ?? 0);
                             var replaceable = slotAssignments
                                 .Where(a =>
@@ -448,10 +448,10 @@ namespace ShiftYar.Application.Common.Utilities
                                     if (solution.IsLockedSkeleton(a.UserId, a.ShiftId, date)) return false;
                                     return true;
                                 })
-                                .Where(a => a.ResponsibilityId == defaultId || slotAssignments.Count(x => x.ResponsibilityId == a.ResponsibilityId) > 1)
                                 .OrderByDescending(a => a.ResponsibilityId == defaultId ? 1 : 0)
                                 .ToList();
 
+                            var prevSatisfied = shiftReq.ResponsibilityRequirements.Sum(r => Math.Min(r.ForDay(isHoliday).RequiredTotalCount, slotAssignments.Count(x => x.ResponsibilityId == r.DepartmentResponsibilityId)));
                             var repaired = false;
                             foreach (var cand in candidates)
                             {
@@ -490,8 +490,8 @@ namespace ShiftYar.Application.Common.Utilities
                                             constraints.UserConstraints,
                                             constraints.DefaultDepartmentResponsibilityId);
 
-                                        var newCount = newSlotAssignees.Count(a => a.ResponsibilityId == req.DepartmentResponsibilityId);
-                                        if (newCount > total)
+                                        var newSatisfied = shiftReq.ResponsibilityRequirements.Sum(r => Math.Min(r.ForDay(isHoliday).RequiredTotalCount, newSlotAssignees.Count(x => x.ResponsibilityId == r.DepartmentResponsibilityId)));
+                                        if (newSatisfied > prevSatisfied)
                                         {
                                             repaired = true;
                                             break;

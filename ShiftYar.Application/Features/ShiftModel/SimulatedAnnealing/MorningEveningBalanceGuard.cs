@@ -598,6 +598,18 @@ public static class MorningEveningBalanceGuard
             return false;
         }
 
+        if (!ShiftEligibilityResolver.IsAssignmentAllowed(
+                user,
+                existingLabels,
+                assignment.ShiftLabel,
+                effectiveMax,
+                constraints.HardRules.ForbidDuplicateDailyAssignments,
+                assignment.Date,
+                constraints.StartDate))
+        {
+            return false;
+        }
+
         var remaining = solution.GetUserAllAssignments(user.UserId)
             .Where(a => !removeKeys.Contains((a.ShiftId, a.Date.Date)))
             .ToList();

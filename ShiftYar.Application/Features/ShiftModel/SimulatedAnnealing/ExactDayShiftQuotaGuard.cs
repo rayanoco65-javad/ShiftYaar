@@ -337,6 +337,18 @@ public static class ExactDayShiftQuotaGuard
             return false;
         }
 
+        if (!ShiftEligibilityResolver.IsAssignmentAllowed(
+                user,
+                existing,
+                label,
+                effectiveMax,
+                constraints.HardRules.ForbidDuplicateDailyAssignments,
+                date,
+                constraints.StartDate))
+        {
+            return false;
+        }
+
         return !AdjacentShiftRestRules.WouldConflict(
             solution.GetUserAllAssignments(user.UserId), date, label, constraints)
                && !MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(

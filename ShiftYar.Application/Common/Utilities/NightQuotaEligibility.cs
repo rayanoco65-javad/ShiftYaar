@@ -130,4 +130,133 @@ public static class NightQuotaEligibility
         solution.GetUserAllAssignments(userId)
             .Count(a => a.ShiftLabel == ShiftLabel.Night && !a.IsOnCall &&
                         constraints.IsHolidayWeekendNight(a.Date));
+
+    public static void ClampInfeasibleQuotas(ShiftConstraints constraints)
+    {
+        foreach (var user in constraints.UserConstraints)
+        {
+            if (user.ExactNightShiftCount.HasValue)
+            {
+                var maxNights = CalculateMaxFeasibleNightShifts(user, constraints);
+                if (user.ExactNightShiftCount.Value > maxNights)
+                {
+                    user.ExactNightShiftCount = maxNights;
+                }
+            }
+
+            if (user.ExactHolidayWeekendNightShiftCount.HasValue &&
+                user.ExactHolidayWeekendNightShiftCount.Value > (user.ExactNightShiftCount ?? 0))
+            {
+                user.ExactHolidayWeekendNightShiftCount = user.ExactNightShiftCount;
+            }
+        }
+    }
+
+    public static int CalculateMaxFeasibleNightShifts(UserConstraint user, ShiftConstraints constraints)
+    {
+        if (!ShiftEligibilityResolver.MayEverTakeLabel(user, ShiftLabel.Night))
+        {
+            return 0;
+        }
+
+        var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
+            ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
+            : 2;
+
+        var start = constraints.StartDate.Date;
+        var end = constraints.EndDate.Date;
+        var daysCount = (end - start).Days + 1;
+        var candidateDates = new List<DateTime>();
+
+        for (var i = 0; i < daysCount; i++)
+        {
+            var d = start.AddDays(i);
+
+            if (user.UnavailableDates.Any(x => x.Date == d))
+            {
+                continue;
+            }
+
+            if (user.UnavailableShiftSlots.Any(x => x.Date == d && x.ShiftLabel == ShiftLabel.Night))
+            {
+                continue;
+            }
+
+            var reqOnD = user.RequiredShiftSlots.Where(x => x.Date == d).ToList();
+            if (reqOnD.Any(x => x.ShiftLabel == ShiftLabel.Night))
+            {
+                candidateDates.Add(d);
+                continue;
+            }
+
+            if (reqOnD.Any(x => x.ShiftLabel == ShiftLabel.Evening))
+            {
+                continue;
+            }
+
+            if (reqOnD.Any(x => x.ShiftLabel == ShiftLabel.Morning))
+            {
+                if (maxPerDay < 2 || !ShiftEligibilityResolver.SupportsMorningNightCombo(user))
+                {
+                    continue;
+                }
+            }
+
+            var nextD = d.AddDays(1);
+            var reqOnNext = user.RequiredShiftSlots.Where(x => x.Date == nextD).ToList();
+            if (reqOnNext.Any(x => x.ShiftLabel == ShiftLabel.Morning))
+            {
+                continue;
+            }
+
+            if (reqOnNext.Any(x => x.ShiftLabel == ShiftLabel.Evening))
+            {
+                var allowEvening = user.ResolveAllowEveningAfterNightShift(constraints.HardRules.AllowEveningAfterNightShift);
+                if (!allowEvening)
+                {
+                    continue;
+                }
+            }
+
+            if (reqOnNext.Any(x => x.ShiftLabel == ShiftLabel.Night))
+            {
+                var allowNight = user.ResolveAllowNightShiftAfterNightShift(constraints.HardRules.AllowNightShiftAfterNightShift);
+                if (!allowNight)
+                {
+                    continue;
+                }
+            }
+
+            var prevD = d.AddDays(-1);
+            var reqOnPrev = user.RequiredShiftSlots.Where(x => x.Date == prevD).ToList();
+            if (reqOnPrev.Any(x => x.ShiftLabel == ShiftLabel.Night))
+            {
+                var allowNight = user.ResolveAllowNightShiftAfterNightShift(constraints.HardRules.AllowNightShiftAfterNightShift);
+                if (!allowNight)
+                {
+                    continue;
+                }
+            }
+
+            candidateDates.Add(d);
+        }
+
+        var allowConsecutiveNight = user.ResolveAllowNightShiftAfterNightShift(constraints.HardRules.AllowNightShiftAfterNightShift);
+        if (!allowConsecutiveNight && candidateDates.Count > 1)
+        {
+            var nonConsecutiveCount = 0;
+            DateTime? lastAssigned = null;
+            foreach (var cd in candidateDates)
+            {
+                if (!lastAssigned.HasValue || (cd - lastAssigned.Value).TotalDays > 1)
+                {
+                    nonConsecutiveCount++;
+                    lastAssigned = cd;
+                }
+            }
+            return nonConsecutiveCount;
+        }
+
+        return candidateDates.Count;
+    }
 }

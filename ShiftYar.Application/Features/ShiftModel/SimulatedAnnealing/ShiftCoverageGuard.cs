@@ -326,7 +326,7 @@ public static class ShiftCoverageGuard
                     var candidates = constraints.UserConstraints
                         .Where(u => u.IsActive && u.SpecialtyId == specialtyReq.SpecialtyId)
                         .Where(u => u.ShiftType != ShiftTypes.FixedShift)
-                        .Where(ShiftEligibilityResolver.SupportsMorningEveningCombo)
+                        .Where(u => ShiftEligibilityResolver.SupportsMorningEveningCombo(u, maxPerDay))
                         .Where(u => ShiftEligibilityResolver.HasInherentPermission(u, shiftReq.ShiftLabel))
                         .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
                         .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
@@ -826,7 +826,7 @@ public static class ShiftCoverageGuard
             .Where(u => !u.UnavailableDates.Any(d => d.Date == date.Date))
             .Where(u => !u.UnavailableShiftSlots.Any(s => s.Date.Date == date.Date && s.ShiftLabel == shiftReq.ShiftLabel))
             .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
-            .Where(u => CanAcceptShift(solution, constraints, u, date, shiftReq.ShiftLabel))
+            .Where(u => CanAcceptShift(solution, constraints, u, date, shiftReq.ShiftLabel, allowEmergencyRelaxation))
             .OrderBy(u => CoveragePriority(solution, constraints, u, date, shiftReq.ShiftLabel))
             .ThenBy(u => solution.GetUserAllAssignments(u.UserId).Count)
             .ToList();
@@ -864,7 +864,7 @@ public static class ShiftCoverageGuard
             }
 
             // ممکن است صبح/عصر با قوانین روزانه تداخل داشته باشد — دوباره چک
-            if (!CanAcceptShift(solution, constraints, user, date, shiftReq.ShiftLabel))
+            if (!CanAcceptShift(solution, constraints, user, date, shiftReq.ShiftLabel, allowEmergencyRelaxation))
             {
                 continue;
             }
@@ -1050,13 +1050,15 @@ public static class ShiftCoverageGuard
             .Where(u => !solution.HasAssignment(u.UserId, shiftReq.ShiftId, date))
             .Where(u =>
             {
-                var existing = solution.GetUserAssignments(u.UserId, date).Select(a => a.ShiftLabel);
+                var existing = solution.GetUserAssignments(u.UserId, date).Select(a => a.ShiftLabel).ToList();
                 var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay
                     ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay)
                     : 2;
                 var approvedCount = u.RequiredShiftSlots.Count(s => s.Date.Date == date.Date);
                 var effectiveMax = Math.Max(maxPerDay, approvedCount);
                 if (!DailyAssignmentRules.CanAddShift(existing, shiftReq.ShiftLabel, effectiveMax, constraints.HardRules.ForbidDuplicateDailyAssignments))
+                    return false;
+                if (!ShiftEligibilityResolver.IsAssignmentAllowed(u, existing, shiftReq.ShiftLabel, effectiveMax, constraints.HardRules.ForbidDuplicateDailyAssignments, date, constraints.StartDate))
                     return false;
                 return true;
             })
@@ -1470,7 +1472,8 @@ public static class ShiftCoverageGuard
         {
             var workDates = MaxConsecutiveWorkdayRules.GetCountableWorkDates(solution, user);
             var projected = MaxConsecutiveWorkdayRules.ProjectedRunIfWorkDayAdded(workDates, date);
-            if (projected > user.MaxConsecutiveShifts)
+            var limit = user.MaxConsecutiveShifts;
+            if (projected > limit)
             {
                 return false;
             }

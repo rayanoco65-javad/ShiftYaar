@@ -1164,9 +1164,6 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         ShiftResponsibilityRules.RepairResponsibilityDeficits(candidateSolution, constraints);
                         ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(candidateSolution, constraints);
                     }
-                    ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
-                    AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
-                    DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
 
                     scheduler.RefreshSolutionViolations(candidateSolution);
 
@@ -3523,6 +3520,8 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                     "LoadConstraints: Successfully built constraints for DepartmentId={DepartmentId} with {UserCount} user constraint(s) and {ShiftCount} shift requirement(s)",
                     request.DepartmentId, constraints.UserConstraints.Count, constraints.ShiftRequirements.Count);
 
+                NightQuotaEligibility.ClampInfeasibleQuotas(constraints);
+
                 return constraints;
             }
             catch (Exception ex)
@@ -4072,11 +4071,16 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                         ShiftResponsibilityRules.RepairResponsibilityDeficits(candidateSolution, constraints);
                         ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(candidateSolution, constraints);
                     }
-                    ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
-                    AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
-                    DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
 
                     scheduler.RefreshSolutionViolations(candidateSolution);
+
+                    if (!scheduler.AreExactNightQuotasSatisfied(candidateSolution, out _))
+                    {
+                        ExactNightQuotaGuard.ForceSatisfyAllDeficits(candidateSolution, constraints);
+                        ExactNightQuotaGuard.GlobalRebalanceNightQuotas(candidateSolution, constraints);
+                        ExactNightQuotaGuard.Enforce(candidateSolution, constraints);
+                        ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+                    }
 
                     EnsureApprovedRequestsOrThrow(scheduler, candidateSolution, constraints);
                     EnsureExactNightQuotasOrThrow(scheduler, candidateSolution);
