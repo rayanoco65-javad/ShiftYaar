@@ -18,7 +18,7 @@ public static class DayShiftQuotaEligibility
         ShiftLabel label,
         DateTime date)
     {
-        if (user.ShiftType == ShiftTypes.FixedShift)
+        if (user.ShiftType == ShiftTypes.FixedShift && !ShiftEligibilityResolver.MayEverTakeLabel(user, label))
         {
             return false;
         }

@@ -178,4 +178,109 @@ public class ApprovedLeaveCapacityValidatorTests
 
         Assert.Null(message);
     }
+
+    [Fact]
+    public void CanUserPerformLongShift_DetectsAllowedPermissionsAndCoupledRules_ConsideringMaxShiftsPerDay()
+    {
+        var userWithPerm = new ShiftYar.Domain.Entities.UserModel.User
+        {
+            AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.MorningEveningSameDay
+        };
+        // اگر سقف روزانه دپارتمان روی ۱ باشد، شیفت‌های لانگ فعال نمی‌شوند
+        Assert.False(ApprovedLeaveCapacityValidator.CanUserPerformMorningEvening(userWithPerm, maxShiftsPerDay: 1));
+        Assert.False(ApprovedLeaveCapacityValidator.CanUserPerformLongShift(userWithPerm, maxShiftsPerDay: 1));
+
+        // اگر سقف روزانه دپارتمان روی ۲ باشد، بر اساس مجوزهای نوع شیفت کاربر فعال می‌شود
+        Assert.True(ApprovedLeaveCapacityValidator.CanUserPerformMorningEvening(userWithPerm, maxShiftsPerDay: 2));
+        Assert.False(ApprovedLeaveCapacityValidator.CanUserPerformMorningNight(userWithPerm, maxShiftsPerDay: 2));
+        Assert.True(ApprovedLeaveCapacityValidator.CanUserPerformLongShift(userWithPerm, maxShiftsPerDay: 2));
+
+        var userCoupled = new ShiftYar.Domain.Entities.UserModel.User
+        {
+            MorningRequiresEvening = true
+        };
+        Assert.False(ApprovedLeaveCapacityValidator.CanUserPerformLongShift(userCoupled, maxShiftsPerDay: 1));
+        Assert.True(ApprovedLeaveCapacityValidator.CanUserPerformMorningEvening(userCoupled, maxShiftsPerDay: 2));
+        Assert.True(ApprovedLeaveCapacityValidator.CanUserPerformLongShift(userCoupled, maxShiftsPerDay: 2));
+
+        var userSingle = new ShiftYar.Domain.Entities.UserModel.User
+        {
+            AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening
+        };
+        Assert.False(ApprovedLeaveCapacityValidator.CanUserPerformLongShift(userSingle, maxShiftsPerDay: 2));
+
+        // کاربری که مجوز صریح ندارد ولی گردشی ۳ شیفت است
+        var userRotatingDefault = new ShiftYar.Domain.Entities.UserModel.User
+        {
+            ShiftType = ShiftTypes.RotatingShift,
+            ShiftSubType = ShiftSubTypes.ThreeShifts,
+            AllowedShiftPermissions = null
+        };
+        Assert.False(ApprovedLeaveCapacityValidator.CanUserPerformLongShift(userRotatingDefault, maxShiftsPerDay: 1));
+        Assert.True(ApprovedLeaveCapacityValidator.CanUserPerformMorningEvening(userRotatingDefault, maxShiftsPerDay: 2));
+    }
+
+    [Fact]
+    public void CalculateMaxLongShifts_ComputesCorrectPairs_RespectingMaxShiftsPerDay()
+    {
+        var users = new List<ShiftYar.Domain.Entities.UserModel.User>();
+        // ۴ کاربر مجاز به صبح+عصر
+        for (int i = 0; i < 4; i++)
+        {
+            users.Add(new ShiftYar.Domain.Entities.UserModel.User
+            {
+                Id = i + 1,
+                AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.MorningEveningSameDay
+            });
+        }
+        // ۸ کاربر عادی
+        for (int i = 4; i < 12; i++)
+        {
+            users.Add(new ShiftYar.Domain.Entities.UserModel.User
+            {
+                Id = i + 1,
+                AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening
+            });
+        }
+
+        // ۶ صبح، ۴ عصر، ۲ شب
+        // در حالت maxShiftsPerDay = 1، حتی با داشتن مجوزهای لانگ، هیچ شیفت لانگی فعال نمی‌شود
+        var maxLongWithCap1 = ApprovedLeaveCapacityValidator.CalculateMaxLongShifts(
+            morningDemand: 6, eveningDemand: 4, nightDemand: 2, users, maxShiftsPerDay: 1);
+        Assert.Equal(0, maxLongWithCap1);
+
+        // در حالت maxShiftsPerDay = 2، شیفت‌های لانگ بر اساس مجوزهای نوع شیفت فعال می‌شوند
+        var maxLongWithCap2 = ApprovedLeaveCapacityValidator.CalculateMaxLongShifts(
+            morningDemand: 6, eveningDemand: 4, nightDemand: 2, users, maxShiftsPerDay: 2);
+        Assert.Equal(4, maxLongWithCap2);
+    }
+
+    [Fact]
+    public void CalculateMaxDailyLeaveCapacity_WithLongShifts_ReducesRequiredPersonnelAndAllowsLeave()
+    {
+        // دپارتمان با ۱۲ نفر و ۱۲ شیفت. ۴ شیفت لانگ ممکن است => نیاز موثر = ۸ نفر
+        var withoutLong = ApprovedLeaveCapacityValidator.CalculateMaxDailyLeaveCapacity(
+            totalActivePersonnel: 12, todayShiftDemand: 12, yesterdayNightShiftDemand: 0, maxLongShifts: 0);
+        Assert.Equal(0, withoutLong); // قبلاً صفر می‌شد و مرخصی داده نمی‌شد
+
+        var withLong = ApprovedLeaveCapacityValidator.CalculateMaxDailyLeaveCapacity(
+            totalActivePersonnel: 12, todayShiftDemand: 12, yesterdayNightShiftDemand: 0, maxLongShifts: 4);
+        Assert.Equal(4, withLong); // با لانگ، سقف مرخصی به ۴ افزایش می‌یابد
+    }
+
+    [Fact]
+    public void ValidateAvailablePersonnelCoverage_ReturnsErrorWhenRemainingPersonnelCannotCover()
+    {
+        // نیاز شیفت ۱۲ عدد است، اما ۸ پرسنل باقیمانده بدون شیفت لانگ حداکثر ۸ شیفت پوشش می‌دهند
+        var error = ApprovedLeaveCapacityValidator.ValidateAvailablePersonnelCoverage(
+            availablePersonnelCount: 8,
+            availableLongShifts: 0,
+            todayShiftDemand: 12,
+            requestDate: new DateTime(2026, 10, 28));
+
+        Assert.NotNull(error);
+        Assert.Contains("حداکثر توانایی پوشش ۸ شیفت را دارند", error);
+        Assert.Contains("نیاز شیفت‌های این روز ۱۲ شیفت است", error);
+    }
 }
+

@@ -15,6 +15,7 @@ public class DayShiftQuotaEligibilityTests
         var user = new UserConstraint
         {
             UserId = 1,
+            ShiftType = ShiftTypes.RotatingShift,
             MorningFallbackParticipation = null,
             AllowedShiftPermissions = UserShiftPermission.Morning,
             AllowedShiftLabels = new List<ShiftLabel> { ShiftLabel.Morning }
@@ -32,6 +33,7 @@ public class DayShiftQuotaEligibilityTests
         var user = new UserConstraint
         {
             UserId = 1,
+            ShiftType = ShiftTypes.RotatingShift,
             MorningFallbackParticipation = false,
             AllowedShiftPermissions = UserShiftPermission.Morning,
             AllowedShiftLabels = new List<ShiftLabel> { ShiftLabel.Morning }
@@ -49,6 +51,7 @@ public class DayShiftQuotaEligibilityTests
         var user = new UserConstraint
         {
             UserId = 1,
+            ShiftType = ShiftTypes.RotatingShift,
             ExactMorningShiftCount = 2,
             MorningFallbackParticipation = null,
             AllowedShiftPermissions = UserShiftPermission.Morning,

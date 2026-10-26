@@ -3311,48 +3311,10 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                             .Where(s => s.Date.Date == date.Date)
                             .ToList();
 
+                        // درخواست‌های تأییدشده بر شیفت پایه فیکس و تمام محدودیت‌ها اولویت دارند؛
+                        // اگر کاربر برای این روز درخواست شیفت تأییدشده‌ای دارد، دقیقاً همان شیفت (یا شیفت‌های) درخواستی جایگزین شیفت پایه فیکس می‌شوند.
                         if (existingRequestedSlots.Count > 0)
                         {
-                            if (existingRequestedSlots.Any(s => s.ShiftLabel == fixedLabel))
-                            {
-                                continue;
-                            }
-
-                            // بررسی مجوز شیفت ترکیبی همان روز (مثلاً صبح+عصر یا صبح+شب) برای اضافه شدن شیفت فیکس در کنار شیفت درخواستی
-                            var allowsComboWithFixed = false;
-                            if (fixedLabel == ShiftLabel.Morning)
-                            {
-                                if (existingRequestedSlots.Any(s => s.ShiftLabel == ShiftLabel.Evening) &&
-                                    uc.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningEveningSameDay))
-                                {
-                                    allowsComboWithFixed = true;
-                                }
-                                else if (existingRequestedSlots.Any(s => s.ShiftLabel == ShiftLabel.Night) &&
-                                         uc.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningNightSameDay))
-                                {
-                                    allowsComboWithFixed = true;
-                                }
-                            }
-                            else if (fixedLabel == ShiftLabel.Evening)
-                            {
-                                if (existingRequestedSlots.Any(s => s.ShiftLabel == ShiftLabel.Morning) &&
-                                    uc.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningEveningSameDay))
-                                {
-                                    allowsComboWithFixed = true;
-                                }
-                            }
-
-                            if (allowsComboWithFixed)
-                            {
-                                uc.RequiredShiftSlots.Add(new ShiftSlotConstraint
-                                {
-                                    Date = date,
-                                    ShiftLabel = fixedLabel
-                                });
-                                EnsureLabelPermitted(uc, fixedLabel);
-                                appliedFixedSlots++;
-                            }
-
                             continue;
                         }
 

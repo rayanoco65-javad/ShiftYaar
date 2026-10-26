@@ -6,6 +6,7 @@ using ShiftYar.Domain.Entities.UserModel;
 using System;
 using System.Collections.Generic;
 using Xunit;
+using ShiftYar.Domain.Enums.ShiftRequestModel;
 using static ShiftYar.Domain.Enums.DepartmentModel.DepartmentEnums;
 using static ShiftYar.Domain.Enums.ShiftModel.ShiftEnums;
 using static ShiftYar.Domain.Enums.ShiftRequestModel.RequestStatus;
@@ -438,4 +439,136 @@ public class ApprovedResponsibilityCapacityValidatorTests
 
         Assert.Null(error);
     }
+
+    [Fact]
+    public void ValidateDailyLeaveCapacity_Department3_OpenHeartSurgery_WithLongShiftPermissions_AllowsLeave()
+    {
+        // شبیه‌سازی کامل سناریوی دپارتمان ۳ (اتاق عمل قلب باز):
+        // ۱۲ نفر پرسنل فعال
+        // مجموعاً ۱۲ شیفت در روز (۷ صبح، ۵ عصر) و بدون شیفت شب فعال در این روز (استراحت شب قبل: ۰ نفر)
+        // ۴ نفر از پرسنل دارای مجوز شیفت لانگ (صبح+عصر: MorningEveningSameDay) هستند.
+        var shifts = new List<Shift>
+        {
+            new()
+            {
+                Label = ShiftLabel.Morning,
+                RequiredResponsibilities = new List<ShiftRequiredResponsibility>
+                {
+                    new() { DepartmentResponsibilityId = 1, RequiredTotalCount = 7 }
+                }
+            },
+            new()
+            {
+                Label = ShiftLabel.Evening,
+                RequiredResponsibilities = new List<ShiftRequiredResponsibility>
+                {
+                    new() { DepartmentResponsibilityId = 1, RequiredTotalCount = 5 }
+                }
+            }
+        };
+
+        var users = new List<User>();
+        // کاربران ۱ تا ۴: دارای مجوز شیفت لانگ صبح+عصر
+        for (var i = 1; i <= 4; i++)
+        {
+            users.Add(new User
+            {
+                Id = i,
+                FullName = $"پرسنل لانگ {i}",
+                AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.MorningEveningSameDay
+            });
+        }
+        // کاربران ۵ تا ۱۲: پرسنل عادی بدون شیفت لانگ
+        for (var i = 5; i <= 12; i++)
+        {
+            users.Add(new User
+            {
+                Id = i,
+                FullName = $"پرسنل عادی {i}",
+                AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.Night
+            });
+        }
+
+        var requestingUser = users[11]; // کاربر ۱۲ درخواست مرخصی داده است
+
+        // ۰. اگر تنظیم «حداکثر شیفت در روز» دپارتمان روی ۱ باشد، شیفت‌های لانگ فعال نمی‌شوند و پیام محدودیت شدید نیرو داده می‌شود
+        var errorWithMax1 = ApprovedResponsibilityCapacityValidator.ValidateDailyLeaveCapacity(
+            shifts,
+            new DateTime(2026, 10, 28), // ۱۴۰۵/۰۸/۰۷
+            isHolidayToday: false,
+            isHolidayYesterday: false,
+            requestingUser,
+            new List<DepartmentResponsibility>(),
+            new List<ShiftRequest>(),
+            users,
+            maxShiftsPerDay: 1);
+
+        Assert.NotNull(errorWithMax1);
+        Assert.Contains("محدودیت شدید نیرو", errorWithMax1);
+        Assert.Contains("حداقل ۱۲ نفر نیرو برای پوشش شیفت‌های امروز (۱۲ نفر) و استراحت اجباری شیفت شب روز قبل (0 نفر) الزامی است", errorWithMax1);
+
+        // ۱. وقتی تنظیم «حداکثر شیفت در روز» دپارتمان روی ۲ باشد، شیفت‌های لانگ پرسنل واجد شرایط فعال می‌شوند و مرخصی تأیید می‌شود
+        var error = ApprovedResponsibilityCapacityValidator.ValidateDailyLeaveCapacity(
+            shifts,
+            new DateTime(2026, 10, 28), // ۱۴۰۵/۰۸/۰۷
+            isHolidayToday: false,
+            isHolidayYesterday: false,
+            requestingUser,
+            new List<DepartmentResponsibility>(),
+            new List<ShiftRequest>(),
+            users,
+            maxShiftsPerDay: 2);
+
+        // نباید خطای «محدودیت شدید نیرو... حداقل ۱۲ نفر برای پوشش ۱۲ شیفت» بدهد، چون ۴ نفر لانگ می‌توانند ۴ شیفت را همپوشانی دهند
+        Assert.Null(error);
+
+        // ۲. اگر ۴ مرخصی قبلاً تأیید شده باشد و کاربر پنجم درخواست دهد (سقف مجاز ۴ نفر تکمیل شده است)
+        var approvedRequests = new List<ShiftRequest>
+        {
+            new() { Id = 101, UserId = 9, User = users[8], RequestAction = RequestAction.RequestToBeOffShift, RequestType = RequestType.FullDay, RequestDate = new DateTime(2026, 10, 28) },
+            new() { Id = 102, UserId = 10, User = users[9], RequestAction = RequestAction.RequestToBeOffShift, RequestType = RequestType.FullDay, RequestDate = new DateTime(2026, 10, 28) },
+            new() { Id = 103, UserId = 11, User = users[10], RequestAction = RequestAction.RequestToBeOffShift, RequestType = RequestType.FullDay, RequestDate = new DateTime(2026, 10, 28) },
+            new() { Id = 104, UserId = 8, User = users[7], RequestAction = RequestAction.RequestToBeOffShift, RequestType = RequestType.FullDay, RequestDate = new DateTime(2026, 10, 28) }
+        };
+
+        var exceededError = ApprovedResponsibilityCapacityValidator.ValidateDailyLeaveCapacity(
+            shifts,
+            new DateTime(2026, 10, 28),
+            isHolidayToday: false,
+            isHolidayYesterday: false,
+            requestingUser,
+            new List<DepartmentResponsibility>(),
+            approvedRequests,
+            users,
+            maxShiftsPerDay: 2);
+
+        Assert.NotNull(exceededError);
+        Assert.Contains("ظرفیت مرخصی روزانه در تاریخ", exceededError);
+        Assert.Contains("تکمیل شده است", exceededError);
+
+        // ۳. اگر هر ۴ نفر پرسنل لانگ (کاربران ۱ تا ۴) مرخصی بگیرند، ۸ نفر باقیمانده بدون لانگ فقط ۸ شیفت را پوشش می‌دهند (کسری ۴ شیفت)
+        var allLongUsersOff = new List<ShiftRequest>
+        {
+            new() { Id = 201, UserId = 1, User = users[0], RequestAction = RequestAction.RequestToBeOffShift, RequestType = RequestType.FullDay, RequestDate = new DateTime(2026, 10, 28) },
+            new() { Id = 202, UserId = 2, User = users[1], RequestAction = RequestAction.RequestToBeOffShift, RequestType = RequestType.FullDay, RequestDate = new DateTime(2026, 10, 28) },
+            new() { Id = 203, UserId = 3, User = users[2], RequestAction = RequestAction.RequestToBeOffShift, RequestType = RequestType.FullDay, RequestDate = new DateTime(2026, 10, 28) }
+        };
+
+        var fourthLongUser = users[3]; // کاربر ۴ که چهارمین نفر لانگ است
+        var coverageShortageError = ApprovedResponsibilityCapacityValidator.ValidateDailyLeaveCapacity(
+            shifts,
+            new DateTime(2026, 10, 28),
+            isHolidayToday: false,
+            isHolidayYesterday: false,
+            fourthLongUser,
+            new List<DepartmentResponsibility>(),
+            allLongUsersOff,
+            users,
+            maxShiftsPerDay: 2);
+
+        Assert.NotNull(coverageShortageError);
+        Assert.Contains("امکان تأیید مرخصی در تاریخ", coverageShortageError);
+        Assert.Contains("پرسنل حاضر حداکثر توانایی پوشش ۸ شیفت را دارند", coverageShortageError);
+    }
 }
+

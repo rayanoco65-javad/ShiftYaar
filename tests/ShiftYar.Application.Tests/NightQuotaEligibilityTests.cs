@@ -15,6 +15,7 @@ public class NightQuotaEligibilityTests
         var user = new UserConstraint
         {
             UserId = 1,
+            ShiftType = ShiftTypes.RotatingShift,
             NightFallbackParticipation = null,
             AllowedShiftPermissions = UserShiftPermission.Night,
             AllowedShiftLabels = new List<ShiftLabel> { ShiftLabel.Night }
@@ -32,6 +33,7 @@ public class NightQuotaEligibilityTests
         var user = new UserConstraint
         {
             UserId = 1,
+            ShiftType = ShiftTypes.RotatingShift,
             NightFallbackParticipation = false,
             AllowedShiftPermissions = UserShiftPermission.Night,
             AllowedShiftLabels = new List<ShiftLabel> { ShiftLabel.Night }
@@ -49,6 +51,7 @@ public class NightQuotaEligibilityTests
         var user = new UserConstraint
         {
             UserId = 1,
+            ShiftType = ShiftTypes.RotatingShift,
             ExactNightShiftCount = 2,
             NightFallbackParticipation = null,
             AllowedShiftPermissions = UserShiftPermission.Night,

@@ -1712,7 +1712,23 @@ namespace ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing
                 {
                     if (group.Count() > 1)
                     {
+                        var userId = group.Key;
+                        var date = group.First().Date.Date;
+                        var userConstraint = _constraints.UserConstraints.FirstOrDefault(u => u.UserId == userId);
+                        var allApproved = userConstraint != null && group.All(a =>
+                            userConstraint.RequiredShiftSlots.Any(s => s.Date.Date == date && s.ShiftLabel == a.ShiftLabel));
+
+                        if (allApproved)
+                        {
+                            continue; // درخواست‌های تأییدشده بر تمام محدودیت‌های روزانه اولویت قطعی دارند
+                        }
+
                         var labels = group.Select(a => a.ShiftLabel).Distinct().ToList();
+                        if (userConstraint != null && userConstraint.CanBypassMaxShiftsPerDay(labels, date))
+                        {
+                            continue;
+                        }
+
                         if (group.Count() > 2 || !labels.Contains(ShiftLabel.Morning) || !labels.Contains(ShiftLabel.Evening))
                         {
                             return false;

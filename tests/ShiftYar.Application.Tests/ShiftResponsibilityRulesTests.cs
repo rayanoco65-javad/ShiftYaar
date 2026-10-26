@@ -626,6 +626,8 @@ public class ShiftResponsibilityRulesTests
                     UserId = 1,
                     UserName = "کاربر مجاز دوشیفت",
                     IsActive = true,
+                    ShiftType = ShiftTypes.RotatingShift,
+                    ShiftSubType = ShiftSubTypes.ThreeShifts,
                     AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.MorningEveningSameDay,
                     ResponsibilityIds = new HashSet<int> { 38 }
                 },
@@ -635,6 +637,8 @@ public class ShiftResponsibilityRulesTests
                     UserId = 2,
                     UserName = "کاربر عصر",
                     IsActive = true,
+                    ShiftType = ShiftTypes.RotatingShift,
+                    ShiftSubType = ShiftSubTypes.ThreeShifts,
                     AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening,
                     ResponsibilityIds = new HashSet<int> { 36 }
                 },
@@ -644,6 +648,8 @@ public class ShiftResponsibilityRulesTests
                     UserId = 3,
                     UserName = "کاربر مازاد عصر",
                     IsActive = true,
+                    ShiftType = ShiftTypes.RotatingShift,
+                    ShiftSubType = ShiftSubTypes.ThreeShifts,
                     AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening,
                     ResponsibilityIds = new HashSet<int> { 36 }
                 }

@@ -16,7 +16,7 @@ public static class NightQuotaEligibility
         UserConstraint user,
         DateTime date)
     {
-        if (user.ShiftType == ShiftTypes.FixedShift && user.ShiftSubType != ShiftSubTypes.FixedNight)
+        if (user.ShiftType == ShiftTypes.FixedShift && user.ShiftSubType != ShiftSubTypes.FixedNight && !ShiftEligibilityResolver.MayEverTakeLabel(user, ShiftLabel.Night))
         {
             return false;
         }

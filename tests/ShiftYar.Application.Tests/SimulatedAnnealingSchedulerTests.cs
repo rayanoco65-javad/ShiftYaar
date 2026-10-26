@@ -1109,6 +1109,8 @@ public class SimulatedAnnealingSchedulerTests
         Gender = gender,
         SpecialtyId = 10,
         IsActive = true,
+        ShiftType = ShiftTypes.RotatingShift,
+        ShiftSubType = ShiftSubTypes.ThreeShifts,
         CanBeShiftManager = canBeShiftManager,
         ShiftManagerLevel = canBeShiftManager ? ShiftManagerRules.Level1 : null,
         MaxConsecutiveShifts = 7,

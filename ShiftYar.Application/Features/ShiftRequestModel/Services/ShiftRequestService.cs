@@ -705,10 +705,12 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
             var isHolidayToday = await IsHolidayDateAsync(requestDate);
             var isHolidayYesterday = await IsHolidayDateAsync(prevDate);
 
-            // استخراج تنظیمات چیدمان دپارتمان جهت تعیین حالت (سطح‌بندی vs مسئولیت‌محور)
+            // استخراج تنظیمات چیدمان دپارتمان جهت تعیین حالت (سطح‌بندی vs مسئولیت‌محور) و سقف شیفت در روز
             var (deptSettingsList, _) = await _deptSettingsRepository.GetByFilterAsync(
                 new SimpleFilter<DepartmentSchedulingSettings>(s => s.DepartmentId == departmentId));
-            var staffingMode = deptSettingsList.FirstOrDefault()?.StaffingMode;
+            var deptSettings = deptSettingsList.FirstOrDefault();
+            var staffingMode = deptSettings?.StaffingMode;
+            var maxShiftsPerDay = deptSettings?.MaxShiftsPerDay ?? 1;
 
             var (shifts, _) = await _shiftRepository.GetByFilterAsync(
                 new ShiftFilter
@@ -770,7 +772,8 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                     requestingUser,
                     departmentResponsibilities,
                     approvedRequests,
-                    departmentUsers);
+                    departmentUsers,
+                    maxShiftsPerDay);
             }
 
             // حالت سطح‌بندی (LevelBased) یا ساده (Simple)
@@ -802,9 +805,14 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
             var yesterdayNightDemand = ApprovedLeaveCapacityValidator.CalculateNightShiftDemandForSpecialty(
                 shifts, specialtyId, isHolidayYesterday);
 
+            var (specM, specE, specN, _) = ApprovedLeaveCapacityValidator.CalculateShiftDemandsByLabelForSpecialty(
+                shifts, specialtyId, isHolidayToday);
+            var maxLongShifts = ApprovedLeaveCapacityValidator.CalculateMaxLongShifts(
+                specM, specE, specN, deptUsersForSpecialty, maxShiftsPerDay);
+
             var totalActivePersonnel = deptUsersForSpecialty.Count;
             var maxCapacity = ApprovedLeaveCapacityValidator.CalculateMaxDailyLeaveCapacity(
-                totalActivePersonnel, todayShiftDemand, yesterdayNightDemand);
+                totalActivePersonnel, todayShiftDemand, yesterdayNightDemand, maxLongShifts);
 
             var (approvedSpecialtyRequests, _) = await _repository.GetByFilterAsync(
                 new SimpleFilter<ShiftRequest>(r =>
@@ -832,7 +840,7 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
 
             var specialtyName = entity.User.Specialty?.SpecialtyName;
 
-            return ApprovedLeaveCapacityValidator.BuildExceededCapacityMessage(
+            var exceededMessage = ApprovedLeaveCapacityValidator.BuildExceededCapacityMessage(
                 approvedUserIds.Count,
                 maxCapacity,
                 totalActivePersonnel,
@@ -840,7 +848,34 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 yesterdayNightDemand,
                 requestDate,
                 specialtyName,
-                approvedNames);
+                approvedNames,
+                maxLongShifts);
+
+            if (exceededMessage != null)
+            {
+                return exceededMessage;
+            }
+
+            // بررسی توان پوشش فیزیکی نیروهای باقیمانده تخصص با احتساب شیفت لانگ
+            var leavesOnDate = new HashSet<int>(approvedUserIds);
+            if (entity.UserId.HasValue)
+            {
+                leavesOnDate.Add(entity.UserId.Value);
+            }
+
+            var availableUsers = deptUsersForSpecialty
+                .Where(u => u.Id.HasValue && !leavesOnDate.Contains(u.Id.Value))
+                .ToList();
+            var availableLongShifts = ApprovedLeaveCapacityValidator.CalculateMaxLongShifts(
+                specM, specE, specN, availableUsers, maxShiftsPerDay);
+
+            return ApprovedLeaveCapacityValidator.ValidateAvailablePersonnelCoverage(
+                availableUsers.Count,
+                availableLongShifts,
+                todayShiftDemand,
+                requestDate,
+                specialtyName,
+                maxShiftsPerDay);
         }
 
         private async Task<bool> IsHolidayDateAsync(DateTime requestDate)

@@ -191,7 +191,7 @@ public static class ShiftEligibilityResolver
     /// </summary>
     public static bool HasInherentPermission(UserConstraint user, ShiftLabel label)
     {
-        if (user.ShiftType == ShiftTypes.FixedShift)
+        if (user.ShiftType == ShiftTypes.FixedShift && !user.HasCoupledShiftRules)
         {
             return user.ShiftSubType switch
             {
@@ -293,13 +293,35 @@ public static class ShiftEligibilityResolver
                 : Math.Max(1, user.RequiredShiftSlots.Count(s => s.ShiftLabel == newLabel));
             var effectiveMax = Math.Max(maxShiftsPerDay, Math.Max(approvedCount, 2));
 
+            var currentExisting = existingOnDay.ToList();
+            if (forbidDuplicateLabels && currentExisting.Contains(newLabel))
+            {
+                return false;
+            }
+
+            if (currentExisting.Count >= effectiveMax)
+            {
+                return false;
+            }
+
+            // درخواست‌های تأییدشده بر تمام محدودیت‌ها اولویت دارند:
+            // اگر تمام شیفت‌های این روز برای کاربر جزو درخواست‌های تأییدشده باشند، مجاز هستند
+            var allAreApproved = date.HasValue &&
+                currentExisting.Append(newLabel).All(lbl =>
+                    user.RequiredShiftSlots.Any(s => s.Date.Date == date.Value.Date && s.ShiftLabel == lbl));
+
+            if (allAreApproved)
+            {
+                return true;
+            }
+
             return DailyAssignmentRules.CanAddShift(
                 existingOnDay, newLabel, effectiveMax, forbidDuplicateLabels);
         }
 
-        // پرسنل شیفت ثابت در صورتی که درخواست تأییدشده‌ای برای این شیفت در این تاریخ نداشته باشند،
-        // فقط مجاز به دریافت شیفت پیش‌فرض فیکس خود هستند.
-        if (user.ShiftType == ShiftTypes.FixedShift)
+        // پرسنل شیفت ثابت در صورتی که درخواست تأییدشده‌ای برای این شیفت در این تاریخ نداشته باشند
+        // و قانون شیفت مقید نداشته باشند، فقط مجاز به دریافت شیفت پیش‌فرض فیکس خود هستند.
+        if (user.ShiftType == ShiftTypes.FixedShift && !user.HasCoupledShiftRules)
         {
             var fixedLabel = user.ShiftSubType switch
             {

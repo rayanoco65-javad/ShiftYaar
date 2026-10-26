@@ -249,14 +249,82 @@ public static class ApprovedResponsibilityCapacityValidator
     }
 
     /// <summary>
-    /// محاسبه سقف مجاز مرخصی روزانه در دپارتمان مسئولیت‌محور
+    /// تفکیک نیاز شیفت‌های دپارتمان بر اساس نوبت (صبح، عصر، شب و سایر)
+    /// </summary>
+    public static (int morningDemand, int eveningDemand, int nightDemand, int otherDemand) CalculateShiftDemandsByLabelForDepartment(
+        IEnumerable<Shift> shifts,
+        bool isHoliday)
+    {
+        int morning = 0, evening = 0, night = 0, other = 0;
+        foreach (var shift in shifts)
+        {
+            var shiftCapacity = ResolveShiftCapacity(shift, isHoliday);
+            var label = shift.Label ?? ShiftLabelResolver.InferLabelFromStartTime(shift);
+            switch (label)
+            {
+                case ShiftLabel.Morning:
+                    morning += shiftCapacity;
+                    break;
+                case ShiftLabel.Evening:
+                    evening += shiftCapacity;
+                    break;
+                case ShiftLabel.Night:
+                    night += shiftCapacity;
+                    break;
+                default:
+                    other += shiftCapacity;
+                    break;
+            }
+        }
+        return (morning, evening, night, other);
+    }
+
+    /// <summary>
+    /// تفکیک نیاز یک مسئولیت خاص بر اساس نوبت شیفت (صبح، عصر، شب و سایر)
+    /// </summary>
+    public static (int morningDemand, int eveningDemand, int nightDemand, int otherDemand) CalculateShiftDemandsByLabelForResponsibility(
+        IEnumerable<Shift> shifts,
+        int respId,
+        bool isHoliday)
+    {
+        int morning = 0, evening = 0, night = 0, other = 0;
+        foreach (var shift in shifts)
+        {
+            var demands = ResolveResponsibilityDemands(shift, isHoliday);
+            var matching = demands.FirstOrDefault(d => d.DepartmentResponsibilityId == respId);
+            if (matching == null || matching.RequiredTotalCount <= 0) continue;
+
+            var label = shift.Label ?? ShiftLabelResolver.InferLabelFromStartTime(shift);
+            switch (label)
+            {
+                case ShiftLabel.Morning:
+                    morning += matching.RequiredTotalCount;
+                    break;
+                case ShiftLabel.Evening:
+                    evening += matching.RequiredTotalCount;
+                    break;
+                case ShiftLabel.Night:
+                    night += matching.RequiredTotalCount;
+                    break;
+                default:
+                    other += matching.RequiredTotalCount;
+                    break;
+            }
+        }
+        return (morning, evening, night, other);
+    }
+
+    /// <summary>
+    /// محاسبه سقف مجاز مرخصی روزانه در دپارتمان مسئولیت‌محور با در نظر گرفتن امکان شیفت لانگ
     /// </summary>
     public static int CalculateMaxDailyLeaveCapacity(
         int totalActivePersonnel,
         int todayShiftDemand,
-        int yesterdayNightShiftDemand)
+        int yesterdayNightShiftDemand,
+        int maxLongShifts = 0)
     {
-        var minRequired = todayShiftDemand + yesterdayNightShiftDemand;
+        var effectiveDemand = Math.Max(0, todayShiftDemand - maxLongShifts);
+        var minRequired = effectiveDemand + yesterdayNightShiftDemand;
         return Math.Max(0, totalActivePersonnel - minRequired);
     }
 
@@ -473,8 +541,9 @@ public static class ApprovedResponsibilityCapacityValidator
 
     /// <summary>
     /// اعتبارسنجی کامل تأیید درخواست مرخصی / عدم‌حضور (OFF) برای دپارتمان مسئولیت‌محور:
-    /// ۱. کنترل سقف کل مرخصی روزانه دپارتمان
-    /// ۲. کنترل سقف مرخصی به تفکیک تک‌تک نقش‌های تخصصی کاربر (جلوگیری از کسر نیرو در هر نقش)
+    /// ۱. کنترل سقف کل مرخصی روزانه دپارتمان با احتساب امکان شیفت لانگ
+    /// ۲. کنترل توان پوشش فیزیکی نیروهای باقیمانده بخش
+    /// ۳. کنترل سقف مرخصی به تفکیک تک‌تک نقش‌های تخصصی کاربر (جلوگیری از کسر نیرو در هر نقش با احتساب شیفت لانگ)
     /// </summary>
     public static string? ValidateDailyLeaveCapacity(
         IEnumerable<Shift> shifts,
@@ -484,7 +553,8 @@ public static class ApprovedResponsibilityCapacityValidator
         User requestingUser,
         IEnumerable<DepartmentResponsibility> departmentResponsibilities,
         IEnumerable<ShiftRequest> approvedLeaveRequestsOnDate,
-        IEnumerable<User> departmentUsers)
+        IEnumerable<User> departmentUsers,
+        int maxShiftsPerDay = 1)
     {
         var shiftsList = shifts.ToList();
         var usersList = departmentUsers.ToList();
@@ -493,8 +563,12 @@ public static class ApprovedResponsibilityCapacityValidator
         var yesterdayNightDemand = CalculateNightShiftDemand(shiftsList, isHolidayYesterday);
         var totalActivePersonnel = usersList.Count;
 
+        var (deptM, deptE, deptN, _) = CalculateShiftDemandsByLabelForDepartment(shiftsList, isHolidayToday);
+        var deptMaxLongShifts = ApprovedLeaveCapacityValidator.CalculateMaxLongShifts(
+            deptM, deptE, deptN, usersList, maxShiftsPerDay);
+
         var maxDailyLeaveCapacity = CalculateMaxDailyLeaveCapacity(
-            totalActivePersonnel, todayShiftDemand, yesterdayNightDemand);
+            totalActivePersonnel, todayShiftDemand, yesterdayNightDemand, deptMaxLongShifts);
 
         var approvedLeaveList = approvedLeaveRequestsOnDate.ToList();
         var approvedUserIds = approvedLeaveList
@@ -520,7 +594,34 @@ public static class ApprovedResponsibilityCapacityValidator
                 yesterdayNightDemand,
                 requestDate,
                 specialtyName: null,
-                approvedDisplayNames);
+                approvedDisplayNames,
+                maxLongShifts: deptMaxLongShifts);
+        }
+
+        // ۱.۱ بررسی امکان پوشش فیزیکی شیفت‌های امروز توسط پرسنل حاضر باقیمانده (با احتساب شیفت لانگ)
+        var leavesOnDate = new HashSet<int>(approvedUserIds);
+        if (requestingUser?.Id.HasValue == true)
+        {
+            leavesOnDate.Add(requestingUser.Id.Value);
+        }
+
+        var availableUsers = usersList
+            .Where(u => u.Id.HasValue && !leavesOnDate.Contains(u.Id.Value))
+            .ToList();
+
+        var availableLongShifts = ApprovedLeaveCapacityValidator.CalculateMaxLongShifts(
+            deptM, deptE, deptN, availableUsers, maxShiftsPerDay);
+
+        var deptCoverageError = ApprovedLeaveCapacityValidator.ValidateAvailablePersonnelCoverage(
+            availableUsers.Count,
+            availableLongShifts,
+            todayShiftDemand,
+            requestDate,
+            contextTitle: null,
+            maxShiftsPerDay: maxShiftsPerDay);
+        if (deptCoverageError != null)
+        {
+            return deptCoverageError;
         }
 
         // ۲. کنترل سقف مرخصی به تفکیک نقش‌های تخصصی کاربر (نقش‌های غیرپیش‌فرض)
@@ -539,16 +640,22 @@ public static class ApprovedResponsibilityCapacityValidator
             var yesterdayNightDemandR = CalculateDemandForResponsibility(
                 shiftsList, respId, isHolidayYesterday, ShiftLabel.Night);
 
-            var minRequiredR = todayDemandR + yesterdayNightDemandR;
-            if (minRequiredR <= 0)
-            {
-                continue;
-            }
+            var (respM, respE, respN, _) = CalculateShiftDemandsByLabelForResponsibility(shiftsList, respId, isHolidayToday);
 
             // پرسنل فعال دارای صلاحیت این نقش
             var qualifiedUsersR = usersList
                 .Where(u => CanUserPerformResponsibility(u, respId, isDefault: false))
                 .ToList();
+
+            var maxLongShiftsR = ApprovedLeaveCapacityValidator.CalculateMaxLongShifts(
+                respM, respE, respN, qualifiedUsersR, maxShiftsPerDay);
+
+            var effectiveTodayDemandR = Math.Max(0, todayDemandR - maxLongShiftsR);
+            var minRequiredR = effectiveTodayDemandR + yesterdayNightDemandR;
+            if (minRequiredR <= 0 && todayDemandR <= 0)
+            {
+                continue;
+            }
 
             var approvedLeavesR = qualifiedUsersR
                 .Count(u => u.Id.HasValue && approvedUserIds.Contains(u.Id.Value));
@@ -568,18 +675,41 @@ public static class ApprovedResponsibilityCapacityValidator
                     ? $" ({string.Join("، ", approvedNamesForRole)})"
                     : string.Empty;
 
+                var longShiftNoteR = maxLongShiftsR > 0
+                    ? $" با احتساب {maxLongShiftsR} شیفت لانگ"
+                    : string.Empty;
+
                 if (maxLeaveR == 0)
                 {
                     return $"به دلیل محدودیت نیرو برای مسئولیت «{roleTitle}» در تاریخ {persianDate}، امکان اعطای مرخصی وجود ندارد. " +
-                           $"حداقل {minRequiredR} نفر نیروی واجد شرایط برای پوشش شیفت‌های امروز ({todayDemandR} نفر) و استراحت اجباری شیفت شب روز قبل ({yesterdayNightDemandR} نفر) الزامی است، " +
+                           $"حداقل {minRequiredR} نفر نیروی واجد شرایط برای پوشش شیفت‌های امروز ({effectiveTodayDemandR} نفر{longShiftNoteR}) و استراحت اجباری شیفت شب روز قبل ({yesterdayNightDemandR} نفر) الزامی است، " +
                            $"در حالی که کل پرسنل فعال این بخش با صلاحیت «{roleTitle}» {qualifiedUsersR.Count} نفر است.";
                 }
 
                 return $"ظرفیت مرخصی برای مسئولیت «{roleTitle}» در تاریخ {persianDate} تکمیل شده است. " +
                        $"حداکثر سقف مجاز مرخصی همزمان برای این نقش {maxLeaveR} نفر است " +
-                       $"(کل پرسنل دارای این مسئولیت: {qualifiedUsersR.Count} نفر، نیاز شیفت‌های امروز: {todayDemandR} نفر، استراحت شب قبل: {yesterdayNightDemandR} نفر). " +
+                       $"(کل پرسنل دارای این مسئولیت: {qualifiedUsersR.Count} نفر، نیاز شیفت‌های امروز: {todayDemandR} نفر{longShiftNoteR}، استراحت شب قبل: {yesterdayNightDemandR} نفر). " +
                        $"در حال حاضر {approvedLeavesR} مرخصی تأییدشده برای این مسئولیت{namesPart} وجود دارد. " +
                        $"امکان تأیید مرخصی جدید وجود ندارد زیرا منجر به کسر نیرو برای مسئولیت «{roleTitle}» خواهد شد.";
+            }
+
+            // بررسی توان پوشش نیروهای حاضر واجد شرایط این نقش
+            var availableQualifiedUsersR = qualifiedUsersR
+                .Where(u => u.Id.HasValue && !leavesOnDate.Contains(u.Id.Value))
+                .ToList();
+            var availableLongShiftsR = ApprovedLeaveCapacityValidator.CalculateMaxLongShifts(
+                respM, respE, respN, availableQualifiedUsersR, maxShiftsPerDay);
+
+            var roleCoverageError = ApprovedLeaveCapacityValidator.ValidateAvailablePersonnelCoverage(
+                availableQualifiedUsersR.Count,
+                availableLongShiftsR,
+                todayDemandR,
+                requestDate,
+                $"مسئولیت «{resp.Title}»",
+                maxShiftsPerDay);
+            if (roleCoverageError != null)
+            {
+                return roleCoverageError;
             }
         }
 

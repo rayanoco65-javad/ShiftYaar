@@ -152,6 +152,8 @@ public class WeeklyAlternatingShiftSchedulingTests
         var user = new UserConstraint
         {
             UserId = 10,
+            ShiftType = ShiftTypes.RotatingShift,
+            ShiftSubType = ShiftSubTypes.ThreeShifts,
             IsWeeklyAlternatingActive = true,
             FirstWeekShiftLabel = ShiftLabel.Evening // شروع با عصر
         };
