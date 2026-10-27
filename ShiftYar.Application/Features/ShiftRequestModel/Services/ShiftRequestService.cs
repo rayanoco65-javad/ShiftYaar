@@ -875,7 +875,8 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 todayShiftDemand,
                 requestDate,
                 specialtyName,
-                maxShiftsPerDay);
+                maxShiftsPerDay,
+                yesterdayNightDemand);
         }
 
         private async Task<bool> IsHolidayDateAsync(DateTime requestDate)

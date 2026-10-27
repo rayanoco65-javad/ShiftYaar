@@ -109,6 +109,7 @@ public static class ShiftEligibilityGuard
             effectiveMax = 2;
         }
 
+
         return ShiftEligibilityResolver.IsAssignmentAllowed(
             user,
             existing,

@@ -618,7 +618,8 @@ public static class ApprovedResponsibilityCapacityValidator
             todayShiftDemand,
             requestDate,
             contextTitle: null,
-            maxShiftsPerDay: maxShiftsPerDay);
+            maxShiftsPerDay: maxShiftsPerDay,
+            yesterdayNightDemand: yesterdayNightDemand);
         if (deptCoverageError != null)
         {
             return deptCoverageError;
@@ -706,7 +707,8 @@ public static class ApprovedResponsibilityCapacityValidator
                 todayDemandR,
                 requestDate,
                 $"مسئولیت «{resp.Title}»",
-                maxShiftsPerDay);
+                maxShiftsPerDay,
+                yesterdayNightDemandR);
             if (roleCoverageError != null)
             {
                 return roleCoverageError;

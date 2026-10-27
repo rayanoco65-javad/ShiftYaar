@@ -34,6 +34,7 @@ public static class ApprovedLeaveCapacityValidator
     public static bool CanUserPerformMorningEvening(User? user, int maxShiftsPerDay = 1)
     {
         if (user == null || maxShiftsPerDay < 2) return false;
+        if (user.ShiftType == ShiftTypes.FixedShift) return false;
         if (user.MorningRequiresEvening == true || user.EveningRequiresMorning == true)
         {
             return true;
@@ -43,10 +44,6 @@ public static class ApprovedLeaveCapacityValidator
             return user.AllowedShiftPermissions.Value.HasFlag(UserShiftPermission.MorningEveningSameDay);
         }
         if (user.ShiftSubType == ShiftSubTypes.TwoShifts && user.TwoShiftRotationPattern == TwoShiftRotationPattern.MorningEvening)
-        {
-            return true;
-        }
-        if (user.ShiftType != ShiftTypes.FixedShift && (user.ShiftSubType == ShiftSubTypes.ThreeShifts || user.ShiftSubType == null))
         {
             return true;
         }
@@ -61,6 +58,7 @@ public static class ApprovedLeaveCapacityValidator
     public static bool CanUserPerformMorningNight(User? user, int maxShiftsPerDay = 1)
     {
         if (user == null || maxShiftsPerDay < 2) return false;
+        if (user.ShiftType == ShiftTypes.FixedShift) return false;
         if (user.MorningRequiresNight == true || user.NightRequiresMorning == true)
         {
             return true;
@@ -270,10 +268,12 @@ public static class ApprovedLeaveCapacityValidator
         int todayShiftDemand,
         DateTime requestDate,
         string? contextTitle = null,
-        int maxShiftsPerDay = 1)
+        int maxShiftsPerDay = 1,
+        int yesterdayNightDemand = 0)
     {
         var maxCoverableShifts = availablePersonnelCount + availableLongShifts;
-        if (maxCoverableShifts < todayShiftDemand)
+        var totalRequired = todayShiftDemand + yesterdayNightDemand;
+        if (maxCoverableShifts < totalRequired)
         {
             var persianDate = DateConverter.ConvertToPersianDate(requestDate);
             var titlePart = !string.IsNullOrWhiteSpace(contextTitle)
@@ -286,10 +286,14 @@ public static class ApprovedLeaveCapacityValidator
                     ? " (تنظیم «حداکثر شیفت در روز» دپارتمان روی ۱ است و امکان پوشش لانگ وجود ندارد)"
                     : " (هیچ‌یک از پرسنل حاضر دارای مجوز شیفت لانگ فعال نیستند)");
 
+            var nightRestNote = yesterdayNightDemand > 0
+                ? $" و {yesterdayNightDemand} نفر استراحت اجباری شیفت شب روز قبل (مجموعاً {totalRequired} سهمیه نیروی لازم)"
+                : string.Empty;
+
             return
                 $"امکان تأیید مرخصی در تاریخ {persianDate}{titlePart} وجود ندارد. " +
                 $"پرسنل حاضر حداکثر توانایی پوشش {maxCoverableShifts} شیفت را دارند{longShiftNote}، " +
-                $"در حالی که نیاز شیفت‌های این روز {todayShiftDemand} شیفت است و تأیید این مرخصی منجر به کمبود نیرو خواهد شد.";
+                $"در حالی که نیاز شیفت‌های این روز {todayShiftDemand} شیفت{nightRestNote} است و تأیید این مرخصی منجر به کمبود نیرو خواهد شد.";
         }
 
         return null;

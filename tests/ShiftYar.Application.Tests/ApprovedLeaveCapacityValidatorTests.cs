@@ -209,7 +209,7 @@ public class ApprovedLeaveCapacityValidatorTests
         };
         Assert.False(ApprovedLeaveCapacityValidator.CanUserPerformLongShift(userSingle, maxShiftsPerDay: 2));
 
-        // کاربری که مجوز صریح ندارد ولی گردشی ۳ شیفت است
+        // کاربری که مجوز صریح لانگ ندارد و گردشی ۳ شیفت است نباید لانگ مجاز شود
         var userRotatingDefault = new ShiftYar.Domain.Entities.UserModel.User
         {
             ShiftType = ShiftTypes.RotatingShift,
@@ -217,7 +217,16 @@ public class ApprovedLeaveCapacityValidatorTests
             AllowedShiftPermissions = null
         };
         Assert.False(ApprovedLeaveCapacityValidator.CanUserPerformLongShift(userRotatingDefault, maxShiftsPerDay: 1));
-        Assert.True(ApprovedLeaveCapacityValidator.CanUserPerformMorningEvening(userRotatingDefault, maxShiftsPerDay: 2));
+        Assert.False(ApprovedLeaveCapacityValidator.CanUserPerformMorningEvening(userRotatingDefault, maxShiftsPerDay: 2));
+
+        // کاربری با شیفت ثابت حتی اگر فلگ صریح لانگ داشته باشد نباید مجاز به لانگ باشد
+        var fixedUserWithFlag = new ShiftYar.Domain.Entities.UserModel.User
+        {
+            ShiftType = ShiftTypes.FixedShift,
+            ShiftSubType = ShiftSubTypes.FixedMorning,
+            AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.MorningEveningSameDay
+        };
+        Assert.False(ApprovedLeaveCapacityValidator.CanUserPerformMorningEvening(fixedUserWithFlag, maxShiftsPerDay: 2));
     }
 
     [Fact]

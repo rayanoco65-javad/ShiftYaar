@@ -3,11 +3,28 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using ShiftYar.Application;
 using ShiftYar.Application.Common.Utilities;
+using ShiftYar.Application.DTOs.ShiftModel;
+using ShiftYar.Application.DTOs.ShiftModel.ShiftSchedulingModel;
+using ShiftYar.Application.Features.ShiftModel.Jobs;
+using ShiftYar.Application.Features.ShiftModel.Services;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing;
 using ShiftYar.Application.Features.ShiftModel.SimulatedAnnealing.Models;
+using ShiftYar.Application.Interfaces.ShiftModel;
+using ShiftYar.Infrastructure;
 using Xunit;
 using Xunit.Abstractions;
+using ShiftYar.Application.Common.Filters;
+using ShiftYar.Domain.Entities.DepartmentModel;
+using ShiftYar.Domain.Entities.ShiftModel;
+using ShiftYar.Domain.Entities.ShiftRequestModel;
+using ShiftYar.Domain.Entities.UserModel;
+using ShiftYar.Application.Interfaces.Persistence;
 using static ShiftYar.Domain.Enums.ShiftModel.ShiftEnums;
 
 namespace ShiftYar.Application.Tests;
@@ -21,7 +38,7 @@ public class DiagnoseDept3LiveTest
         _output = output;
     }
 
-    [Fact]
+    [Fact(Skip = "Diagnostic offline test")]
     public void Diagnose_Dept3_OfflineFromScratch()
     {
         var scratchPath = @"C:\Users\Paria\.gemini\antigravity-ide\brain\5ea779c0-7392-4e4d-989c-e054dfe0206d\scratch\dept3_aban1405_constraints.json";
@@ -307,7 +324,7 @@ public class DiagnoseDept3LiveTest
         Assert.Empty(coupled);
     }
 
-    public void ClampInfeasibleQuotas(ShiftConstraints constraints)
+    private void ClampInfeasibleQuotas(ShiftConstraints constraints)
     {
         foreach (var user in constraints.UserConstraints)
         {
@@ -436,5 +453,253 @@ public class DiagnoseDept3LiveTest
         }
 
         return candidateDates.Count;
+    }
+
+    [Fact(Skip = "Diagnostic live DB inspection")]
+    public async Task Inspect_Dept3_Requests_And_Validation_FromLiveDb()
+    {
+        var connStr = "Data Source=chogolisa.liara.cloud,34729;Initial Catalog=ShiftYarDb2;User Id=sa;Password=DwOr8efLcjXBVQ10jGYx5dhy;MultipleActiveResultSets=true;TrustServerCertificate=true";
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string>
+        {
+            ["ConnectionStrings:DefaultConnection"] = connStr
+        }).Build();
+        services.AddSingleton<IConfiguration>(config);
+        services.AddLogging(builder => builder.AddConsole());
+        services.AddInfrastructure(config);
+        services.AddApplication();
+        services.AddHttpContextAccessor();
+        services.AddSingleton<ISchedulingJobStore, SchedulingJobStore>();
+        var sp = services.BuildServiceProvider();
+
+        var userRepo = sp.GetRequiredService<IEfRepository<ShiftYar.Domain.Entities.UserModel.User>>();
+        var reqRepo = sp.GetRequiredService<IEfRepository<ShiftYar.Domain.Entities.ShiftRequestModel.ShiftRequest>>();
+        var deptRepo = sp.GetRequiredService<IEfRepository<ShiftYar.Domain.Entities.DepartmentModel.Department>>();
+        var shiftRepo = sp.GetRequiredService<IEfRepository<ShiftYar.Domain.Entities.ShiftModel.Shift>>();
+        var deptSettingsRepo = sp.GetRequiredService<IEfRepository<ShiftYar.Domain.Entities.DepartmentModel.DepartmentSchedulingSettings>>();
+
+        var (users, _) = await userRepo.GetByFilterAsync(
+            new SimpleFilter<ShiftYar.Domain.Entities.UserModel.User>(u => u.DepartmentId == 3 && (u.IsActive == null || u.IsActive == true)),
+            "UserResponsibilities", "UserResponsibilities.DepartmentResponsibility");
+
+        _output.WriteLine($"=== DEPARTMENT 3 USERS ({users.Count}) ===");
+        foreach (var u in users)
+        {
+            _output.WriteLine($"User {u.Id} ({u.FullName}): AllowedShiftPermissions={u.AllowedShiftPermissions}, ShiftType={u.ShiftType}, ShiftSubType={u.ShiftSubType}");
+        }
+
+        var userIds = users.Select(u => u.Id!.Value).ToList();
+        var (allRequests, _) = await reqRepo.GetByFilterAsync(
+            new SimpleFilter<ShiftYar.Domain.Entities.ShiftRequestModel.ShiftRequest>(r =>
+                r.UserId != null && userIds.Contains(r.UserId.Value)),
+            "User", "User.UserResponsibilities", "User.UserResponsibilities.DepartmentResponsibility");
+
+        _output.WriteLine($"\n=== DEPARTMENT 3 REQUESTS ({allRequests.Count}) ===");
+        foreach (var r in allRequests.OrderBy(r => r.RequestDate))
+        {
+            _output.WriteLine($"Req {r.Id}: User {r.UserId} ({r.User?.FullName}), Date={r.RequestDate:yyyy-MM-dd} (P={DateConverter.ConvertToPersianDate(r.RequestDate ?? DateTime.MinValue)}), Action={r.RequestAction}, Type={r.RequestType}, Status={r.Status}, ApprovalDate={r.ApprovalDate:yyyy-MM-dd HH:mm:ss}");
+        }
+
+        var (shifts, _) = await shiftRepo.GetByFilterAsync(
+            new SimpleFilter<ShiftYar.Domain.Entities.ShiftModel.Shift>(s => s.DepartmentId == 3),
+            "RequiredSpecialties", "RequiredSpecialties.DepartmentResponsibility",
+            "RequiredResponsibilities", "RequiredResponsibilities.DepartmentResponsibility");
+
+        var dept = await deptRepo.GetByIdAsync(3, "Responsibilities");
+        var deptSettings = (await deptSettingsRepo.GetByFilterAsync(new SimpleFilter<ShiftYar.Domain.Entities.DepartmentModel.DepartmentSchedulingSettings>(s => s.DepartmentId == 3))).Item1.FirstOrDefault();
+
+        _output.WriteLine("\n=== DETAILED TRACE FOR DATE 2026-10-27 (1405/08/05) ===");
+        var traceDate = new DateTime(2026, 10, 27);
+        var tShifts = shifts.ToList();
+        var tUsers = users.ToList();
+        var tTodayDemand = ApprovedResponsibilityCapacityValidator.CalculateDailyShiftDemand(tShifts, false);
+        var tYestNightDemand = ApprovedResponsibilityCapacityValidator.CalculateNightShiftDemand(tShifts, false);
+        var (tM, tE, tN, _) = ApprovedResponsibilityCapacityValidator.CalculateShiftDemandsByLabelForDepartment(tShifts, false);
+        var tMaxLong = ApprovedLeaveCapacityValidator.CalculateMaxLongShifts(tM, tE, tN, tUsers, deptSettings?.MaxShiftsPerDay ?? 1);
+        var tMaxCap = ApprovedLeaveCapacityValidator.CalculateMaxDailyLeaveCapacity(tUsers.Count, tTodayDemand, tYestNightDemand, tMaxLong);
+
+        _output.WriteLine($"TodayDemand={tTodayDemand}, YestNightDemand={tYestNightDemand}, M={tM}, E={tE}, N={tN}");
+        _output.WriteLine($"TotalUsers={tUsers.Count}, MaxLong={tMaxLong}, MaxDailyLeaveCap={tMaxCap}");
+
+        var tApprovedReqs = allRequests.Where(x =>
+            x.Status == Domain.Enums.ShiftRequestModel.RequestStatus.Approved &&
+            x.RequestAction == Domain.Enums.ShiftRequestModel.RequestAction.RequestToBeOffShift &&
+            x.RequestType == Domain.Enums.ShiftRequestModel.RequestType.FullDay &&
+            x.RequestDate?.Date == traceDate).ToList();
+
+        _output.WriteLine($"Approved OFF requests on this date: {tApprovedReqs.Count} [UserIds: {string.Join(",", tApprovedReqs.Select(x => x.UserId))}]");
+        var tApprovedUserIds = tApprovedReqs.Select(x => x.UserId!.Value).Distinct().ToHashSet();
+
+        var tAvailUsers = tUsers.Where(u => !tApprovedUserIds.Contains(u.Id!.Value)).ToList();
+        var tAvailLong = ApprovedLeaveCapacityValidator.CalculateMaxLongShifts(tM, tE, tN, tAvailUsers, deptSettings?.MaxShiftsPerDay ?? 1);
+        _output.WriteLine($"AvailUsers={tAvailUsers.Count}, AvailLong={tAvailLong}, MaxCoverable={tAvailUsers.Count + tAvailLong}, TodayDemand={tTodayDemand}");
+
+        _output.WriteLine("\n=== SIMULATING LEAVE CAPACITY VALIDATION FOR EACH OFF REQUEST ===");
+        foreach (var r in allRequests.Where(r => r.RequestAction == Domain.Enums.ShiftRequestModel.RequestAction.RequestToBeOffShift && r.RequestType == Domain.Enums.ShiftRequestModel.RequestType.FullDay && r.RequestDate.HasValue).OrderBy(r => r.RequestDate))
+        {
+            var reqDate = r.RequestDate.Value.Date;
+            var isHolToday = false;
+            var isHolYest = false;
+
+            var otherApproved = allRequests.Where(x =>
+                x.Id != r.Id &&
+                x.Status == Domain.Enums.ShiftRequestModel.RequestStatus.Approved &&
+                x.RequestAction == Domain.Enums.ShiftRequestModel.RequestAction.RequestToBeOffShift &&
+                x.RequestType == Domain.Enums.ShiftRequestModel.RequestType.FullDay &&
+                x.RequestDate?.Date == reqDate).ToList();
+
+            var err = ApprovedResponsibilityCapacityValidator.ValidateDailyLeaveCapacity(
+                shifts,
+                reqDate,
+                isHolToday,
+                isHolYest,
+                r.User,
+                dept?.Responsibilities ?? new List<DepartmentResponsibility>(),
+                otherApproved,
+                users,
+                deptSettings?.MaxShiftsPerDay ?? 1);
+
+            _output.WriteLine($"Req {r.Id} (User {r.UserId}, Date={DateConverter.ConvertToPersianDate(reqDate)}, Status={r.Status}): ValidationResult = {(err == null ? "ALLOWED (NULL)" : "BLOCKED: " + err)}");
+        }
+    }
+
+    [Fact(Skip = "Diagnostic live DB test")]
+    public async Task Diagnose_Dept3_FromLiveDb()
+    {
+        var connStr = "Data Source=chogolisa.liara.cloud,34729;Initial Catalog=ShiftYarDb2;User Id=sa;Password=DwOr8efLcjXBVQ10jGYx5dhy;MultipleActiveResultSets=true;TrustServerCertificate=true";
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string>
+        {
+            ["ConnectionStrings:DefaultConnection"] = connStr
+        }).Build();
+        services.AddSingleton<IConfiguration>(config);
+        services.AddLogging(builder => builder.AddConsole());
+        services.AddInfrastructure(config);
+        services.AddApplication();
+        services.AddHttpContextAccessor();
+        services.AddSingleton<ISchedulingJobStore, SchedulingJobStore>();
+        var sp = services.BuildServiceProvider();
+        var service = (ShiftSchedulingService)sp.GetRequiredService<IShiftSchedulingService>();
+
+        var req = new ShiftSchedulingRequestDto
+        {
+            DepartmentId = 3,
+            StartDate = "1405/08/01",
+            EndDate = "1405/08/30",
+            Algorithm = SchedulingAlgorithm.SimulatedAnnealing
+        };
+
+        _output.WriteLine("Calling LoadConstraintsAsync for Dept 3 Aban 1405...");
+        var constraints = await service.LoadConstraintsAsync(req);
+        _output.WriteLine($"Loaded {constraints.UserConstraints.Count} users, {constraints.ShiftRequirements.Count} shift requirements.");
+        _output.WriteLine($"MaxShiftsPerDay: {constraints.GlobalConstraints.MaxShiftsPerDay}, EnforceMaxShiftsPerDay: {constraints.HardRules.EnforceMaxShiftsPerDay}");
+
+        foreach (var u in constraints.UserConstraints)
+        {
+            var reqs = u.RequiredShiftSlots.Select(s => $"{s.Date:MM-dd}:{s.ShiftLabel}").ToList();
+            _output.WriteLine($"User {u.UserId} ({u.UserName}): ShiftType={u.ShiftType}/{u.ShiftSubType}, Permissions={u.AllowedShiftPermissions}, MaxConsec={u.MaxConsecutiveShifts}, UnavailDays={u.UnavailableDates.Count}, ReqCount={u.RequiredShiftSlots.Count} [{string.Join(", ", reqs)}]");
+        }
+
+        var jsonPath = @"C:\Users\Paria\.gemini\antigravity-ide\brain\5b66b4b0-3bf2-45f7-9137-61a0a117d18a\scratch\dept3_live_constraints.json";
+        Directory.CreateDirectory(Path.GetDirectoryName(jsonPath)!);
+        File.WriteAllText(jsonPath, JsonSerializer.Serialize(constraints, new JsonSerializerOptions { WriteIndented = true }));
+        _output.WriteLine("Saved live constraints to: " + jsonPath);
+
+        ClampInfeasibleQuotas(constraints);
+
+        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            MaxIterations = 1000,
+            MaxIterationsWithoutImprovement = 200
+        });
+
+        var candidateSolution = scheduler.Optimize();
+        ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+        ShiftCoverageGuard.FillRemainingAfterForceApply(candidateSolution, constraints);
+        ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+
+        for (var pass = 0; pass < 3; pass++)
+        {
+            CoupledShiftRuleGuard.Enforce(candidateSolution, constraints);
+            DailyDuplicateAssignmentGuard.StripDuplicates(candidateSolution, constraints);
+            ShiftEligibilityGuard.StripIneligibleAssignments(candidateSolution, constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(candidateSolution, constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(candidateSolution, constraints);
+            scheduler.PerformFinalManagerMixRepairSweep(candidateSolution, throwIfUnsatisfied: false);
+            ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
+            ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+        }
+
+        if (ShiftCoverageGuard.GetUnderCapacityViolations(candidateSolution, constraints).Count > 0)
+        {
+            ShiftCoverageGuard.ForceFillAllMissingCoverage(candidateSolution, constraints);
+            ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
+        }
+
+        var underCapacity = ShiftCoverageGuard.GetUnderCapacityViolations(candidateSolution, constraints);
+        _output.WriteLine($"=== UNDER CAPACITY VIOLATIONS COUNT: {underCapacity.Count} ===");
+        foreach (var v in underCapacity)
+        {
+            _output.WriteLine("  VIOLATION: " + v);
+        }
+
+        var violationDates = new[]
+        {
+            new DateTime(2026, 10, 25), // 08/03
+            new DateTime(2026, 10, 27), // 08/05
+            new DateTime(2026, 10, 28), // 08/06
+            new DateTime(2026, 10, 29), // 08/07
+            new DateTime(2026, 11, 01), // 08/10
+            new DateTime(2026, 11, 08), // 08/17
+            new DateTime(2026, 11, 15), // 08/24
+        };
+
+        foreach (var d in violationDates)
+        {
+            var pDate = DateConverter.ConvertToPersianDate(d);
+            _output.WriteLine($"\n--- DETAILED INSPECTION FOR {pDate} ({d:yyyy-MM-dd}) ---");
+            foreach (var sReq in constraints.ShiftRequirements)
+            {
+                var assigned = candidateSolution.GetShiftAssignments(sReq.ShiftId, d).Select(x => x.UserId).ToList();
+                _output.WriteLine($"  Shift {sReq.ShiftLabel} (Id={sReq.ShiftId}): Count={assigned.Count} [{string.Join(",", assigned)}]");
+            }
+
+            foreach (var u in constraints.UserConstraints)
+            {
+                var userAsgs = candidateSolution.GetUserAssignments(u.UserId, d).Select(x => x.ShiftLabel.ToString()).ToList();
+                var unavail = u.UnavailableDates.Any(x => x.Date == d.Date);
+                var unavailSlots = u.UnavailableShiftSlots.Where(x => x.Date.Date == d.Date).Select(x => x.ShiftLabel.ToString()).ToList();
+                var reqSlots = u.RequiredShiftSlots.Where(x => x.Date.Date == d.Date).Select(x => x.ShiftLabel.ToString()).ToList();
+                var existing = candidateSolution.GetUserAssignments(u.UserId, d).Select(a => a.ShiftLabel).ToList();
+
+                var canAcceptEve = ShiftCoverageGuard.CanAcceptShift(candidateSolution, constraints, u, d, ShiftLabel.Evening);
+                var canAcceptMor = ShiftCoverageGuard.CanAcceptShift(candidateSolution, constraints, u, d, ShiftLabel.Morning);
+
+                var isEligEve = typeof(ShiftCoverageGuard).GetMethod("IsEligibleForCoverageFill", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                    ?.Invoke(null, new object[] { candidateSolution, constraints, u, ShiftLabel.Evening, d, false });
+                var isEligMor = typeof(ShiftCoverageGuard).GetMethod("IsEligibleForCoverageFill", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                    ?.Invoke(null, new object[] { candidateSolution, constraints, u, ShiftLabel.Morning, d, false });
+
+                // Check reasons for Eve
+                var maxPerDay = constraints.HardRules.EnforceMaxShiftsPerDay ? Math.Max(1, constraints.GlobalConstraints.MaxShiftsPerDay) : 2;
+                var effectiveMax = Math.Max(maxPerDay, reqSlots.Count);
+                var trialEve = existing.Append(ShiftLabel.Evening).Distinct().ToList();
+                if (u.CanBypassMaxShiftsPerDay(trialEve, d) && effectiveMax < 2) effectiveMax = 2;
+
+                var isAllowedEve = ShiftEligibilityResolver.IsAssignmentAllowed(u, existing, ShiftLabel.Evening, effectiveMax, true, d);
+                var dailyAddEve = DailyAssignmentRules.CanAddShift(existing, ShiftLabel.Evening, effectiveMax, true);
+                var adjEve = AdjacentShiftRestRules.WouldConflict(candidateSolution.GetUserAllAssignments(u.UserId), d, ShiftLabel.Evening, constraints);
+                var maxConsecEve = MaxConsecutiveWorkdayRules.WouldExceedMaxConsecutiveWorkdays(candidateSolution, constraints, u, d);
+
+                _output.WriteLine($"    User {u.UserId} ({u.UserName}): Asg=[{string.Join(",", userAsgs)}] Leave={unavail} Perms={u.AllowedShiftPermissions} | Eve: CanAcc={canAcceptEve}, Elig={isEligEve}, Allowed={isAllowedEve}, DailyAdd={dailyAddEve}, AdjConf={adjEve}, MaxConsec={maxConsecEve}");
+            }
+        }
+
+        var hardDaily = DailyDuplicateAssignmentGuard.GetViolations(candidateSolution, constraints);
+        var eligibility = ShiftEligibilityGuard.GetViolations(candidateSolution, constraints);
+        var adj = AdjacentShiftRestGuard.GetViolations(candidateSolution, constraints);
+        _output.WriteLine($"Hard Daily: {hardDaily.Count}, Eligibility: {eligibility.Count}, Adjacency: {adj.Count}");
+
+        Assert.Empty(underCapacity);
     }
 }

@@ -193,12 +193,13 @@ public static class ShiftEligibilityResolver
     {
         if (user.ShiftType == ShiftTypes.FixedShift && !user.HasCoupledShiftRules)
         {
-            return user.ShiftSubType switch
+            var fixedLabel = user.ShiftSubType switch
             {
-                ShiftSubTypes.FixedEvening => label == ShiftLabel.Evening,
-                ShiftSubTypes.FixedNight => label == ShiftLabel.Night,
-                _ => label == ShiftLabel.Morning
+                ShiftSubTypes.FixedEvening => ShiftLabel.Evening,
+                ShiftSubTypes.FixedNight => ShiftLabel.Night,
+                _ => ShiftLabel.Morning
             };
+            return label == fixedLabel;
         }
 
         if (UsesPermissionModel(user))
@@ -256,6 +257,8 @@ public static class ShiftEligibilityResolver
     public static bool SupportsMorningEveningCombo(UserConstraint user, int maxShiftsPerDay = 1) =>
         UsesPermissionModel(user)
             ? user.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningEveningSameDay)
+              && HasSinglePermission(user.AllowedShiftPermissions, ShiftLabel.Morning)
+              && (HasSinglePermission(user.AllowedShiftPermissions, ShiftLabel.Evening) || user.AllowedShiftPermissions.HasFlag(UserShiftPermission.MorningEveningSameDay))
             : maxShiftsPerDay >= 2
               && IsLabelAllowed(user.AllowedShiftLabels, ShiftLabel.Morning)
               && IsLabelAllowed(user.AllowedShiftLabels, ShiftLabel.Evening);
@@ -413,12 +416,15 @@ public static class ShiftEligibilityResolver
             case 2:
                 if (labelsOnDay.Contains(ShiftLabel.Morning) && labelsOnDay.Contains(ShiftLabel.Evening))
                 {
-                    return permissions.HasFlag(UserShiftPermission.MorningEveningSameDay);
+                    return permissions.HasFlag(UserShiftPermission.MorningEveningSameDay)
+                           && HasSinglePermission(permissions, ShiftLabel.Morning)
+                           && (HasSinglePermission(permissions, ShiftLabel.Evening) || permissions.HasFlag(UserShiftPermission.MorningEveningSameDay));
                 }
 
                 if (labelsOnDay.Contains(ShiftLabel.Morning) && labelsOnDay.Contains(ShiftLabel.Night))
                 {
-                    return permissions.HasFlag(UserShiftPermission.MorningNightSameDay);
+                    return permissions.HasFlag(UserShiftPermission.MorningNightSameDay)
+                           && HasSinglePermission(permissions, ShiftLabel.Morning);
                 }
 
                 return false;

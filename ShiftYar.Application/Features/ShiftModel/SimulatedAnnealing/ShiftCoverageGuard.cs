@@ -265,6 +265,11 @@ public static class ShiftCoverageGuard
                 return;
             }
         }
+
+        if (maxDaily >= 2)
+        {
+            EmergencyFillMissingCoverageWithDoubleShift(solution, constraints);
+        }
     }
 
     /// <summary>
@@ -1473,8 +1478,7 @@ public static class ShiftCoverageGuard
         {
             var workDates = MaxConsecutiveWorkdayRules.GetCountableWorkDates(solution, user);
             var projected = MaxConsecutiveWorkdayRules.ProjectedRunIfWorkDayAdded(workDates, date);
-            var limit = user.MaxConsecutiveShifts;
-            if (projected > limit)
+            if (projected > user.MaxConsecutiveShifts)
             {
                 return false;
             }
