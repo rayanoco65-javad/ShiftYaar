@@ -138,6 +138,7 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
 
                 await _repository.AddAsync(entity);
                 await _repository.SaveAsync();
+                entity.User = userDepatment;
                 var result = _mapper.Map<ShiftRequestDtoGet>(entity);
                 return ApiResponse<ShiftRequestDtoGet>.Success(result, "درخواست با موفقیت ثبت شد.");
             }
@@ -205,6 +206,10 @@ namespace ShiftYar.Application.Features.ShiftRequestModel.Services
                 if (createdCount > 0)
                     await _repository.SaveAsync();
 
+                if (lastCreated != null)
+                {
+                    lastCreated.User = userDepatment;
+                }
                 var result = lastCreated != null ? _mapper.Map<ShiftRequestDtoGet>(lastCreated) : null;
                 var message = createdCount > 0
                     ? $"درخواست مرخصی برای {createdCount} روز با موفقیت ثبت شد."

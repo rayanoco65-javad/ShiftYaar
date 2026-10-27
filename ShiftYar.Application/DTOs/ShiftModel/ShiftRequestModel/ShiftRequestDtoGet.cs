@@ -1,4 +1,4 @@
-﻿using ShiftYar.Domain.Entities.ShiftDateModel;
+using ShiftYar.Domain.Entities.ShiftDateModel;
 using ShiftYar.Domain.Entities.UserModel;
 using ShiftYar.Domain.Enums.ShiftRequestModel;
 using System;
@@ -16,6 +16,12 @@ namespace ShiftYar.Application.DTOs.ShiftModel.ShiftRequestModel
         public int? UserId { get; set; }
         public User? User { get; set; }
         public DateTime? RequestDate { get; set; }  //تاریخ مورد درخواست
+        public string? RequestPersianDate { get; set; }  //تاریخ شمسی مورد درخواست کاربر (مثلاً ۱۴۰۵/۰۸/۱۵)
+        public int? PersianYear { get; set; }
+        public int? PersianMonth { get; set; }
+        public int? PersianDay { get; set; }
+        public int? DepartmentId { get; set; }
+        public string? UserFullName { get; set; }
         //public int? ShiftDateId { get; set; }
         //public ShiftDate? ShiftDate { get; set; }
         public RequestType? RequestType { get; set; }
