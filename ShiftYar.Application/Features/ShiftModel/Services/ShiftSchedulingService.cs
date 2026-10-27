@@ -177,8 +177,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
 
                 if (underCapacityViolations.Count > 0 || result.AlgorithmStatus == "Failed")
                 {
+                    var hint = "";
+                    if (underCapacityViolations.Count > 0 && constraints.HardRules.EnforceMaxConsecutiveShifts)
+                    {
+                        var maxConsec = constraints.UserConstraints.FirstOrDefault(u => u.ShiftType != ShiftTypes.FixedShift)?.MaxConsecutiveShifts ?? 4;
+                        hint = $"\n\nراهنما: در تنظیمات دپارتمان «اعمال سقف روزهای کاری متوالی» فعال است (سقف: {maxConsec} روز). با توجه به نیاز روزانه بخش و تعداد کل پرسنل، پرسنل پس از کار در روزهای قبل به سقف متوالی رسیده‌اند و قانوناً امکان شیفت‌دهی به آنها در روزهای فوق وجود ندارد. برای رفع مشکل، در تنظیمات دپارتمان «حداکثر شیفت‌های متوالی» را متناسب با روزهای کاری هفته (مثلاً ۵ یا ۶ روز) افزایش دهید یا گزینه «اعمال سقف روزهای کاری متوالی» را غیرفعال نمایید.";
+                    }
+
                     var errorMsg = underCapacityViolations.Count > 0
-                        ? "امکان تکمیل شیفت‌بندی وجود ندارد؛ ظرفیت شیفت‌ها یا مسئولیت‌های مورد نیاز در روزهای زیر تکمیل نشده است:\n" + string.Join("\n", underCapacityViolations)
+                        ? "امکان تکمیل شیفت‌بندی وجود ندارد؛ ظرفیت شیفت‌ها یا مسئولیت‌های مورد نیاز در روزهای زیر تکمیل نشده است:\n" + string.Join("\n", underCapacityViolations) + hint
                         : (result.Violations?.FirstOrDefault() ?? "الگوریتم بهینه‌سازی موفق به تکمیل کلیهٔ ظرفیت‌های درخواستی نشد.");
                     _logger.LogWarning("Optimization finished with incomplete shift coverage for DepartmentId={DepartmentId}: {Error}", request.DepartmentId, errorMsg);
                     return ApiResponse<ShiftSchedulingResultDto>.Fail(errorMsg, result);
@@ -1847,8 +1854,15 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
             var under = ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints);
             if (under.Count > 0)
             {
+                var hint = "";
+                if (constraints.HardRules.EnforceMaxConsecutiveShifts)
+                {
+                    var maxConsec = constraints.UserConstraints.FirstOrDefault(u => u.ShiftType != ShiftTypes.FixedShift)?.MaxConsecutiveShifts ?? 4;
+                    hint = $"\n\nراهنما: در تنظیمات دپارتمان «اعمال سقف روزهای کاری متوالی» فعال است (سقف: {maxConsec} روز). با توجه به نیاز روزانه بخش و تعداد کل پرسنل، پرسنل پس از کار در روزهای قبل به سقف متوالی رسیده‌اند و قانوناً امکان شیفت‌دهی به آنها در روزهای فوق وجود ندارد. برای رفع مشکل، در تنظیمات دپارتمان «حداکثر شیفت‌های متوالی» را متناسب با روزهای کاری هفته (مثلاً ۵ یا ۶ روز) افزایش دهید یا گزینه «اعمال سقف روزهای کاری متوالی» را غیرفعال نمایید.";
+                }
+
                 throw new InvalidOperationException(
-                    "امکان تکمیل شیفت‌بندی وجود ندارد؛ ظرفیت شیفت‌ها در روزهای زیر تکمیل نشده است:\n" + string.Join("\n", under));
+                    "امکان تکمیل شیفت‌بندی وجود ندارد؛ ظرفیت شیفت‌ها در روزهای زیر تکمیل نشده است:\n" + string.Join("\n", under) + hint);
             }
 
             if (ShiftResponsibilityRules.IsApplicable(constraints))

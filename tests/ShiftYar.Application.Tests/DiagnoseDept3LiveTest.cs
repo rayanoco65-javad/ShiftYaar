@@ -594,18 +594,19 @@ public class DiagnoseDept3LiveTest
         _output.WriteLine($"Loaded {constraints.UserConstraints.Count} users, {constraints.ShiftRequirements.Count} shift requirements.");
         _output.WriteLine($"MaxShiftsPerDay: {constraints.GlobalConstraints.MaxShiftsPerDay}, EnforceMaxShiftsPerDay: {constraints.HardRules.EnforceMaxShiftsPerDay}");
 
-        foreach (var u in constraints.UserConstraints)
-        {
-            var reqs = u.RequiredShiftSlots.Select(s => $"{s.Date:MM-dd}:{s.ShiftLabel}").ToList();
-            _output.WriteLine($"User {u.UserId} ({u.UserName}): ShiftType={u.ShiftType}/{u.ShiftSubType}, Permissions={u.AllowedShiftPermissions}, MaxConsec={u.MaxConsecutiveShifts}, UnavailDays={u.UnavailableDates.Count}, ReqCount={u.RequiredShiftSlots.Count} [{string.Join(", ", reqs)}]");
-        }
+
 
         var jsonPath = @"C:\Users\Paria\.gemini\antigravity-ide\brain\5b66b4b0-3bf2-45f7-9137-61a0a117d18a\scratch\dept3_live_constraints.json";
         Directory.CreateDirectory(Path.GetDirectoryName(jsonPath)!);
         File.WriteAllText(jsonPath, JsonSerializer.Serialize(constraints, new JsonSerializerOptions { WriteIndented = true }));
         _output.WriteLine("Saved live constraints to: " + jsonPath);
 
-        ClampInfeasibleQuotas(constraints);
+        // Test hypothesis: MaxConsecutiveShifts is the root cause
+        // constraints.HardRules.EnforceMaxConsecutiveShifts = false;
+        foreach (var u in constraints.UserConstraints)
+        {
+            u.MaxConsecutiveShifts = 6; // allow working Saturday through Thursday
+        }
 
         var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
         {
@@ -614,6 +615,12 @@ public class DiagnoseDept3LiveTest
         });
 
         var candidateSolution = scheduler.Optimize();
+        var initialUnderCapacity = ShiftCoverageGuard.GetUnderCapacityViolations(candidateSolution, constraints);
+        var initialMaxConsec = MaxConsecutiveWorkdayRules.GetViolations(candidateSolution, constraints);
+        _output.WriteLine($"[AFTER OPTIMIZE] UnderCapacity: {initialUnderCapacity.Count}, MaxConsecViolations: {initialMaxConsec.Count}");
+        foreach (var v in initialUnderCapacity) _output.WriteLine("  InitUnderCap: " + v);
+        foreach (var v in initialMaxConsec) _output.WriteLine("  InitMaxConsec: " + v);
+
         ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
         ShiftCoverageGuard.FillRemainingAfterForceApply(candidateSolution, constraints);
         ShiftCoverageGuard.StripExcessCoverage(candidateSolution, constraints);
