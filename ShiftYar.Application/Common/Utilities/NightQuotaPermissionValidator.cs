@@ -22,13 +22,9 @@ public static class NightQuotaPermissionValidator
                               || nightFallbackParticipation == true
                               || holidayWeekendNightFallbackParticipation == true;
 
-        if (nightConfigured && !MayEverTakeNight(permissions))
-        {
-            return
-                $"{displayName} مجوز شیفت شب ندارد؛ امکان ثبت سهمیه یا ترجیح توزیع شب وجود ندارد. " +
-                "ابتدا مجوز نوع شیفت کاربر را اصلاح کنید.";
-        }
-
+        // تخصیص سهمیه شب ماهانه توسط سرپرست/مدیر می‌تواند برای هر پرسنلی در دپارتمان تنظیم شود
+        // (به‌عنوان مثال پرسنل فیکس صبح/عصر که با ثبت درخواست حضور قصد انجام شیفت شب دارند).
+        // بنابراین بررسی اولیه مجوز نوع شیفت کاربر در این بخش مانع تخصیص سهمیه ماهانه نمی‌شود.
         return null;
     }
 
