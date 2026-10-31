@@ -563,6 +563,167 @@ public class DiagnoseDept3LiveTest
         }
     }
 
+    [Fact(Skip = "One-time migration live DB test")]
+    public async Task Upgrade_PlainText_Passwords_In_Live_Db()
+    {
+        var connStr = "Data Source=chogolisa.liara.cloud,34729;Initial Catalog=ShiftYarDb2;User Id=sa;Password=DwOr8efLcjXBVQ10jGYx5dhy;MultipleActiveResultSets=true;TrustServerCertificate=true";
+        using var conn = new Microsoft.Data.SqlClient.SqlConnection(connStr);
+        await conn.OpenAsync();
+        using var selectCmd = conn.CreateCommand();
+        selectCmd.CommandText = "SELECT Id, FullName, PhoneNumberMembership, Password FROM Users WHERE Password IS NOT NULL AND (Password NOT LIKE '$2%' OR LEN(Password)<>60)";
+        var toUpdate = new List<(int Id, string Name, string Phone, string PlainPass)>();
+        using (var reader = await selectCmd.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+            {
+                toUpdate.Add((reader.GetInt32(0), reader.IsDBNull(1) ? "" : reader.GetString(1), reader.IsDBNull(2) ? "" : reader.GetString(2), reader.GetString(3)));
+            }
+        }
+
+        _output.WriteLine($"Found {toUpdate.Count} users with plain-text passwords.");
+        foreach (var u in toUpdate)
+        {
+            var hashed = BCrypt.Net.BCrypt.HashPassword(u.PlainPass);
+            using var updateCmd = conn.CreateCommand();
+            updateCmd.CommandText = "UPDATE Users SET Password = @p WHERE Id = @id";
+            updateCmd.Parameters.AddWithValue("@p", hashed);
+            updateCmd.Parameters.AddWithValue("@id", u.Id);
+            await updateCmd.ExecuteNonQueryAsync();
+            _output.WriteLine($"User {u.Id} ({u.Name}, {u.Phone}) upgraded from plain-text '{u.PlainPass}' to BCrypt hash.");
+        }
+    }
+
+    [Fact(Skip = "Diagnostic live DB test")]
+    public async Task Diagnose_User46_Day0803()
+    {
+        var connStr = "Data Source=chogolisa.liara.cloud,34729;Initial Catalog=ShiftYarDb2;User Id=sa;Password=DwOr8efLcjXBVQ10jGYx5dhy;MultipleActiveResultSets=true;TrustServerCertificate=true";
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string>
+        {
+            ["ConnectionStrings:DefaultConnection"] = connStr
+        }).Build();
+        services.AddSingleton<IConfiguration>(config);
+        services.AddLogging(builder => builder.AddConsole());
+        services.AddInfrastructure(config);
+        services.AddApplication();
+        services.AddHttpContextAccessor();
+        services.AddSingleton<ISchedulingJobStore, SchedulingJobStore>();
+        var sp = services.BuildServiceProvider();
+        var service = (ShiftSchedulingService)sp.GetRequiredService<IShiftSchedulingService>();
+
+        var req = new ShiftSchedulingRequestDto
+        {
+            DepartmentId = 3,
+            StartDate = "1405/08/01",
+            EndDate = "1405/08/30",
+            Algorithm = SchedulingAlgorithm.SimulatedAnnealing
+        };
+
+        var diagPath = @"C:\Users\Paria\.gemini\antigravity\brain\c7379f82-5683-4713-8862-f63b7fe4210c\scratch\user46_diag.txt";
+        var logLines = new List<string>();
+        void Log(string msg) { logLines.Add(msg); _output.WriteLine(msg); }
+
+        var constraints = await service.LoadConstraintsAsync(req);
+        var u46 = constraints.UserConstraints.FirstOrDefault(u => u.UserId == 46);
+        Assert.NotNull(u46);
+
+        var date0803 = new DateTime(2026, 10, 25);
+        Log($"Date 1405/08/03 = {date0803:yyyy-MM-dd}");
+        Log($"User 46 RequiredShiftSlots on 08/03: {string.Join(", ", u46.RequiredShiftSlots.Where(s => s.Date.Date == date0803.Date).Select(s => $"{s.ShiftLabel} (ShiftId={s.ShiftId})"))}");
+        Log($"User 46 UnavailableDates on 08/03: {u46.UnavailableDates.Count(d => d.Date == date0803.Date)}");
+        Log($"User 46 UnavailableShiftSlots on 08/03: {string.Join(", ", u46.UnavailableShiftSlots.Where(s => s.Date.Date == date0803.Date).Select(s => $"{s.ShiftLabel} (ShiftId={s.ShiftId})"))}");
+
+        // Now run SimulatedAnnealingScheduler
+        var scheduler = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            MaxIterations = 1000,
+            MaxIterationsWithoutImprovement = 200
+        });
+
+        var solution = scheduler.Optimize();
+
+        void LogU46(string step)
+        {
+            var asgs = solution.GetUserAssignments(46, date0803).ToList();
+            Log($"[{step}] User 46 assignments on 08/03 ({asgs.Count}): {string.Join(", ", asgs.Select(a => $"{a.ShiftLabel} (ShiftId={a.ShiftId}, OnCall={a.IsOnCall})"))}");
+            var unmet = ApprovedRequestGuard.GetUnmetViolations(solution, constraints);
+            var unmet46 = unmet.Where(v => v.Contains("46")).ToList();
+            if (unmet46.Any())
+            {
+                Log($"  UNMET VIOLATIONS FOR 46: {string.Join(" | ", unmet46)}");
+            }
+        }
+
+        LogU46("After Optimize");
+
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+        LogU46("After StripExcessCoverage 1");
+
+        ShiftCoverageGuard.FillRemainingAfterForceApply(solution, constraints);
+        LogU46("After FillRemaining");
+
+        ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+        LogU46("After StripExcessCoverage 2");
+
+        for (var pass = 0; pass < 3; pass++)
+        {
+            CoupledShiftRuleGuard.Enforce(solution, constraints);
+            DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
+            ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(solution, constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(solution, constraints);
+            scheduler.PerformFinalManagerMixRepairSweep(solution, throwIfUnsatisfied: false);
+            ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            LogU46($"After 3-pass loop {pass}");
+        }
+
+        if (ShiftCoverageGuard.GetUnderCapacityViolations(solution, constraints).Count > 0)
+        {
+            ShiftCoverageGuard.ForceFillAllMissingCoverage(solution, constraints);
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            LogU46("After ForceFillAllMissingCoverage");
+        }
+
+        OvertimeBalanceGuard.Enforce(solution, constraints);
+        LogU46("After OvertimeBalanceGuard");
+
+        CoupledShiftRuleGuard.Enforce(solution, constraints);
+        DailyDuplicateAssignmentGuard.StripDuplicates(solution, constraints);
+        ShiftEligibilityGuard.StripIneligibleAssignments(solution, constraints);
+        LogU46("After StripDuplicates & Ineligible");
+
+        ApprovedRequestGuard.ForceApply(solution, constraints);
+        LogU46("After ApprovedRequestGuard.ForceApply");
+
+        if (ShiftResponsibilityRules.IsApplicable(constraints))
+        {
+            ShiftResponsibilityRules.RepairResponsibilityDeficits(solution, constraints);
+            LogU46("After ShiftResponsibilityRules.RepairResponsibilityDeficits");
+            ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(solution, constraints);
+        }
+
+        scheduler.RefreshSolutionViolations(solution);
+
+        if (!scheduler.AreExactNightQuotasSatisfied(solution, out _))
+        {
+            ExactNightQuotaGuard.ForceSatisfyAllDeficits(solution, constraints);
+            ExactNightQuotaGuard.GlobalRebalanceNightQuotas(solution, constraints);
+            ExactNightQuotaGuard.Enforce(solution, constraints);
+            ShiftCoverageGuard.StripExcessCoverage(solution, constraints);
+            LogU46("After ExactNightQuotaGuard");
+        }
+
+        var allUnmet = ApprovedRequestGuard.GetUnmetViolations(solution, constraints);
+        Log($"\nFINAL UNMET APPROVED REQUESTS COUNT: {allUnmet.Count}");
+        foreach (var u in allUnmet)
+        {
+            Log("  " + u);
+        }
+
+        File.WriteAllLines(diagPath, logLines);
+    }
+
     [Fact(Skip = "Diagnostic live DB test")]
     public async Task Diagnose_Dept3_FromLiveDb()
     {

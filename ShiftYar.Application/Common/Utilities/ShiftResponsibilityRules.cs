@@ -447,6 +447,7 @@ namespace ShiftYar.Application.Common.Utilities
                                     var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
                                     if (u == null) return false;
                                     if (ApprovedRequestGuard.IsApprovedRequiredSlot(u, date, a.ShiftLabel, a.ShiftId)) return false;
+                                    if (u.RequiredPresenceDates.Any(d => d.Date == date.Date)) return false;
                                     if (solution.IsLockedSkeleton(a.UserId, a.ShiftId, date)) return false;
                                     return true;
                                 })
@@ -472,7 +473,8 @@ namespace ShiftYar.Application.Common.Utilities
                                     }
                                     else if (AdjacentShiftRestGuard.GetViolations(solution, constraints).Count > 0 ||
                                              ShiftEligibilityGuard.GetViolations(solution, constraints).Count > 0 ||
-                                             DailyDuplicateAssignmentGuard.GetViolations(solution, constraints).Count > 0)
+                                             DailyDuplicateAssignmentGuard.GetViolations(solution, constraints).Count > 0 ||
+                                             ApprovedRequestGuard.GetUnmetViolations(solution, constraints).Count > 0)
                                     {
                                         isSafe = false;
                                     }
@@ -536,7 +538,10 @@ namespace ShiftYar.Application.Common.Utilities
                                         {
                                             var u = constraints.UserConstraints.FirstOrDefault(x => x.UserId == a.UserId);
                                             if (u == null) return false;
+                                            // کاربر نباید از قبل در شیفت مقصد حضور داشته باشد
+                                            if (slotAssignments.Any(sa => sa.UserId == a.UserId)) return false;
                                             if (ApprovedRequestGuard.IsApprovedRequiredSlot(u, date, a.ShiftLabel, a.ShiftId)) return false;
+                                            if (u.RequiredPresenceDates.Any(d => d.Date == date.Date)) return false;
                                             if (solution.IsLockedSkeleton(a.UserId, a.ShiftId, date)) return false;
                                             // کاربر شیفت دیگر می‌تواند نقش مورد نیاز یا هر نقش غیرپیش‌فرض این شیفت را تأمین کند
                                             return u.CanPerformResponsibility(req.DepartmentResponsibilityId, req.IsDefault) ||
@@ -554,6 +559,9 @@ namespace ShiftYar.Application.Common.Utilities
 
                                         foreach (var rep in replaceable)
                                         {
+                                            // کاربر جایگزین‌شونده نباید از قبل در شیفت دیگر حضور داشته باشد
+                                            if (otherSlotAssignees.Any(osa => osa.UserId == rep.UserId)) continue;
+
                                             var uRep = constraints.UserConstraints.First(x => x.UserId == rep.UserId);
 
                                             // تعویض آزمایشی
@@ -569,7 +577,8 @@ namespace ShiftYar.Application.Common.Utilities
                                                 ShiftEligibilityGuard.GetViolations(solution, constraints).Count > 0 ||
                                                 DailyDuplicateAssignmentGuard.GetViolations(solution, constraints).Count > 0 ||
                                                 MaxConsecutiveWorkdayRules.GetViolations(solution, constraints).Count > 0 ||
-                                                (ShiftManagerRules.IsApplicable(constraints) && ShiftManagerMixGuard.GetViolations(solution, constraints).Count > 0))
+                                                (ShiftManagerRules.IsApplicable(constraints) && ShiftManagerMixGuard.GetViolations(solution, constraints).Count > 0) ||
+                                                ApprovedRequestGuard.GetUnmetViolations(solution, constraints).Count > 0)
                                             {
                                                 isSafe = false;
                                             }

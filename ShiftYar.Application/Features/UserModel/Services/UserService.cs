@@ -395,6 +395,11 @@ namespace ShiftYar.Application.Features.UserModel.Services
                     user.Image = _fileUploader.UpdateFile(dto.Image, user.Image, "Users");
                 }
 
+                if (!string.IsNullOrWhiteSpace(dto.Password))
+                {
+                    user.Password = BCrypt.Net.BCrypt.HashPassword(dto.Password);
+                }
+
                 user.CreateDate = DateTime.Now;
                 //user.TheUserId = Convert.ToInt16(_httpContextAccessor.HttpContext.User.FindFirst(ClaimTypes.NameIdentifier));
                 var sub = _httpContextAccessor.HttpContext?.User?.FindFirst(JwtClaimTypes.Sub)?.Value;

@@ -39,16 +39,46 @@ namespace ShiftYar.Infrastructure.Services.Security
                 .Include(u => u.LoginHistories)
                 .SingleOrDefaultAsync(x => x.PhoneNumberMembership == dto.PhoneNumberMembership);
 
-            if (user.Password == null)
+            if (user == null || string.IsNullOrWhiteSpace(user.Password))
             {
                 _logger.LogWarning($"ورود ناموفق | شماره تلفن: {dto.PhoneNumberMembership} | IP: {ip} | دستگاه: {device}");
                 throw new UnauthorizedAccessException("نام کاربری یا رمز عبور اشتباه است.");
             }
 
-            if (user == null || !BCrypt.Net.BCrypt.Verify(dto.Password, user.Password))
+            var isPasswordValid = false;
+            var needsRehash = false;
+
+            if (IsBcryptHash(user.Password))
+            {
+                try
+                {
+                    isPasswordValid = BCrypt.Net.BCrypt.Verify(dto.Password, user.Password);
+                }
+                catch (BCrypt.Net.SaltParseException)
+                {
+                    isPasswordValid = false;
+                }
+            }
+            else
+            {
+                // پشتیبانی از رمزهای عبور متنی قدیمی (Legacy Plain-Text)
+                if (user.Password == dto.Password)
+                {
+                    isPasswordValid = true;
+                    needsRehash = true;
+                }
+            }
+
+            if (!isPasswordValid)
             {
                 _logger.LogWarning($"ورود ناموفق | شماره تلفن: {dto.PhoneNumberMembership} | IP: {ip} | دستگاه: {device}");
                 throw new UnauthorizedAccessException("نام کاربری یا رمز عبور اشتباه است.");
+            }
+
+            // ارتقای خودکار رمز متن ساده به هش امن BCrypt پس از اولین ورود موفق
+            if (needsRehash)
+            {
+                user.Password = BCrypt.Net.BCrypt.HashPassword(dto.Password);
             }
 
             var roles = user.UserRoles.Select(ur => ur.Role.Name).ToList();
@@ -319,6 +349,17 @@ namespace ShiftYar.Infrastructure.Services.Security
                 token.IsRevoked = true;
             }
             await _context.SaveChangesAsync();
+        }
+
+        private static bool IsBcryptHash(string? password)
+        {
+            if (string.IsNullOrWhiteSpace(password) || password.Length != 60)
+                return false;
+
+            return password.StartsWith("$2a$") ||
+                   password.StartsWith("$2b$") ||
+                   password.StartsWith("$2y$") ||
+                   password.StartsWith("$2x$");
         }
     }
 }

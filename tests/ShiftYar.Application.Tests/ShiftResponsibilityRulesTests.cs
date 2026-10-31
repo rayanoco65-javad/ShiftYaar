@@ -795,5 +795,104 @@ public class ShiftResponsibilityRulesTests
         Assert.Contains(2, eveningUsers); // کاربر ۲ به عصر منتقل شده
         Assert.Contains(4, eveningUsers);
     }
+
+    [Fact]
+    public void RepairResponsibilityDeficits_PreservesApprovedShiftSlot_WhenUserHasDoubleShiftOnSameDay()
+    {
+        var date = new DateTime(2026, 10, 25);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = date,
+            EndDate = date,
+            StaffingMode = DepartmentStaffingMode.ResponsibilityBased,
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 2 },
+            HardRules = new HardRuleSet
+            {
+                EnforceMaxShiftsPerDay = true,
+                ForbidDuplicateDailyAssignments = true
+            },
+            ShiftRequirements = new List<ShiftRequirement>
+            {
+                new()
+                {
+                    ShiftId = 1,
+                    ShiftLabel = ShiftLabel.Morning,
+                    ResponsibilityRequirements = new List<ResponsibilityRequirement>
+                    {
+                        new() { DepartmentResponsibilityId = 42, ResponsibilityTitle = "مسئول شیفت", RequiredTotalCount = 1 },
+                        new() { DepartmentResponsibilityId = 36, ResponsibilityTitle = "سیرکولر", RequiredTotalCount = 1, IsDefault = true }
+                    }
+                },
+                new()
+                {
+                    ShiftId = 2,
+                    ShiftLabel = ShiftLabel.Evening,
+                    ResponsibilityRequirements = new List<ResponsibilityRequirement>
+                    {
+                        new() { DepartmentResponsibilityId = 41, ResponsibilityTitle = "وینیست", RequiredTotalCount = 1 },
+                        new() { DepartmentResponsibilityId = 36, ResponsibilityTitle = "سیرکولر", RequiredTotalCount = 1, IsDefault = true }
+                    }
+                }
+            },
+            UserConstraints = new List<UserConstraint>
+            {
+                // کاربر ۱: دارای درخواست تأییدشده در صبح، و دو شیفت مجاز
+                new()
+                {
+                    UserId = 1,
+                    UserName = "کاربر دارای حضور اجباری",
+                    IsActive = true,
+                    ShiftType = ShiftTypes.RotatingShift,
+                    ShiftSubType = ShiftSubTypes.ThreeShifts,
+                    AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.MorningEveningSameDay,
+                    ResponsibilityIds = new HashSet<int> { 36 },
+                    RequiredShiftSlots = new List<ShiftSlotConstraint>
+                    {
+                        new() { Date = date, ShiftLabel = ShiftLabel.Morning, ShiftId = 1 }
+                    }
+                },
+                // کاربر ۲: در صبح، دارای نقش مسئول شیفت
+                new()
+                {
+                    UserId = 2,
+                    UserName = "کاربر مسئول شیفت صبح",
+                    IsActive = true,
+                    ShiftType = ShiftTypes.RotatingShift,
+                    ShiftSubType = ShiftSubTypes.ThreeShifts,
+                    AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening,
+                    ResponsibilityIds = new HashSet<int> { 42 }
+                },
+                // کاربر ۳: در عصر، فقط سیرکولر
+                new()
+                {
+                    UserId = 3,
+                    UserName = "کاربر سیرکولر عصر",
+                    IsActive = true,
+                    ShiftType = ShiftTypes.RotatingShift,
+                    ShiftSubType = ShiftSubTypes.ThreeShifts,
+                    AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening,
+                    ResponsibilityIds = new HashSet<int> { 36 }
+                }
+            }
+        };
+
+        var solution = new ShiftSolution();
+        // کاربر ۱ در هر دو شیفت صبح و عصر قرار دارد
+        solution.AddAssignment(1, 1, date, ShiftLabel.Morning);
+        solution.AddAssignment(2, 1, date, ShiftLabel.Morning);
+
+        solution.AddAssignment(1, 2, date, ShiftLabel.Evening);
+        solution.AddAssignment(3, 2, date, ShiftLabel.Evening);
+
+        // اجرای تعمیر کسری‌ها
+        ShiftResponsibilityRules.RepairResponsibilityDeficits(solution, constraints);
+
+        // تحت هیچ شرایطی نباید حضور اجباری کاربر ۱ در صبح حذف شده باشد
+        var unmet = ApprovedRequestGuard.GetUnmetViolations(solution, constraints);
+        Assert.Empty(unmet);
+
+        var morningAssignees = solution.GetShiftAssignments(1, date).Select(a => a.UserId).ToList();
+        Assert.Contains(1, morningAssignees);
+    }
 }
 

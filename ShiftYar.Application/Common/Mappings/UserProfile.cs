@@ -31,7 +31,8 @@ namespace ShiftYar.Application.Common.Mappings
                 .ForMember(dest => dest.UserRoles, opt => opt.MapFrom(src =>
                     src.UserRoles != null ? src.UserRoles.Select(r => new UserRole { RoleId = r }).ToList() : null))
                 // تاریخ استخدام شمسی است؛ تبدیل در UserService انجام می‌شود تا AutoMapper اشتباه پارس نکند.
-                .ForMember(dest => dest.DateOfEmployment, opt => opt.Ignore());
+                .ForMember(dest => dest.DateOfEmployment, opt => opt.Ignore())
+                .ForMember(dest => dest.Password, opt => opt.Ignore());
 
             CreateMap<UserPhoneNumber, UserPhoneNumber>()
                 .ForMember(dest => dest.User, opt => opt.Ignore());
