@@ -143,7 +143,7 @@ namespace ShiftYar.Application.Features.ShiftModel.Services
                 );
                 if (pendingExists)
                 {
-                    return ApiResponse<ShiftSchedulingResultDto>.Fail("There are pending shift requests in the selected period. Resolve them before scheduling.");
+                    return ApiResponse<ShiftSchedulingResultDto>.Fail("در بازه زمانی انتخابی، درخواست‌های شیفت در وضعیت «در انتظار بررسی» (Pending) وجود دارد. لطفاً پیش از اجرای فرآیند شیفت‌بندی، آن‌ها را تعیین تکلیف (تأیید یا رد) نمایید.");
                 }
 
                 ShiftSchedulingResultDto result;

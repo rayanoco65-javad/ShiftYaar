@@ -589,17 +589,132 @@ public class DiagnoseDept3LiveTest
             Algorithm = SchedulingAlgorithm.SimulatedAnnealing
         };
 
-        _output.WriteLine("Calling LoadConstraintsAsync for Dept 3 Aban 1405...");
+        _output.WriteLine("Calling OptimizeShiftScheduleAsync for Dept 3 Aban 1405...");
+        try
+        {
+            var result = await service.OptimizeShiftScheduleAsync(req);
+            _output.WriteLine($"Result Success: {result.IsSuccess}, Message: {result.Message}");
+            if (result.Data?.Violations != null)
+            {
+                foreach (var v in result.Data.Violations) _output.WriteLine("  Violation: " + v);
+            }
+        }
+        catch (Exception ex)
+        {
+            _output.WriteLine("THROWN EXCEPTION: " + ex.Message);
+            _output.WriteLine("STACK TRACE: " + ex.StackTrace);
+        }
+
         var constraints = await service.LoadConstraintsAsync(req);
         _output.WriteLine($"Loaded {constraints.UserConstraints.Count} users, {constraints.ShiftRequirements.Count} shift requirements.");
-        _output.WriteLine($"MaxShiftsPerDay: {constraints.GlobalConstraints.MaxShiftsPerDay}, EnforceMaxShiftsPerDay: {constraints.HardRules.EnforceMaxShiftsPerDay}");
+        
+        foreach (var u in constraints.UserConstraints)
+        {
+            _output.WriteLine($"User {u.UserId} ({u.UserName}): ShiftType={u.ShiftType}, SubType={u.ShiftSubType}, Perms={u.AllowedShiftPermissions}, Resps=[{string.Join(",", u.ResponsibilityIds)}]");
+        }
+
+        foreach (var sr in constraints.ShiftRequirements)
+        {
+            _output.WriteLine($"Shift {sr.ShiftLabel} (Id={sr.ShiftId}): Duration={sr.DurationHours}");
+            foreach (var rr in sr.ResponsibilityRequirements)
+            {
+                _output.WriteLine($"   Resp Req: Id={rr.DepartmentResponsibilityId}, Title={rr.ResponsibilityTitle}, ReqTotal={rr.RequiredTotalCount}, HolTotal={rr.HolidayRequiredTotalCount}, IsDef={rr.IsDefault}, Prio={rr.Priority}");
+            }
+        }
+
+        var traceDate = new DateTime(2026, 10, 27);
+        var pDate1 = DateConverter.ConvertToPersianDate(traceDate);
+        var traceDate2 = new DateTime(2026, 10, 28);
+        var pDate2 = DateConverter.ConvertToPersianDate(traceDate2);
+        _output.WriteLine($"Trace 1: {traceDate:yyyy-MM-dd} = {pDate1}");
+        _output.WriteLine($"Trace 2: {traceDate2:yyyy-MM-dd} = {pDate2}");
+
+        foreach (var u in constraints.UserConstraints)
+        {
+            var reqOn1 = u.RequiredShiftSlots.Where(s => s.Date.Date == traceDate.Date).Select(s => s.ShiftLabel.ToString()).ToList();
+            var off1 = u.UnavailableDates.Where(d => d.Date == traceDate.Date).ToList();
+            var offSlot1 = u.UnavailableShiftSlots.Where(s => s.Date.Date == traceDate.Date).Select(s => s.ShiftLabel.ToString()).ToList();
+            if (reqOn1.Any() || off1.Any() || offSlot1.Any())
+            {
+                _output.WriteLine($"  {pDate1} User {u.UserId} ({u.UserName}): ON=[{string.Join(",", reqOn1)}], OFF_DAY={off1.Count}, OFF_SLOT=[{string.Join(",", offSlot1)}]");
+            }
+
+            var reqOn2 = u.RequiredShiftSlots.Where(s => s.Date.Date == traceDate2.Date).Select(s => s.ShiftLabel.ToString()).ToList();
+            var off2 = u.UnavailableDates.Where(d => d.Date == traceDate2.Date).ToList();
+            var offSlot2 = u.UnavailableShiftSlots.Where(s => s.Date.Date == traceDate2.Date).Select(s => s.ShiftLabel.ToString()).ToList();
+            if (reqOn2.Any() || off2.Any() || offSlot2.Any())
+            {
+                _output.WriteLine($"  {pDate2} User {u.UserId} ({u.UserName}): ON=[{string.Join(",", reqOn2)}], OFF_DAY={off2.Count}, OFF_SLOT=[{string.Join(",", offSlot2)}]");
+            }
+        }
 
 
 
-        var jsonPath = @"C:\Users\Paria\.gemini\antigravity-ide\brain\5b66b4b0-3bf2-45f7-9137-61a0a117d18a\scratch\dept3_live_constraints.json";
-        Directory.CreateDirectory(Path.GetDirectoryName(jsonPath)!);
-        File.WriteAllText(jsonPath, JsonSerializer.Serialize(constraints, new JsonSerializerOptions { WriteIndented = true }));
-        _output.WriteLine("Saved live constraints to: " + jsonPath);
+        var date0806 = new DateTime(2026, 10, 28); // 1405/08/06
+        _output.WriteLine("\n=== RUNNING OPTIMIZATION AND RESPONSIBILITY DIAGNOSTIC FOR 1405/08/06 ===");
+        var sched = new SimulatedAnnealingScheduler(constraints, new SimulatedAnnealingParameters
+        {
+            MaxIterations = 1000,
+            MaxIterationsWithoutImprovement = 200
+        });
+        var testSolution = sched.Optimize();
+
+        // Run full pipeline like ShiftSchedulingService
+        ShiftCoverageGuard.StripExcessCoverage(testSolution, constraints);
+        ShiftCoverageGuard.FillRemainingAfterForceApply(testSolution, constraints);
+        ShiftCoverageGuard.StripExcessCoverage(testSolution, constraints);
+
+        for (var pass = 0; pass < 3; pass++)
+        {
+            CoupledShiftRuleGuard.Enforce(testSolution, constraints);
+            DailyDuplicateAssignmentGuard.StripDuplicates(testSolution, constraints);
+            ShiftEligibilityGuard.StripIneligibleAssignments(testSolution, constraints);
+            AdjacentShiftRestGuard.StripForbiddenAdjacencies(testSolution, constraints);
+            MaxConsecutiveWorkdayGuard.Enforce(testSolution, constraints);
+            sched.PerformFinalManagerMixRepairSweep(testSolution, throwIfUnsatisfied: false);
+            ShiftCoverageGuard.ForceFillAllMissingCoverage(testSolution, constraints);
+            ShiftCoverageGuard.StripExcessCoverage(testSolution, constraints);
+        }
+
+        if (ShiftResponsibilityRules.IsApplicable(constraints))
+        {
+            ShiftResponsibilityRules.RepairResponsibilityDeficits(testSolution, constraints);
+            ShiftResponsibilityRules.AssignResponsibilitiesToAllSlots(testSolution, constraints);
+        }
+
+        var morningShift = constraints.ShiftRequirements.First(s => s.ShiftLabel == ShiftLabel.Morning);
+        var morningAssignees = testSolution.GetShiftAssignments(morningShift.ShiftId, date0806).ToList();
+        _output.WriteLine($"Morning Assignees on 1405/08/06 ({morningAssignees.Count}):");
+        foreach (var a in morningAssignees)
+        {
+            var u = constraints.UserConstraints.First(x => x.UserId == a.UserId);
+            _output.WriteLine($"  User {u.UserId} ({u.UserName}): RespAssigned={a.ResponsibilityId} ({constraints.ResponsibilityTitles.GetValueOrDefault(a.ResponsibilityId ?? 0, "None")}), UserResps=[{string.Join(",", u.ResponsibilityIds)}]");
+        }
+
+        var eveningShift = constraints.ShiftRequirements.First(s => s.ShiftLabel == ShiftLabel.Evening);
+        var eveningAssignees = testSolution.GetShiftAssignments(eveningShift.ShiftId, date0806).ToList();
+        _output.WriteLine($"Evening Assignees on 1405/08/06 ({eveningAssignees.Count}):");
+        foreach (var a in eveningAssignees)
+        {
+            var u = constraints.UserConstraints.First(x => x.UserId == a.UserId);
+            _output.WriteLine($"  User {u.UserId} ({u.UserName}): RespAssigned={a.ResponsibilityId} ({constraints.ResponsibilityTitles.GetValueOrDefault(a.ResponsibilityId ?? 0, "None")}), UserResps=[{string.Join(",", u.ResponsibilityIds)}]");
+        }
+
+        var nightShift = constraints.ShiftRequirements.First(s => s.ShiftLabel == ShiftLabel.Night);
+        var nightAssignees = testSolution.GetShiftAssignments(nightShift.ShiftId, date0806).ToList();
+        _output.WriteLine($"Night Assignees on 1405/08/06 ({nightAssignees.Count}):");
+        foreach (var a in nightAssignees)
+        {
+            var u = constraints.UserConstraints.First(x => x.UserId == a.UserId);
+            _output.WriteLine($"  User {u.UserId} ({u.UserName}): RespAssigned={a.ResponsibilityId} ({constraints.ResponsibilityTitles.GetValueOrDefault(a.ResponsibilityId ?? 0, "None")}), UserResps=[{string.Join(",", u.ResponsibilityIds)}]");
+        }
+
+        var violations0806 = ShiftResponsibilityRules.GetViolations(testSolution, constraints);
+        _output.WriteLine($"\nALL Responsibility Violations ({violations0806.Count}):");
+        foreach (var v in violations0806)
+        {
+            _output.WriteLine("  " + v);
+        }
 
         // Test hypothesis: MaxConsecutiveShifts is the root cause
         // constraints.HardRules.EnforceMaxConsecutiveShifts = false;

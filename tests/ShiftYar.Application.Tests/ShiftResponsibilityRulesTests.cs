@@ -679,5 +679,121 @@ public class ShiftResponsibilityRulesTests
         var eligibilityViolations = ShiftEligibilityGuard.GetViolations(solution, constraints);
         Assert.Empty(eligibilityViolations);
     }
+
+    [Fact]
+    public void RepairResponsibilityDeficits_ResolvesDeficit_ViaSameDayInterShiftSwap_WhenMultiSkilledUserIsBottlenecked()
+    {
+        var date = new DateTime(2026, 10, 28);
+        var constraints = new ShiftConstraints
+        {
+            StartDate = date,
+            EndDate = date,
+            StaffingMode = DepartmentStaffingMode.ResponsibilityBased,
+            GlobalConstraints = new GlobalConstraints { MaxShiftsPerDay = 1 },
+            HardRules = new HardRuleSet
+            {
+                EnforceMaxShiftsPerDay = true,
+                ForbidDuplicateDailyAssignments = true
+            },
+            ShiftRequirements = new List<ShiftRequirement>
+            {
+                new()
+                {
+                    ShiftId = 1,
+                    ShiftLabel = ShiftLabel.Morning,
+                    ResponsibilityRequirements = new List<ResponsibilityRequirement>
+                    {
+                        new() { DepartmentResponsibilityId = 42, ResponsibilityTitle = "مسئول شیفت", RequiredTotalCount = 1 },
+                        new() { DepartmentResponsibilityId = 41, ResponsibilityTitle = "وینیست", RequiredTotalCount = 1 }
+                    }
+                },
+                new()
+                {
+                    ShiftId = 2,
+                    ShiftLabel = ShiftLabel.Evening,
+                    ResponsibilityRequirements = new List<ResponsibilityRequirement>
+                    {
+                        new() { DepartmentResponsibilityId = 41, ResponsibilityTitle = "وینیست", RequiredTotalCount = 1 },
+                        new() { DepartmentResponsibilityId = 36, ResponsibilityTitle = "سیرکولر", RequiredTotalCount = 1, IsDefault = true }
+                    }
+                }
+            },
+            UserConstraints = new List<UserConstraint>
+            {
+                // کاربر ۱: هم مسئول شیفت (۴۲) و هم وینیست (۴۱) دارد، در صبح است
+                new()
+                {
+                    UserId = 1,
+                    UserName = "کاربر چند مهارته صبح",
+                    IsActive = true,
+                    ShiftType = ShiftTypes.FixedShift,
+                    ShiftSubType = ShiftSubTypes.FixedMorning,
+                    AllowedShiftPermissions = UserShiftPermission.Morning,
+                    ResponsibilityIds = new HashSet<int> { 41, 42 }
+                },
+                // کاربر ۲: فقط سیرکولر (۳۶) دارد، در صبح است
+                new()
+                {
+                    UserId = 2,
+                    UserName = "کاربر سیرکولر صبح",
+                    IsActive = true,
+                    ShiftType = ShiftTypes.RotatingShift,
+                    ShiftSubType = ShiftSubTypes.ThreeShifts,
+                    AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening,
+                    ResponsibilityIds = new HashSet<int> { 36 }
+                },
+                // کاربر ۳: وینیست (۴۱) و سیرکولر (۳۶) دارد، در عصر است و می‌تواند صبح هم بیاید
+                new()
+                {
+                    UserId = 3,
+                    UserName = "کاربر وینیست عصر",
+                    IsActive = true,
+                    ShiftType = ShiftTypes.RotatingShift,
+                    ShiftSubType = ShiftSubTypes.ThreeShifts,
+                    AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening,
+                    ResponsibilityIds = new HashSet<int> { 41, 36 }
+                },
+                // کاربر ۴: وینیست (۴۱) و سیرکولر (۳۶) دارد، در عصر است (باعث می‌شود کاربر ۳ در عصر مازاد باشد و بتواند به صبح برود)
+                new()
+                {
+                    UserId = 4,
+                    UserName = "کاربر وینیست دوم عصر",
+                    IsActive = true,
+                    ShiftType = ShiftTypes.RotatingShift,
+                    ShiftSubType = ShiftSubTypes.ThreeShifts,
+                    AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening,
+                    ResponsibilityIds = new HashSet<int> { 41, 36 }
+                }
+            }
+        };
+
+        var solution = new ShiftSolution();
+        // صبح: کاربر ۱ و کاربر ۲
+        solution.AddAssignment(1, 1, date, ShiftLabel.Morning);
+        solution.AddAssignment(2, 1, date, ShiftLabel.Morning);
+
+        // عصر: کاربر ۳ و کاربر ۴
+        solution.AddAssignment(3, 2, date, ShiftLabel.Evening);
+        solution.AddAssignment(4, 2, date, ShiftLabel.Evening);
+
+        // قبل از تعمیر، در صبح فقط کاربر ۱ است که می‌تواند ۴۱ یا ۴۲ را پوشش دهد. یکی از آن‌ها خالی می‌ماند (کسری)
+        var preViolations = ShiftResponsibilityRules.GetViolations(solution, constraints);
+        Assert.NotEmpty(preViolations);
+
+        // اجرای تعمیر کسری‌ها
+        ShiftResponsibilityRules.RepairResponsibilityDeficits(solution, constraints);
+
+        // بعد از تعمیر، باید کاربر ۳ با کاربر ۲ جابه‌جا شده باشد تا صبح هر دو نقش ۴۱ و ۴۲ پوشش داده شود و عصر هم تامین باشد
+        var postViolations = ShiftResponsibilityRules.GetViolations(solution, constraints);
+        Assert.Empty(postViolations);
+
+        var morningUsers = solution.GetShiftAssignments(1, date).Select(a => a.UserId).ToHashSet();
+        Assert.Contains(1, morningUsers);
+        Assert.Contains(3, morningUsers); // کاربر ۳ از عصر به صبح منتقل شده
+
+        var eveningUsers = solution.GetShiftAssignments(2, date).Select(a => a.UserId).ToHashSet();
+        Assert.Contains(2, eveningUsers); // کاربر ۲ به عصر منتقل شده
+        Assert.Contains(4, eveningUsers);
+    }
 }
 
