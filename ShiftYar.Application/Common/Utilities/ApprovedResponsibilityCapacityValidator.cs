@@ -2,6 +2,7 @@ using ShiftYar.Domain.Entities.DepartmentModel;
 using ShiftYar.Domain.Entities.ShiftModel;
 using ShiftYar.Domain.Entities.ShiftRequestModel;
 using ShiftYar.Domain.Entities.UserModel;
+using ShiftYar.Domain.Enums.ShiftRequestModel;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -554,7 +555,9 @@ public static class ApprovedResponsibilityCapacityValidator
         IEnumerable<DepartmentResponsibility> departmentResponsibilities,
         IEnumerable<ShiftRequest> approvedLeaveRequestsOnDate,
         IEnumerable<User> departmentUsers,
-        int maxShiftsPerDay = 1)
+        int maxShiftsPerDay = 1,
+        IEnumerable<ShiftRequest>? approvedNightRequestsYesterday = null,
+        ShiftRequest? pendingRequest = null)
     {
         var shiftsList = shifts.ToList();
         var usersList = departmentUsers.ToList();
@@ -565,29 +568,39 @@ public static class ApprovedResponsibilityCapacityValidator
 
         var (deptM, deptE, deptN, _) = CalculateShiftDemandsByLabelForDepartment(shiftsList, isHolidayToday);
         var deptMaxLongShifts = ApprovedLeaveCapacityValidator.CalculateMaxLongShifts(
-            deptM, deptE, deptN, usersList, maxShiftsPerDay);
+            deptM, deptE, deptN, usersList, maxShiftsPerDay,
+            approvedLeaveRequestsOnDate, approvedNightRequestsYesterday, pendingRequest);
 
         var maxDailyLeaveCapacity = CalculateMaxDailyLeaveCapacity(
             totalActivePersonnel, todayShiftDemand, yesterdayNightDemand, deptMaxLongShifts);
 
         var approvedLeaveList = approvedLeaveRequestsOnDate.ToList();
-        var approvedUserIds = approvedLeaveList
-            .Where(r => r.UserId.HasValue)
+        var approvedFullDayList = approvedLeaveList
+            .Where(r => r.RequestAction == RequestAction.RequestToBeOffShift &&
+                        r.RequestType == RequestType.FullDay &&
+                        r.UserId.HasValue)
+            .ToList();
+
+        var approvedFullDayUserIds = approvedFullDayList
             .Select(r => r.UserId!.Value)
             .Distinct()
             .ToHashSet();
 
-        var approvedDisplayNames = approvedLeaveList
-            .Where(r => r.UserId.HasValue && approvedUserIds.Contains(r.UserId.Value))
+        var approvedDisplayNames = approvedFullDayList
+            .Where(r => r.UserId.HasValue && approvedFullDayUserIds.Contains(r.UserId.Value))
             .GroupBy(r => r.UserId)
             .Select(g => FormatUserDisplayName(g.First().User))
             .ToList();
 
-        // ۱. کنترل سقف کل مرخصی روزانه بخش
-        if (ApprovedLeaveCapacityValidator.WouldExceedCapacity(approvedUserIds.Count, maxDailyLeaveCapacity))
+        // ۱. کنترل سقف کل مرخصی روزانه بخش (فقط برای درخواست‌های مرخصی کل‌روز)
+        var isFullDayPending = pendingRequest == null ||
+                               (pendingRequest.RequestAction == RequestAction.RequestToBeOffShift &&
+                                pendingRequest.RequestType == RequestType.FullDay);
+
+        if (isFullDayPending && ApprovedLeaveCapacityValidator.WouldExceedCapacity(approvedFullDayUserIds.Count, maxDailyLeaveCapacity))
         {
             return ApprovedLeaveCapacityValidator.BuildExceededCapacityMessage(
-                approvedUserIds.Count,
+                approvedFullDayUserIds.Count,
                 maxDailyLeaveCapacity,
                 totalActivePersonnel,
                 todayShiftDemand,
@@ -598,9 +611,18 @@ public static class ApprovedResponsibilityCapacityValidator
                 maxLongShifts: deptMaxLongShifts);
         }
 
-        // ۱.۱ بررسی امکان پوشش فیزیکی شیفت‌های امروز توسط پرسنل حاضر باقیمانده (با احتساب شیفت لانگ)
-        var leavesOnDate = new HashSet<int>(approvedUserIds);
-        if (requestingUser?.Id.HasValue == true)
+        // ۱.۱ اعتبارسنجی جامع پوشش شیفت‌های روز (صبح، عصر، شب و مجموع کل با احتساب شیفت لانگ)
+        var shiftCoverageError = ApprovedLeaveCapacityValidator.ValidateDailyShiftCoverage(
+            deptM, deptE, deptN, yesterdayNightDemand,
+            usersList, requestDate, maxShiftsPerDay,
+            approvedLeaveRequestsOnDate, approvedNightRequestsYesterday, pendingRequest);
+        if (shiftCoverageError != null)
+        {
+            return shiftCoverageError;
+        }
+
+        var leavesOnDate = new HashSet<int>(approvedFullDayUserIds);
+        if (isFullDayPending && requestingUser?.Id.HasValue == true)
         {
             leavesOnDate.Add(requestingUser.Id.Value);
         }
@@ -610,7 +632,8 @@ public static class ApprovedResponsibilityCapacityValidator
             .ToList();
 
         var availableLongShifts = ApprovedLeaveCapacityValidator.CalculateMaxLongShifts(
-            deptM, deptE, deptN, availableUsers, maxShiftsPerDay);
+            deptM, deptE, deptN, availableUsers, maxShiftsPerDay,
+            approvedLeaveRequestsOnDate, approvedNightRequestsYesterday, pendingRequest);
 
         var deptCoverageError = ApprovedLeaveCapacityValidator.ValidateAvailablePersonnelCoverage(
             availableUsers.Count,
@@ -649,7 +672,8 @@ public static class ApprovedResponsibilityCapacityValidator
                 .ToList();
 
             var maxLongShiftsR = ApprovedLeaveCapacityValidator.CalculateMaxLongShifts(
-                respM, respE, respN, qualifiedUsersR, maxShiftsPerDay);
+                respM, respE, respN, qualifiedUsersR, maxShiftsPerDay,
+                approvedLeaveRequestsOnDate, approvedNightRequestsYesterday, pendingRequest);
 
             var effectiveTodayDemandR = Math.Max(0, todayDemandR - maxLongShiftsR);
             var minRequiredR = effectiveTodayDemandR + yesterdayNightDemandR;
@@ -659,17 +683,17 @@ public static class ApprovedResponsibilityCapacityValidator
             }
 
             var approvedLeavesR = qualifiedUsersR
-                .Count(u => u.Id.HasValue && approvedUserIds.Contains(u.Id.Value));
+                .Count(u => u.Id.HasValue && approvedFullDayUserIds.Contains(u.Id.Value));
 
             var maxLeaveR = Math.Max(0, qualifiedUsersR.Count - minRequiredR);
 
-            if (approvedLeavesR + 1 > maxLeaveR)
+            if (isFullDayPending && approvedLeavesR + 1 > maxLeaveR)
             {
                 var roleTitle = !string.IsNullOrWhiteSpace(resp.Title) ? resp.Title.Trim() : $"نقش {respId}";
                 var persianDate = DateConverter.ConvertToPersianDate(requestDate);
 
                 var approvedNamesForRole = qualifiedUsersR
-                    .Where(u => u.Id.HasValue && approvedUserIds.Contains(u.Id.Value))
+                    .Where(u => u.Id.HasValue && approvedFullDayUserIds.Contains(u.Id.Value))
                     .Select(u => FormatUserDisplayName(u))
                     .ToList();
                 var namesPart = approvedNamesForRole.Count > 0
@@ -699,7 +723,8 @@ public static class ApprovedResponsibilityCapacityValidator
                 .Where(u => u.Id.HasValue && !leavesOnDate.Contains(u.Id.Value))
                 .ToList();
             var availableLongShiftsR = ApprovedLeaveCapacityValidator.CalculateMaxLongShifts(
-                respM, respE, respN, availableQualifiedUsersR, maxShiftsPerDay);
+                respM, respE, respN, availableQualifiedUsersR, maxShiftsPerDay,
+                approvedLeaveRequestsOnDate, approvedNightRequestsYesterday, pendingRequest);
 
             var roleCoverageError = ApprovedLeaveCapacityValidator.ValidateAvailablePersonnelCoverage(
                 availableQualifiedUsersR.Count,

@@ -291,5 +291,117 @@ public class ApprovedLeaveCapacityValidatorTests
         Assert.Contains("حداکثر توانایی پوشش ۸ شیفت را دارند", error);
         Assert.Contains("نیاز شیفت‌های این روز ۱۲ شیفت است", error);
     }
+
+    [Fact]
+    public void CalculateMaxLongShifts_DoesNotCountUser_WhenUserHasOffRequestForShift()
+    {
+        var users = new List<ShiftYar.Domain.Entities.UserModel.User>();
+        for (int i = 0; i < 4; i++)
+        {
+            users.Add(new ShiftYar.Domain.Entities.UserModel.User
+            {
+                Id = i + 1,
+                AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.MorningEveningSameDay
+            });
+        }
+
+        var today = new DateTime(2026, 10, 25);
+        // کاربر ۱ در شیفت عصر درخواست عدم حضور تأییدشده دارد
+        var approvedRequests = new List<ShiftYar.Domain.Entities.ShiftRequestModel.ShiftRequest>
+        {
+            new()
+            {
+                Id = 101,
+                UserId = 1,
+                RequestAction = ShiftYar.Domain.Enums.ShiftRequestModel.RequestAction.RequestToBeOffShift,
+                RequestType = ShiftYar.Domain.Enums.ShiftRequestModel.RequestType.SpecificShift,
+                ShiftLabel = ShiftLabel.Evening,
+                RequestDate = today,
+                Status = ShiftYar.Domain.Enums.ShiftRequestModel.RequestStatus.Approved
+            }
+        };
+
+        // تقاضا: ۶ صبح، ۵ عصر، ۱ شب
+        // کاربر ۱ نباید شمرده شود؛ بنابراین از ۴ کاربر فقط ۳ کاربر می‌توانند لانگ باشند
+        var maxLong = ApprovedLeaveCapacityValidator.CalculateMaxLongShifts(
+            morningDemand: 6,
+            eveningDemand: 5,
+            nightDemand: 1,
+            users,
+            maxShiftsPerDay: 2,
+            approvedRequestsOnDate: approvedRequests);
+
+        Assert.Equal(3, maxLong);
+    }
+
+    [Fact]
+    public void ValidateDailyShiftCoverage_DetectsDeficit_WhenDoubleShiftsAndStaffCannotCoverAllSlots()
+    {
+        // شبیه‌سازی دقیق دپارتمان ۳ در تاریخ ۳ آبان:
+        // ۱۲ پرسنل:
+        // کاربر ۳۴: ثابت صبح
+        // کاربر ۳۸ و ۴۶: مجوز صبح+عصر
+        // کاربر ۴۴: مجوز صبح+عصر ولی درخواست عدم حضور در شیفت عصر دارد
+        // کاربر ۴۰ و ۴۵: مرخصی کل‌روز
+        // کاربر ۴۷: دیشب شیفت شب بوده (استراحت اجباری امروز)
+        // سایر کاربران (۳۵، ۳۶، ۳۷، ۳۹، ۴۳): گردشی عادی تک‌شیفت
+        var users = new List<ShiftYar.Domain.Entities.UserModel.User>
+        {
+            new() { Id = 34, ShiftType = ShiftTypes.FixedShift, ShiftSubType = ShiftSubTypes.FixedMorning, AllowedShiftPermissions = UserShiftPermission.Morning },
+            new() { Id = 35, ShiftType = ShiftTypes.RotatingShift, ShiftSubType = ShiftSubTypes.ThreeShifts, AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.Night },
+            new() { Id = 36, ShiftType = ShiftTypes.RotatingShift, ShiftSubType = ShiftSubTypes.ThreeShifts, AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.Night },
+            new() { Id = 37, ShiftType = ShiftTypes.RotatingShift, ShiftSubType = ShiftSubTypes.ThreeShifts, AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.Night },
+            new() { Id = 38, ShiftType = ShiftTypes.RotatingShift, ShiftSubType = ShiftSubTypes.ThreeShifts, AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.Night | UserShiftPermission.MorningEveningSameDay },
+            new() { Id = 39, ShiftType = ShiftTypes.RotatingShift, ShiftSubType = ShiftSubTypes.ThreeShifts, AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.Night },
+            new() { Id = 40, ShiftType = ShiftTypes.RotatingShift, ShiftSubType = ShiftSubTypes.ThreeShifts, AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.Night | UserShiftPermission.MorningEveningSameDay },
+            new() { Id = 43, ShiftType = ShiftTypes.RotatingShift, ShiftSubType = ShiftSubTypes.ThreeShifts, AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.Night },
+            new() { Id = 44, ShiftType = ShiftTypes.RotatingShift, ShiftSubType = ShiftSubTypes.ThreeShifts, AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.Night | UserShiftPermission.MorningEveningSameDay },
+            new() { Id = 45, ShiftType = ShiftTypes.RotatingShift, ShiftSubType = ShiftSubTypes.ThreeShifts, AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.Night },
+            new() { Id = 46, ShiftType = ShiftTypes.RotatingShift, ShiftSubType = ShiftSubTypes.ThreeShifts, AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.Night | UserShiftPermission.MorningEveningSameDay },
+            new() { Id = 47, ShiftType = ShiftTypes.RotatingShift, ShiftSubType = ShiftSubTypes.ThreeShifts, AllowedShiftPermissions = UserShiftPermission.Morning | UserShiftPermission.Evening | UserShiftPermission.Night },
+        };
+
+        var today = new DateTime(2026, 10, 25);
+        var yesterday = today.AddDays(-1);
+
+        var approvedToday = new List<ShiftYar.Domain.Entities.ShiftRequestModel.ShiftRequest>
+        {
+            new() { Id = 2999, UserId = 40, RequestAction = ShiftYar.Domain.Enums.ShiftRequestModel.RequestAction.RequestToBeOffShift, RequestType = ShiftYar.Domain.Enums.ShiftRequestModel.RequestType.FullDay, RequestDate = today, Status = ShiftYar.Domain.Enums.ShiftRequestModel.RequestStatus.Approved },
+            new() { Id = 3021, UserId = 44, RequestAction = ShiftYar.Domain.Enums.ShiftRequestModel.RequestAction.RequestToBeOffShift, RequestType = ShiftYar.Domain.Enums.ShiftRequestModel.RequestType.SpecificShift, ShiftLabel = ShiftLabel.Evening, RequestDate = today, Status = ShiftYar.Domain.Enums.ShiftRequestModel.RequestStatus.Approved },
+        };
+
+        var approvedYesterday = new List<ShiftYar.Domain.Entities.ShiftRequestModel.ShiftRequest>
+        {
+            new() { Id = 3056, UserId = 47, RequestAction = ShiftYar.Domain.Enums.ShiftRequestModel.RequestAction.RequestToBeOnShift, RequestType = ShiftYar.Domain.Enums.ShiftRequestModel.RequestType.SpecificShift, ShiftLabel = ShiftLabel.Night, RequestDate = yesterday, Status = ShiftYar.Domain.Enums.ShiftRequestModel.RequestStatus.Approved },
+        };
+
+        // کاربر ۴۵ می‌خواهد مرخصی کل‌روز بگیرد:
+        var pending45 = new ShiftYar.Domain.Entities.ShiftRequestModel.ShiftRequest
+        {
+            Id = 3025,
+            UserId = 45,
+            RequestAction = ShiftYar.Domain.Enums.ShiftRequestModel.RequestAction.RequestToBeOffShift,
+            RequestType = ShiftYar.Domain.Enums.ShiftRequestModel.RequestType.FullDay,
+            RequestDate = today,
+            Status = ShiftYar.Domain.Enums.ShiftRequestModel.RequestStatus.Pending
+        };
+
+        var error = ApprovedLeaveCapacityValidator.ValidateDailyShiftCoverage(
+            morningDemand: 6,
+            eveningDemand: 5,
+            nightDemand: 1,
+            yesterdayNightDemand: 1,
+            departmentUsers: users,
+            requestDate: today,
+            maxShiftsPerDay: 2,
+            approvedRequestsOnDate: approvedToday,
+            approvedRequestsYesterday: approvedYesterday,
+            pendingRequest: pending45);
+
+        Assert.NotNull(error);
+        // خطا باید عدم توانایی پوشش و کسری را با عدد دقیق نشان دهد
+        Assert.Contains("امکان تأیید", error);
+        Assert.Contains("کمبود نیرو", error);
+    }
 }
 

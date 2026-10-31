@@ -1,5 +1,7 @@
 using ShiftYar.Domain.Entities.ShiftModel;
+using ShiftYar.Domain.Entities.ShiftRequestModel;
 using ShiftYar.Domain.Entities.UserModel;
+using ShiftYar.Domain.Enums.ShiftRequestModel;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -123,6 +125,27 @@ public static class ApprovedLeaveCapacityValidator
     }
 
     /// <summary>
+    /// بررسی مجاز بودن کاربر برای یک برچسب شیفت با در نظر گرفتن نوع شیفت و مجوزها
+    /// </summary>
+    public static bool MayUserTakeLabel(User? user, ShiftLabel label)
+    {
+        if (user == null) return false;
+        var perms = ShiftEligibilityResolver.ResolvePermissions(
+            user.AllowedShiftPermissions,
+            user.ShiftType ?? ShiftTypes.RotatingShift,
+            user.ShiftSubType ?? ShiftSubTypes.ThreeShifts,
+            user.TwoShiftRotationPattern);
+
+        return label switch
+        {
+            ShiftLabel.Morning => perms.HasFlag(UserShiftPermission.Morning),
+            ShiftLabel.Evening => perms.HasFlag(UserShiftPermission.Evening),
+            ShiftLabel.Night => perms.HasFlag(UserShiftPermission.Night),
+            _ => true
+        };
+    }
+
+    /// <summary>
     /// محاسبه حداکثر تعداد شیفت‌های لانگ (صبح+عصر یا صبح+شب) که با ترکیب پرسنل واجد شرایط و شیفت‌های امروز قابل پوشش است.
     /// هر شیفت لانگ به منزله پوشش ۲ شیفت توسط ۱ نفر است و ۱ نفر از حداقل نیروی فیزیکی مورد نیاز کسر می‌کند.
     /// شیفت‌های لانگ در بخش «مجوزهای نوع شیفت» تنها در صورتی فعال می‌شوند که «حداکثر شیفت در روز» دپارتمان روی ۲ تنظیم شده باشد.
@@ -132,12 +155,70 @@ public static class ApprovedLeaveCapacityValidator
         int eveningDemand,
         int nightDemand,
         IEnumerable<User>? users,
-        int maxShiftsPerDay = 1)
+        int maxShiftsPerDay = 1,
+        IEnumerable<ShiftRequest>? approvedRequestsOnDate = null,
+        IEnumerable<ShiftRequest>? approvedRequestsYesterday = null,
+        ShiftRequest? pendingRequest = null)
     {
         if (maxShiftsPerDay < 2 || users == null || morningDemand <= 0 || (eveningDemand <= 0 && nightDemand <= 0))
         {
             return 0;
         }
+
+        var allRequestsToday = (approvedRequestsOnDate ?? Enumerable.Empty<ShiftRequest>()).ToList();
+        if (pendingRequest != null)
+        {
+            allRequestsToday.Add(pendingRequest);
+        }
+
+        var allRequestsYesterday = (approvedRequestsYesterday ?? Enumerable.Empty<ShiftRequest>()).ToList();
+
+        var fullDayOffUserIds = allRequestsToday
+            .Where(r => r.UserId.HasValue &&
+                        r.RequestAction == RequestAction.RequestToBeOffShift &&
+                        r.RequestType == RequestType.FullDay)
+            .Select(r => r.UserId!.Value)
+            .ToHashSet();
+
+        var morningOffUserIds = allRequestsToday
+            .Where(r => r.UserId.HasValue &&
+                        r.RequestAction == RequestAction.RequestToBeOffShift &&
+                        r.RequestType == RequestType.SpecificShift &&
+                        r.ShiftLabel == ShiftLabel.Morning)
+            .Select(r => r.UserId!.Value)
+            .ToHashSet();
+
+        var eveningOffUserIds = allRequestsToday
+            .Where(r => r.UserId.HasValue &&
+                        r.RequestAction == RequestAction.RequestToBeOffShift &&
+                        r.RequestType == RequestType.SpecificShift &&
+                        r.ShiftLabel == ShiftLabel.Evening)
+            .Select(r => r.UserId!.Value)
+            .ToHashSet();
+
+        var nightOffUserIds = allRequestsToday
+            .Where(r => r.UserId.HasValue &&
+                        r.RequestAction == RequestAction.RequestToBeOffShift &&
+                        r.RequestType == RequestType.SpecificShift &&
+                        r.ShiftLabel == ShiftLabel.Night)
+            .Select(r => r.UserId!.Value)
+            .ToHashSet();
+
+        var todayNightOnUserIds = allRequestsToday
+            .Where(r => r.UserId.HasValue &&
+                        r.RequestAction == RequestAction.RequestToBeOnShift &&
+                        r.RequestType == RequestType.SpecificShift &&
+                        r.ShiftLabel == ShiftLabel.Night)
+            .Select(r => r.UserId!.Value)
+            .ToHashSet();
+
+        var yesterdayNightOnUserIds = allRequestsYesterday
+            .Where(r => r.UserId.HasValue &&
+                        r.RequestAction == RequestAction.RequestToBeOnShift &&
+                        r.RequestType == RequestType.SpecificShift &&
+                        r.ShiftLabel == ShiftLabel.Night)
+            .Select(r => r.UserId!.Value)
+            .ToHashSet();
 
         int countMeOnly = 0;
         int countMnOnly = 0;
@@ -145,8 +226,25 @@ public static class ApprovedLeaveCapacityValidator
 
         foreach (var user in users)
         {
-            var canMe = CanUserPerformMorningEvening(user, maxShiftsPerDay);
-            var canMn = CanUserPerformMorningNight(user, maxShiftsPerDay);
+            if (!user.Id.HasValue) continue;
+            var uid = user.Id.Value;
+
+            if (fullDayOffUserIds.Contains(uid)) continue;
+            if (yesterdayNightOnUserIds.Contains(uid)) continue;
+
+            var canDoMorning = !morningOffUserIds.Contains(uid) &&
+                               !todayNightOnUserIds.Contains(uid) &&
+                               MayUserTakeLabel(user, ShiftLabel.Morning);
+
+            var canDoEvening = !eveningOffUserIds.Contains(uid) &&
+                               !todayNightOnUserIds.Contains(uid) &&
+                               MayUserTakeLabel(user, ShiftLabel.Evening);
+
+            var canDoNight = !nightOffUserIds.Contains(uid) &&
+                             MayUserTakeLabel(user, ShiftLabel.Night);
+
+            var canMe = canDoMorning && canDoEvening && CanUserPerformMorningEvening(user, maxShiftsPerDay);
+            var canMn = canDoMorning && canDoNight && CanUserPerformMorningNight(user, maxShiftsPerDay);
 
             if (canMe && canMn)
             {
@@ -351,5 +449,180 @@ public static class ApprovedLeaveCapacityValidator
             $"(کل پرسنل فعال: {totalActivePersonnel} نفر، مجموع نیاز شیفت‌های امروز: {todayShiftDemand} نفر{longShiftPart}، استراحت اجباری شب روز قبل: {yesterdayNightDemand} نفر). " +
             $"در حال حاضر {approvedLeaveCount} مرخصی تأییدشده{namesPart} وجود دارد. " +
             "امکان تأیید مرخصی جدید در این تاریخ وجود ندارد زیرا منجر به کمبود فیزیکی نیرو و عدم امکان شیفت‌بندی خواهد شد.";
+    }
+
+    /// <summary>
+    /// اعتبارسنجی جامع توان پوشش شیفت‌های روز بر اساس نوبت (صبح، عصر، شب و مجموع کل)
+    /// با احتساب استراحت شب قبل، مرخصی‌ها، عدم حضور در شیفت خاص و شیفت‌های لانگ مجاز.
+    /// </summary>
+    public static string? ValidateDailyShiftCoverage(
+        int morningDemand,
+        int eveningDemand,
+        int nightDemand,
+        int yesterdayNightDemand,
+        IEnumerable<User> departmentUsers,
+        DateTime requestDate,
+        int maxShiftsPerDay = 1,
+        IEnumerable<ShiftRequest>? approvedRequestsOnDate = null,
+        IEnumerable<ShiftRequest>? approvedRequestsYesterday = null,
+        ShiftRequest? pendingRequest = null)
+    {
+        var usersList = departmentUsers.ToList();
+        var allRequestsToday = (approvedRequestsOnDate ?? Enumerable.Empty<ShiftRequest>()).ToList();
+        if (pendingRequest != null)
+        {
+            allRequestsToday.Add(pendingRequest);
+        }
+
+        var allRequestsYesterday = (approvedRequestsYesterday ?? Enumerable.Empty<ShiftRequest>()).ToList();
+
+        var fullDayOffUserIds = allRequestsToday
+            .Where(r => r.UserId.HasValue &&
+                        r.RequestAction == RequestAction.RequestToBeOffShift &&
+                        r.RequestType == RequestType.FullDay)
+            .Select(r => r.UserId!.Value)
+            .ToHashSet();
+
+        var morningOffUserIds = allRequestsToday
+            .Where(r => r.UserId.HasValue &&
+                        r.RequestAction == RequestAction.RequestToBeOffShift &&
+                        r.RequestType == RequestType.SpecificShift &&
+                        r.ShiftLabel == ShiftLabel.Morning)
+            .Select(r => r.UserId!.Value)
+            .ToHashSet();
+
+        var eveningOffUserIds = allRequestsToday
+            .Where(r => r.UserId.HasValue &&
+                        r.RequestAction == RequestAction.RequestToBeOffShift &&
+                        r.RequestType == RequestType.SpecificShift &&
+                        r.ShiftLabel == ShiftLabel.Evening)
+            .Select(r => r.UserId!.Value)
+            .ToHashSet();
+
+        var nightOffUserIds = allRequestsToday
+            .Where(r => r.UserId.HasValue &&
+                        r.RequestAction == RequestAction.RequestToBeOffShift &&
+                        r.RequestType == RequestType.SpecificShift &&
+                        r.ShiftLabel == ShiftLabel.Night)
+            .Select(r => r.UserId!.Value)
+            .ToHashSet();
+
+        var todayNightOnUserIds = allRequestsToday
+            .Where(r => r.UserId.HasValue &&
+                        r.RequestAction == RequestAction.RequestToBeOnShift &&
+                        r.RequestType == RequestType.SpecificShift &&
+                        r.ShiftLabel == ShiftLabel.Night)
+            .Select(r => r.UserId!.Value)
+            .ToHashSet();
+
+        var yesterdayNightOnUserIds = allRequestsYesterday
+            .Where(r => r.UserId.HasValue &&
+                        r.RequestAction == RequestAction.RequestToBeOnShift &&
+                        r.RequestType == RequestType.SpecificShift &&
+                        r.ShiftLabel == ShiftLabel.Night)
+            .Select(r => r.UserId!.Value)
+            .ToHashSet();
+
+        var persianDate = DateConverter.ConvertToPersianDate(requestDate);
+
+        // ۱. بررسی امکان پوشش تک‌تک شیفت‌ها
+        var availableForMorning = usersList
+            .Where(u => u.Id.HasValue &&
+                        !fullDayOffUserIds.Contains(u.Id.Value) &&
+                        !yesterdayNightOnUserIds.Contains(u.Id.Value) &&
+                        !morningOffUserIds.Contains(u.Id.Value) &&
+                        !todayNightOnUserIds.Contains(u.Id.Value) &&
+                        MayUserTakeLabel(u, ShiftLabel.Morning))
+            .ToList();
+
+        if (availableForMorning.Count < morningDemand)
+        {
+            return $"امکان تأیید این درخواست وجود ندارد؛ حداقل {morningDemand} نفر برای پوشش شیفت صبح در تاریخ {persianDate} الزامی است، " +
+                   $"در حالی که با تأیید این درخواست تنها {availableForMorning.Count} نفر نیروی واجد شرایط در دسترس خواهند بود و منجر به کسری نیرو در شیفت‌بندی می‌شود.";
+        }
+
+        var availableForEvening = usersList
+            .Where(u => u.Id.HasValue &&
+                        !fullDayOffUserIds.Contains(u.Id.Value) &&
+                        !yesterdayNightOnUserIds.Contains(u.Id.Value) &&
+                        !eveningOffUserIds.Contains(u.Id.Value) &&
+                        !todayNightOnUserIds.Contains(u.Id.Value) &&
+                        MayUserTakeLabel(u, ShiftLabel.Evening))
+            .ToList();
+
+        if (availableForEvening.Count < eveningDemand)
+        {
+            return $"امکان تأیید این درخواست وجود ندارد؛ حداقل {eveningDemand} نفر برای پوشش شیفت عصر در تاریخ {persianDate} الزامی است، " +
+                   $"در حالی که با تأیید این درخواست تنها {availableForEvening.Count} نفر نیروی واجد شرایط در دسترس خواهند بود و منجر به کسری نیرو در شیفت‌بندی می‌شود.";
+        }
+
+        var availableForNight = usersList
+            .Where(u => u.Id.HasValue &&
+                        !fullDayOffUserIds.Contains(u.Id.Value) &&
+                        !nightOffUserIds.Contains(u.Id.Value) &&
+                        MayUserTakeLabel(u, ShiftLabel.Night))
+            .ToList();
+
+        if (availableForNight.Count < nightDemand)
+        {
+            return $"امکان تأیید این درخواست وجود ندارد؛ حداقل {nightDemand} نفر برای پوشش شیفت شب در تاریخ {persianDate} الزامی است، " +
+                   $"در حالی که با تأیید این درخواست تنها {availableForNight.Count} نفر نیروی واجد شرایط در دسترس خواهند بود و منجر به کسری نیرو در شیفت‌بندی می‌شود.";
+        }
+
+        // ۲. بررسی ظرفیت توأم صبح و عصر (با احتساب شیفت‌های لانگ صبح+عصر)
+        if (morningDemand > 0 && eveningDemand > 0)
+        {
+            var availableForMorningOrEvening = usersList
+                .Where(u => u.Id.HasValue &&
+                            !fullDayOffUserIds.Contains(u.Id.Value) &&
+                            !yesterdayNightOnUserIds.Contains(u.Id.Value) &&
+                            !todayNightOnUserIds.Contains(u.Id.Value) &&
+                            ((!morningOffUserIds.Contains(u.Id.Value) && MayUserTakeLabel(u, ShiftLabel.Morning)) ||
+                             (!eveningOffUserIds.Contains(u.Id.Value) && MayUserTakeLabel(u, ShiftLabel.Evening))))
+                .ToList();
+
+            var longShiftMECandidates = availableForMorningOrEvening
+                .Count(u => !morningOffUserIds.Contains(u.Id!.Value) &&
+                            !eveningOffUserIds.Contains(u.Id!.Value) &&
+                            MayUserTakeLabel(u, ShiftLabel.Morning) &&
+                            MayUserTakeLabel(u, ShiftLabel.Evening) &&
+                            CanUserPerformMorningEvening(u, maxShiftsPerDay));
+
+            var maxLongME = Math.Min(longShiftMECandidates, Math.Min(morningDemand, eveningDemand));
+            var totalCoverableME = availableForMorningOrEvening.Count + maxLongME;
+            var totalRequiredME = morningDemand + eveningDemand;
+
+            if (totalCoverableME < totalRequiredME)
+            {
+                return $"امکان تأیید این درخواست وجود ندارد؛ مجموع ظرفیت پوشش شیفت‌های صبح و عصر در تاریخ {persianDate} " +
+                       $"({totalCoverableME} شیفت با احتساب {maxLongME} شیفت لانگ مجاز) کمتر از مجموع نیاز این دو شیفت " +
+                       $"({totalRequiredME} شیفت: {morningDemand} صبح + {eveningDemand} عصر) است و منجر به کسری نیرو در شیفت‌بندی می‌شود.";
+            }
+        }
+
+        // ۳. بررسی ظرفیت کلی شیفت‌های روز
+        var availablePersonnel = usersList
+            .Where(u => u.Id.HasValue && !fullDayOffUserIds.Contains(u.Id.Value))
+            .ToList();
+
+        var availableLongShifts = CalculateMaxLongShifts(
+            morningDemand,
+            eveningDemand,
+            nightDemand,
+            availablePersonnel,
+            maxShiftsPerDay,
+            approvedRequestsOnDate,
+            approvedRequestsYesterday,
+            pendingRequest);
+
+        var totalShiftDemand = morningDemand + eveningDemand + nightDemand;
+        return ValidateAvailablePersonnelCoverage(
+            availablePersonnel.Count,
+            availableLongShifts,
+            totalShiftDemand,
+            requestDate,
+            contextTitle: null,
+            maxShiftsPerDay: maxShiftsPerDay,
+            yesterdayNightDemand: yesterdayNightDemand);
     }
 }
